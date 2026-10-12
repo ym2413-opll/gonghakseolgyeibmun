@@ -122,6 +122,22 @@ fun Route.questionRoutes(questionService: QuestionService) {
             }
         }
 
+        // Update question
+        put("/{id}") {
+            val userId = call.getCurrentUserId()
+            val questionId = parseQuestionId(call.parameters["id"])
+            val request = call.receive<UpdateQuestionRequest>()
+
+            try {
+                val updated = questionService.updateQuestion(questionId, userId, request)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
         // Post answer
         post("/{id}/answers") {
             val profId = call.getCurrentUserId()

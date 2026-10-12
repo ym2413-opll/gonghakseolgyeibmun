@@ -17,10 +17,10 @@ export default function QuestionList({
   const safeQuestions = Array.isArray(questions) ? questions : [];
 
   // 1. 내 질문
-  const myQuestions = safeQuestions.filter((q) => q.studentId === currentUser?.id);
+  const myQuestions = safeQuestions.filter((q) => q.isMyQuestion || q.studentId === currentUser?.id);
 
   // 2. 답변 완료된 질문
-  const answeredQuestions = safeQuestions.filter((q) => Array.isArray(q.answers) && q.answers.length > 0);
+  const answeredQuestions = safeQuestions.filter((q) => q.hasAnswers || (Array.isArray(q.answers) && q.answers.length > 0));
 
   // 탭 필터링
   let filtered = safeQuestions;
@@ -32,7 +32,7 @@ export default function QuestionList({
 
   // 카테고리 필터링
   if (selectedCategory !== 'all') {
-    filtered = filtered.filter((q) => q.category === selectedCategory);
+    filtered = filtered.filter((q) => (q.category || '').toLowerCase() === selectedCategory.toLowerCase());
   }
 
   // 검색어 필터링

@@ -1,7 +1,7 @@
 // src/components/student/QuestionDetail.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import AnswerForm from '../professor/AnswerForm';
 import AiRefineModal from './AiRefineModal';
@@ -128,9 +128,10 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
     }
   };
 
-  const handleApplyAiInEdit = (refined, origin) => {
-    setEditContent(refined);
-    setEditOriginalContent(origin);
+  const handleApplyAiInEdit = (refinedContent, originContent, refinedTitle, originTitle) => {
+    if (refinedContent) setEditContent(refinedContent);
+    if (originContent) setEditOriginalContent(originContent);
+    if (refinedTitle) setEditTitle(refinedTitle);
     setEditHasAiRefined(true);
   };
 
@@ -194,7 +195,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
               <div className="form-group">
                 <label className="form-label">질문 카테고리</label>
                 <div className="edit-category-chips">
-                  {Object.values(CATEGORY_DEFINITIONS).map((cat) => (
+                  {CATEGORY_LIST.map((cat) => (
                     <button
                       key={cat.id}
                       type="button"
@@ -210,15 +211,29 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
               {/* 제목 수정 */}
               <div className="form-group">
-                <label className="form-label" htmlFor="edit-title">
-                  질문 제목 <span className="req">*</span>
-                </label>
+                <div className="title-label-row">
+                  <label className="form-label" htmlFor="edit-title">
+                    질문 제목 <span className="req">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-ai-assist-inline"
+                    onClick={() => setIsAiModalOpen(true)}
+                    title="AI로 제목과 본문 함께 정중하게 윤색하기"
+                  >
+                    <Sparkles size={12} />
+                    <span>AI 제목·본문 윤색</span>
+                  </button>
+                </div>
                 <input
                   id="edit-title"
                   type="text"
-                  className="input-text"
+                  className={`input-text ${editHasAiRefined ? 'has-refined-border' : ''}`}
                   value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
+                  onChange={(e) => {
+                    setEditTitle(e.target.value);
+                    if (editHasAiRefined) setEditHasAiRefined(false);
+                  }}
                   maxLength={120}
                 />
               </div>
@@ -235,7 +250,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     onClick={() => setIsAiModalOpen(true)}
                   >
                     <Sparkles size={14} />
-                    <span>✨ AI 질문 도우미로 다듬기</span>
+                    <span>✨ AI 질문 도우미 (제목·본문 윤색)</span>
                   </button>
                 </div>
 
@@ -253,7 +268,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 {editHasAiRefined && (
                   <div className="refined-status-hint">
                     <CheckCircle2 size={14} />
-                    <span>AI 교정 내용이 반영되었습니다. 원문은 작성자에게만 보관됩니다.</span>
+                    <span>AI 교정 내용(제목 및 본문)이 반영되었습니다. 원문은 작성자에게만 보관됩니다.</span>
                   </div>
                 )}
               </div>
@@ -301,7 +316,8 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
             <AiRefineModal
               isOpen={isAiModalOpen}
               onClose={() => setIsAiModalOpen(false)}
-              initialText={editContent || editTitle}
+              initialTitle={editTitle}
+              initialText={editContent}
               category={editCategory}
               onApplyRefined={handleApplyAiInEdit}
             />

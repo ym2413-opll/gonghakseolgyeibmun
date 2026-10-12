@@ -15,16 +15,19 @@ fun Route.aiRoutes(aiRefineService: AiRefineService) {
         post("/refine") {
             val request = call.receive<RefineQuestionRequest>()
             val contentToRefine = request.effectiveContent
-            if (contentToRefine.isBlank()) {
+            val titleToRefine = request.effectiveTitle
+
+            if (contentToRefine.isBlank() && titleToRefine.isNullOrBlank()) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ApiResponse<String>(success = false, message = "질문 원문을 입력해 주세요.")
+                    ApiResponse<String>(success = false, message = "질문 내용을 입력해 주세요.")
                 )
                 return@post
             }
 
-            val refined = aiRefineService.refineQuestion(
-                rawContent = contentToRefine,
+            val result = aiRefineService.refineQuestion(
+                rawContent = contentToRefine.ifBlank { titleToRefine ?: "" },
+                rawTitle = titleToRefine,
                 courseName = request.courseName,
                 category = request.category
             )
@@ -35,9 +38,17 @@ fun Route.aiRoutes(aiRefineService: AiRefineService) {
                     success = true,
                     data = RefineQuestionResponse(
                         original = contentToRefine,
-                        refined = refined,
+                        refined = result.content,
                         rawContent = contentToRefine,
-                        refinedContent = refined
+                        refinedContent = result.content,
+                        originalTitle = titleToRefine,
+                        refinedTitle = result.title,
+                        politenessScore = 98,
+                        changes = listOf(
+                            "원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성",
+                            "질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색",
+                            "경어체 및 대학 질의응답 표준 예절 적용"
+                        )
                     )
                 )
             )

@@ -197,12 +197,17 @@ data class ImportedCourseDto(
 data class RefineQuestionRequest(
     val rawContent: String? = null,
     val text: String? = null,
+    val title: String? = null,
+    val rawTitle: String? = null,
     val courseName: String? = null,
     val category: QuestionCategory? = null,
     val studentInfo: Map<String, String>? = null
 ) {
     val effectiveContent: String
         get() = text?.takeIf { it.isNotBlank() } ?: rawContent ?: ""
+
+    val effectiveTitle: String?
+        get() = title?.takeIf { it.isNotBlank() } ?: rawTitle?.takeIf { it.isNotBlank() }
 }
 
 @Serializable
@@ -211,8 +216,10 @@ data class RefineQuestionResponse(
     val refined: String = "",
     val rawContent: String = original,
     val refinedContent: String = refined,
+    val originalTitle: String? = null,
+    val refinedTitle: String? = null,
     val politenessScore: Int = 98,
-    val changes: List<String> = listOf("격양된 표현을 공손하고 격식 있는 존댓말로 전환", "학업 문의 표준 서식 적용", "건의 및 배려 표현 추가")
+    val changes: List<String> = listOf("원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성", "질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색", "경어체 및 대학 질의응답 표준 예절 적용")
 )
 
 @Serializable
@@ -240,6 +247,18 @@ data class CreateQuestionRequest(
     val effectiveRefinedContent: String?
         get() = refinedContent ?: content
 }
+
+@Serializable
+data class UpdateQuestionRequest(
+    val title: String? = null,
+    val content: String? = null,
+    val rawContent: String? = null,
+    val refinedContent: String? = null,
+    val originalContent: String? = null,
+    val category: QuestionCategory? = null,
+    val isAnonymous: Boolean? = null,
+    val hasAiRefined: Boolean? = null
+)
 
 @Serializable
 data class AnswerDto(

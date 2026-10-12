@@ -21,12 +21,12 @@ export default function AnswerForm({ question, onAnswerAdded }) {
       (c.group && (c.group === question.courseGroup || c.group === question.group))
   );
 
-  const isDesignatedProf = currentUser.id === question.profId;
+  const isDesignatedProf = currentUser.id === question.profId || currentUser.id === question.assignedProfessorId;
   const isSameCourseOrGroupProf = !isDesignatedProf && Boolean(matchingCourse);
 
   // 2. 지정 담당 교수의 답변이 이미 존재하는지 여부
-  const hasDesignatedProfAnswered = question.answers?.some(
-    (a) => a.authorId === question.profId
+  const hasDesignatedProfAnswered = question.isAnsweredByAssignedProfessor || question.answers?.some(
+    (a) => a.authorId === question.profId || a.authorId === question.assignedProfessorId || a.isAssignedProfessor
   );
 
   // 3. 권한 검사 (주/부교수 개념 배제 및 동등한 교수 권한 적용)
@@ -39,14 +39,14 @@ export default function AnswerForm({ question, onAnswerAdded }) {
     statusMessage = '담당 교수 권한으로 답변을 작성합니다.';
     statusType = 'primary';
   } else if (isSameCourseOrGroupProf) {
-    if (question.category !== 'lecture') {
+    if ((question.category || '').toLowerCase() !== 'lecture') {
       canAnswer = false;
-      const catName = CATEGORY_DEFINITIONS[question.category]?.name || question.category;
+      const catName = (CATEGORY_DEFINITIONS[question.category?.toLowerCase()] || CATEGORY_DEFINITIONS[question.category])?.name || question.category;
       statusMessage = `[${catName}] 카테고리 질문은 분반/평가 기준 보호를 위해 배정된 담당 교수님만 답변할 수 있습니다.`;
       statusType = 'locked';
     } else if (hasDesignatedProfAnswered) {
       canAnswer = false;
-      statusMessage = `배정된 담당 교수(${question.profName})님이 이미 답변을 완료하여, 추가 답변이 제한됩니다.`;
+      statusMessage = `배정된 담당 교수(${question.profName || question.assignedProfessorName || '담당 교수'})님이 이미 답변을 완료하여, 추가 답변이 제한됩니다.`;
       statusType = 'locked';
     } else {
       canAnswer = true;
@@ -57,6 +57,11 @@ export default function AnswerForm({ question, onAnswerAdded }) {
     canAnswer = false;
     statusMessage = '해당 강좌 또는 동일 교과목군을 담당하는 교수가 아니므로 답변 권한이 없습니다.';
     statusType = 'unauthorized';
+  }
+
+  // 백엔드 명시적 권한 플래그가 있는 경우 동기화
+  if (question.canAnswer !== undefined) {
+    canAnswer = question.canAnswer;
   }
 
   const handleSubmit = async (e) => {

@@ -19,6 +19,7 @@ fun Route.userSettingRoutes(
             val userId = call.getCurrentUserId()
             val userSetting = userService.getUserSetting(userId)
             val profSetting = notificationService.getProfessorNotificationSetting(userId)
+            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
 
             val combined = UnifiedSettingDto(
                 userId = userId.toString(),
@@ -34,11 +35,7 @@ fun Route.userSettingRoutes(
                 dndStartTime = profSetting.quietHoursStart,
                 dndEndTime = profSetting.quietHoursEnd,
                 coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = mapOf(
-                    "grade" to true,
-                    "assignment" to true,
-                    "lecture" to true
-                )
+                activeCategories = categoriesMap
             )
             call.respond(HttpStatusCode.OK, combined)
         }
@@ -73,8 +70,14 @@ fun Route.userSettingRoutes(
                 )
             }
 
+            // Update category settings if provided
+            if (request.activeCategories != null) {
+                userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
+            }
+
             val userSetting = userService.getUserSetting(userId)
             val profSetting = notificationService.getProfessorNotificationSetting(userId)
+            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
 
             val updated = UnifiedSettingDto(
                 userId = userId.toString(),
@@ -85,7 +88,7 @@ fun Route.userSettingRoutes(
                 dndStartTime = profSetting.quietHoursStart,
                 dndEndTime = profSetting.quietHoursEnd,
                 coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = request.activeCategories ?: mapOf("grade" to true, "assignment" to true, "lecture" to true)
+                activeCategories = categoriesMap
             )
             call.respond(HttpStatusCode.OK, updated)
         }
@@ -118,8 +121,13 @@ fun Route.userSettingRoutes(
                 )
             }
 
+            if (request.activeCategories != null) {
+                userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
+            }
+
             val userSetting = userService.getUserSetting(userId)
             val profSetting = notificationService.getProfessorNotificationSetting(userId)
+            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
 
             val updated = UnifiedSettingDto(
                 userId = userId.toString(),
@@ -130,7 +138,7 @@ fun Route.userSettingRoutes(
                 dndStartTime = profSetting.quietHoursStart,
                 dndEndTime = profSetting.quietHoursEnd,
                 coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = request.activeCategories ?: mapOf("grade" to true, "assignment" to true, "lecture" to true)
+                activeCategories = categoriesMap
             )
             call.respond(HttpStatusCode.OK, updated)
         }

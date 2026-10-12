@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
@@ -76,9 +76,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     }
   }, [title, content, selectedCategory]);
 
-  const handleApplyAiRefined = (refined, origin) => {
-    setContent(refined);
-    setOriginalContent(origin);
+  const handleApplyAiRefined = (refinedContent, originContent, refinedTitle, originTitle) => {
+    if (refinedContent) setContent(refinedContent);
+    if (originContent) setOriginalContent(originContent);
+    if (refinedTitle) setTitle(refinedTitle);
     setHasAiRefined(true);
   };
 
@@ -193,7 +194,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             </div>
 
             <div className="category-select-grid">
-              {Object.values(CATEGORY_DEFINITIONS).map((cat) => {
+              {CATEGORY_LIST.map((cat) => {
                 const isSelected = selectedCategory === cat.id;
                 const isProfActive = profSettings.activeCategories?.[cat.id] ?? true;
 
@@ -231,16 +232,30 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
           {/* 3. 제목 입력 */}
           <div className="form-group">
-            <label className="form-label" htmlFor="q-title">
-              질문 제목 <span className="req">*</span>
-            </label>
+            <div className="title-label-row">
+              <label className="form-label" htmlFor="q-title">
+                질문 제목 <span className="req">*</span>
+              </label>
+              <button
+                type="button"
+                className="btn-ai-assist-inline"
+                onClick={() => setIsAiModalOpen(true)}
+                title="AI로 제목과 본문 함께 정중하게 윤색하기"
+              >
+                <Sparkles size={12} />
+                <span>AI 제목·본문 윤색</span>
+              </button>
+            </div>
             <input
               id="q-title"
               type="text"
-              className="input-text"
+              className={`input-text ${hasAiRefined ? 'has-refined-border' : ''}`}
               placeholder="질문할 핵심 내용을 요약하여 입력하세요 (예: 3주차 실습 회로 전압 강하 질문)"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (hasAiRefined) setHasAiRefined(false);
+              }}
               maxLength={120}
             />
           </div>
@@ -278,10 +293,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   type="button"
                   className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
                   onClick={() => setIsAiModalOpen(true)}
-                  title="학생이 작성한 내용을 정중한 학술/질문 양식으로 교정 및 윤문합니다"
+                  title="학생이 작성한 제목과 내용을 정중한 학술/질문 양식으로 교정 및 윤문합니다"
                 >
                   <Sparkles size={14} />
-                  <span>{hasAiRefined ? '✨ AI 교정 완료 (다시 다듬기)' : '✨ AI 질문 도우미'}</span>
+                  <span>{hasAiRefined ? '✨ AI 교정 완료 (제목·본문 다시 다듬기)' : '✨ AI 질문 도우미 (제목·본문 윤색)'}</span>
                 </button>
 
                 {/* 유사 질답 보기 버튼 */}
@@ -315,7 +330,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             {hasAiRefined && (
               <div className="refined-status-hint">
                 <CheckCircle2 size={14} />
-                <span>AI가 공손한 어조로 교정한 내용이 적용되었습니다. 원문도 안전하게 보관됩니다.</span>
+                <span>AI가 질문 제목과 본문을 공손하고 명확한 학술 양식으로 윤색하였습니다. 원문은 안전하게 보관됩니다.</span>
               </div>
             )}
           </div>
@@ -368,7 +383,8 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
       <AiRefineModal
         isOpen={isAiModalOpen}
         onClose={() => setIsAiModalOpen(false)}
-        initialText={content || title}
+        initialTitle={title}
+        initialText={content}
         category={selectedCategory}
         onApplyRefined={handleApplyAiRefined}
       />

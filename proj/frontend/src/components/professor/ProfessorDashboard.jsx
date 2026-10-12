@@ -42,27 +42,31 @@ export default function ProfessorDashboard({
   };
 
   // 1. 직접 배정된 질문
-  const myAssignedQuestions = safeQuestions.filter((q) => q.profId === currentUser?.id);
+  const myAssignedQuestions = safeQuestions.filter(
+    (q) => q.profId === currentUser?.id || q.assignedProfessorId === currentUser?.id
+  );
 
   // 2. 같은 과목 또는 동일 교과목군 다른 분반의 미답변 질문 (답변 지원 대상)
   const sameGroupQuestions = safeQuestions.filter(
     (q) =>
       q.profId !== currentUser?.id &&
+      q.assignedProfessorId !== currentUser?.id &&
       isRelatedCourseOrGroup(q) &&
-      q.category === 'lecture'
+      (q.category || '').toLowerCase() === 'lecture'
   );
 
   // 3. 미답변 질문
   const unansweredQuestions = safeQuestions.filter(
     (q) =>
       (q.profId === currentUser?.id ||
-        (isRelatedCourseOrGroup(q) && q.category === 'lecture')) &&
-      (!q.answers || q.answers.length === 0)
+        q.assignedProfessorId === currentUser?.id ||
+        (isRelatedCourseOrGroup(q) && (q.category || '').toLowerCase() === 'lecture')) &&
+      (!q.hasAnswers && (!q.answers || q.answers.length === 0))
   );
 
   // 탭별 필터링
   let filtered = safeQuestions.filter((q) => {
-    return isRelatedCourseOrGroup(q) || q.profId === currentUser?.id;
+    return isRelatedCourseOrGroup(q) || q.profId === currentUser?.id || q.assignedProfessorId === currentUser?.id;
   });
 
   if (activeTab === 'primary') {
@@ -74,7 +78,7 @@ export default function ProfessorDashboard({
   }
 
   if (selectedCategory !== 'all') {
-    filtered = filtered.filter((q) => q.category === selectedCategory);
+    filtered = filtered.filter((q) => (q.category || '').toLowerCase() === selectedCategory.toLowerCase());
   }
 
   const inDnd = isCurrentlyInDnd();

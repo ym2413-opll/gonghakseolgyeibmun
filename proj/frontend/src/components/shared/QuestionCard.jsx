@@ -9,16 +9,16 @@ export default function QuestionCard({ question, onClick }) {
 
   if (!question) return null;
 
-  const catDef = CATEGORY_DEFINITIONS[question.category] || CATEGORY_DEFINITIONS.lecture;
-  const hasAnswers = Array.isArray(question.answers) && question.answers.length > 0;
-  const isMine = currentUser?.id === question.studentId;
+  const catDef = CATEGORY_DEFINITIONS[question.category?.toLowerCase()] || CATEGORY_DEFINITIONS[question.category] || CATEGORY_DEFINITIONS.lecture;
+  const hasAnswers = question.hasAnswers !== undefined ? question.hasAnswers : (Array.isArray(question.answers) && question.answers.length > 0);
+  const isMine = question.isMyQuestion || currentUser?.id === question.studentId;
 
   // 익명 표기 로직 (명세: ex. 26_소프트_서영민 -> 공학설계입문 수강생)
-  let authorDisplay = question.isAnonymous
+  let authorDisplay = question.authorDisplayName || (question.isAnonymous
     ? `${question.courseName || '수강'} 수강생`
-    : question.studentTag || question.studentName || '수강생';
+    : question.studentTag || question.studentName || '수강생');
 
-  if (question.isAnonymous && isMine) {
+  if (question.isAnonymous && isMine && !authorDisplay.includes('(나')) {
     authorDisplay = `${authorDisplay} (나 - 익명 처리됨)`;
   }
 
@@ -33,8 +33,8 @@ export default function QuestionCard({ question, onClick }) {
   const isCoProfTarget =
     isProfessor &&
     teachesSameCourseOrGroup &&
-    currentUser?.id !== question.profId &&
-    question.category === 'lecture' &&
+    currentUser?.id !== (question.profId || question.assignedProfessorId) &&
+    question.category?.toLowerCase() === 'lecture' &&
     !hasAnswers;
 
   const formattedDate = (() => {

@@ -50,7 +50,7 @@ export default function SimilarQuestionsModal({
             ) : (
               similarList.map((item) => {
                 const isExpanded = expandedId === item.id;
-                const catDef = CATEGORY_DEFINITIONS[item.category] || {};
+                const catDef = CATEGORY_DEFINITIONS[item.category?.toLowerCase()] || CATEGORY_DEFINITIONS[item.category] || {};
                 const hasAnswer = item.answers && item.answers.length > 0;
 
                 return (

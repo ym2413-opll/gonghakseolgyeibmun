@@ -1,7 +1,7 @@
 // src/components/professor/CategorySettingsModal.jsx
 import React, { useState } from 'react';
 import { useNotifications } from '../../context/NotificationContext';
-import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { CATEGORY_LIST } from '../../services/mockData';
 import { SlidersHorizontal, X, Check, Save, ShieldAlert } from 'lucide-react';
 
 export default function CategorySettingsModal({ isOpen, onClose }) {
@@ -52,7 +52,7 @@ export default function CategorySettingsModal({ isOpen, onClose }) {
           </p>
 
           <div className="category-toggle-list">
-            {Object.values(CATEGORY_DEFINITIONS).map((cat) => {
+            {CATEGORY_LIST.map((cat) => {
               const isEnabled = categories[cat.id];
               return (
                 <div key={cat.id} className={`category-toggle-card ${isEnabled ? 'active' : 'disabled'}`}>

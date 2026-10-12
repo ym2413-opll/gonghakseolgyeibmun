@@ -268,6 +268,45 @@ class QuestionService(
         )
     }
 
+    suspend fun updateQuestion(
+        questionId: UUID,
+        currentUserId: UUID,
+        request: UpdateQuestionRequest
+    ): QuestionDetailDto = dbQuery {
+        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+            ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+
+        val authorId = qRow[QuestionsTable.studentId]
+        if (authorId != currentUserId) {
+            throw IllegalStateException("질문 작성자만 수정할 수 있습니다.")
+        }
+
+        if (request.category == QuestionCategory.GRADE && (request.isAnonymous == true || (request.isAnonymous == null && qRow[QuestionsTable.isAnonymous]))) {
+            throw IllegalArgumentException("성적 카테고리 질문은 익명으로 작성할 수 없습니다.")
+        }
+
+        QuestionsTable.update({ QuestionsTable.id eq questionId }) {
+            request.title?.takeIf { it.isNotBlank() }?.let { v -> it[title] = v }
+            request.category?.let { v -> it[category] = v.name }
+            request.isAnonymous?.let { v -> it[isAnonymous] = v }
+            request.rawContent?.takeIf { it.isNotBlank() }?.let { v -> it[rawContent] = v }
+            request.originalContent?.takeIf { it.isNotBlank() }?.let { v -> it[rawContent] = v }
+            request.refinedContent?.takeIf { it.isNotBlank() }?.let { v -> it[refinedContent] = v }
+            request.content?.takeIf { it.isNotBlank() }?.let { v -> it[refinedContent] = v }
+        }
+
+        // Recompute vector if title or content changed
+        val updatedRow = QuestionsTable.select { QuestionsTable.id eq questionId }.single()
+        val newText = "${updatedRow[QuestionsTable.title]} ${updatedRow[QuestionsTable.refinedContent]}"
+        val newVector = similarityService.computeVector(newText)
+        val vectorJson = similarityService.serializeVector(newVector)
+        QuestionsTable.update({ QuestionsTable.id eq questionId }) {
+            it[vectorData] = vectorJson
+        }
+
+        getQuestionDetailInternal(questionId, currentUserId)
+    }
+
     suspend fun createAnswer(
         questionId: UUID,
         professorId: UUID,

@@ -386,4 +386,56 @@ class UserService {
             colleges = colleges
         )
     }
+
+    suspend fun getProfessorActiveCategoriesMap(professorId: UUID): Map<String, Boolean> = dbQuery {
+        val rows = ProfessorCategorySettingsTable.select { ProfessorCategorySettingsTable.professorId eq professorId }.toList()
+        if (rows.isEmpty()) {
+            mapOf("grade" to true, "assignment" to true, "lecture" to true)
+        } else {
+            val map = mutableMapOf("grade" to true, "assignment" to true, "lecture" to true)
+            rows.forEach { r ->
+                val catKey = r[ProfessorCategorySettingsTable.category].lowercase()
+                val isEnabled = r[ProfessorCategorySettingsTable.isEnabled]
+                map[catKey] = isEnabled
+            }
+            map
+        }
+    }
+
+    suspend fun updateProfessorActiveCategoriesMap(professorId: UUID, categoriesMap: Map<String, Boolean>) = dbQuery {
+        val courseIds = CourseProfessorsTable.select { CourseProfessorsTable.professorId eq professorId }
+            .map { it[CourseProfessorsTable.courseId] }
+            .distinct()
+            .ifEmpty {
+                CoursesTable.selectAll().map { it[CoursesTable.id].value }
+            }
+
+        categoriesMap.forEach { (catKey, isEnabled) ->
+            val catEnum = runCatching { QuestionCategory.valueOf(catKey.uppercase()) }.getOrNull() ?: return@forEach
+            courseIds.forEach { cId ->
+                val exists = ProfessorCategorySettingsTable.select {
+                    (ProfessorCategorySettingsTable.professorId eq professorId) and
+                            (ProfessorCategorySettingsTable.courseId eq cId) and
+                            (ProfessorCategorySettingsTable.category eq catEnum.name)
+                }.count() > 0
+
+                if (exists) {
+                    ProfessorCategorySettingsTable.update({
+                        (ProfessorCategorySettingsTable.professorId eq professorId) and
+                                (ProfessorCategorySettingsTable.courseId eq cId) and
+                                (ProfessorCategorySettingsTable.category eq catEnum.name)
+                    }) {
+                        it[ProfessorCategorySettingsTable.isEnabled] = isEnabled
+                    }
+                } else {
+                    ProfessorCategorySettingsTable.insert {
+                        it[ProfessorCategorySettingsTable.professorId] = professorId
+                        it[ProfessorCategorySettingsTable.courseId] = cId
+                        it[ProfessorCategorySettingsTable.category] = catEnum.name
+                        it[ProfessorCategorySettingsTable.isEnabled] = isEnabled
+                    }
+                }
+            }
+        }
+    }
 }

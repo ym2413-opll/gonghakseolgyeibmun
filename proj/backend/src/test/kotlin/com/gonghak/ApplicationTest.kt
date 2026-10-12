@@ -58,6 +58,7 @@ class ApplicationTest {
         }
 
         val refineReq = RefineQuestionRequest(
+            title = "성적이 왜 이래요",
             rawContent = "아니 교수야 성적이 이게 말이 되냐 차라리 재수강하게 C로 내려줘라",
             courseName = "공학설계입문",
             category = QuestionCategory.GRADE
@@ -71,6 +72,11 @@ class ApplicationTest {
         assertTrue(body.success)
         val refined = body.data?.refinedContent ?: ""
         assertTrue(refined.contains("안녕하십니까") && refined.contains("교수님"))
+        // 원문 날것의 표현이 직접 포함되지 않아야 함
+        assertFalse(refined.contains("아니 교수야"))
+        // 제목도 정중하고 명확한 학업 문의 양식으로 윤색되어야 함
+        val refinedTitle = body.data?.refinedTitle ?: ""
+        assertTrue(refinedTitle.contains("성적 문의"))
     }
 
     @Test
