@@ -37,7 +37,8 @@ object DatabaseFactory {
                 UserSettingsTable,
                 QuestionsTable,
                 AnswersTable,
-                NotificationsTable
+                NotificationsTable,
+                AttachmentsTable
             )
             seedConvertedCoursesData()
             seedDemoData()

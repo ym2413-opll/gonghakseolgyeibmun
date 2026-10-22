@@ -1,8 +1,9 @@
 // src/components/shared/QuestionCard.jsx
 import React from 'react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { generateSummaryTitle } from '../../utils/textSummary';
 import { useAuth } from '../../context/AuthContext';
-import { Sparkles, CheckCircle2, Clock, User, EyeOff, Users } from 'lucide-react';
+import { Sparkles, CheckCircle2, Clock, User, EyeOff, Users, Paperclip } from 'lucide-react';
 
 export default function QuestionCard({ question, onClick }) {
   const { currentUser, isProfessor } = useAuth();
@@ -78,7 +79,7 @@ export default function QuestionCard({ question, onClick }) {
         </div>
       </div>
 
-      <h4 className="card-title">{question.title || '제목 없음'}</h4>
+      <h4 className="card-title">{question.title || generateSummaryTitle(question.content)}</h4>
 
       <p className="card-snippet">
         {(question.content || '').length > 120

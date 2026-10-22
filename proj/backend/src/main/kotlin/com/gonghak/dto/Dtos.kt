@@ -132,7 +132,7 @@ data class CourseListResponse(
 
 @Serializable
 data class CourseSummaryDto(
-    val title: String,
+    val title: String? = null,
     val semester: String,
     val totalCourses: Long,
     val totalSections: Long,
@@ -149,7 +149,7 @@ data class CourseDataFile(
 
 @Serializable
 data class CourseDataMetadata(
-    val title: String,
+    val title: String? = null,
     val semester: String,
     val generatedAt: String,
     val totalCourses: Int,
@@ -226,7 +226,7 @@ data class RefineQuestionResponse(
 data class CreateQuestionRequest(
     val courseId: String,
     val category: QuestionCategory,
-    val title: String,
+    val title: String? = null,
     val rawContent: String? = null,
     val content: String? = null,
     val refinedContent: String? = null,
@@ -236,7 +236,9 @@ data class CreateQuestionRequest(
     val studentName: String? = null,
     val studentTag: String? = null,
     val department: String? = null,
-    val isAnonymous: Boolean = false
+    val isAnonymous: Boolean = false,
+    val attachmentIds: List<String> = emptyList(),
+    val attachments: List<AttachmentDto> = emptyList()
 ) {
     val effectiveRawContent: String
         get() = originalContent?.takeIf { it.isNotBlank() }
@@ -282,7 +284,7 @@ data class QuestionListItemDto(
     val courseId: String,
     val courseName: String,
     val category: QuestionCategory,
-    val title: String,
+    val title: String? = null,
     val authorDisplayName: String,
     val isAnonymous: Boolean,
     val isMyQuestion: Boolean,
@@ -297,7 +299,9 @@ data class QuestionListItemDto(
     val studentId: String? = null,
     val studentTag: String? = null,
     val studentName: String? = null,
-    val answers: List<AnswerDto> = emptyList()
+    val answers: List<AnswerDto> = emptyList(),
+    val attachmentCount: Int = 0,
+    val attachments: List<AttachmentDto> = emptyList()
 )
 
 @Serializable
@@ -306,7 +310,7 @@ data class QuestionDetailDto(
     val courseId: String,
     val courseName: String,
     val category: QuestionCategory,
-    val title: String,
+    val title: String? = null,
     val rawContent: String,
     val refinedContent: String,
     val authorDisplayName: String,
@@ -324,7 +328,8 @@ data class QuestionDetailDto(
     val originalContent: String = rawContent,
     val studentId: String? = null,
     val studentTag: String? = null,
-    val studentName: String? = null
+    val studentName: String? = null,
+    val attachments: List<AttachmentDto> = emptyList()
 )
 
 @Serializable
@@ -339,7 +344,7 @@ data class CreateAnswerRequest(
 @Serializable
 data class SimilarQuestionDto(
     val id: String,
-    val title: String,
+    val title: String? = null,
     val snippet: String,
     val category: QuestionCategory,
     val similarity: Double,
@@ -347,7 +352,9 @@ data class SimilarQuestionDto(
     val topAnswerSnippet: String? = null,
     val content: String = snippet,
     val similarityScore: Int = (similarity * 100).toInt(),
-    val answers: List<AnswerDto> = emptyList()
+    val answers: List<AnswerDto> = emptyList(),
+    val attachmentCount: Int = 0,
+    val attachments: List<AttachmentDto> = emptyList()
 )
 
 @Serializable
@@ -366,7 +373,7 @@ data class SimilarQuestionRequest(
 data class NotificationDto(
     val id: String,
     val type: String,
-    val title: String,
+    val title: String? = null,
     val message: String,
     val referenceId: String?,
     val isRead: Boolean,
@@ -375,4 +382,28 @@ data class NotificationDto(
     val createdAt: String,
     val userId: String? = null,
     val questionId: String? = referenceId
+)
+
+@Serializable
+data class AttachmentDto(
+    val id: String,
+    val questionId: String? = null,
+    val originalName: String,
+    val savedName: String = "",
+    val fileSize: Long,
+    val originalSize: Long = fileSize,
+    val mimeType: String,
+    val isImage: Boolean = false,
+    val isCompressed: Boolean = false,
+    val compressionRatio: Double = 0.0,
+    val url: String = "",
+    val downloadUrl: String = "",
+    val createdAt: String = ""
+)
+
+@Serializable
+data class FileUploadResponse(
+    val success: Boolean = true,
+    val attachment: AttachmentDto,
+    val message: String? = null
 )

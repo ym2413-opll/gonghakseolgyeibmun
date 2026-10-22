@@ -18,8 +18,13 @@ import {
   X,
   Lock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Paperclip,
+  Download,
+  ExternalLink
 } from 'lucide-react';
+import { formatFileSize } from '../../utils/fileSecurity';
+import { generateSummaryTitle } from '../../utils/textSummary';
 
 function safeFormatDate(val) {
   try {
@@ -34,10 +39,11 @@ function safeFormatDate(val) {
 export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
   const { currentUser, isProfessor } = useAuth();
   const [showOriginal, setShowOriginal] = useState(false);
+  const [activePreviewImage, setActivePreviewImage] = useState(null);
 
   // 수정(Edit) 모드 상태
   const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
+  // editTitle removed - automatically summarized from content
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState('lecture');
   const [editIsAnonymous, setEditIsAnonymous] = useState(false);
@@ -49,7 +55,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
   useEffect(() => {
     if (question) {
-      setEditTitle(question.title || '');
+      // title omitted
       setEditContent(question.content || '');
       setEditCategory(question.category || 'lecture');
       setEditIsAnonymous(Boolean(question.isAnonymous));
@@ -95,10 +101,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
   // 질문 수정 저장 처리
   const handleSaveEdit = async (e) => {
     e.preventDefault();
-    if (!editTitle.trim()) {
-      setEditError('질문 제목을 입력해 주세요.');
-      return;
-    }
+// title check removed
     if (!editContent.trim()) {
       setEditError('질문 내용을 입력해 주세요.');
       return;
@@ -109,7 +112,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
     try {
       const payload = {
-        title: editTitle.trim(),
+        title: generateSummaryTitle(editContent),
         content: editContent.trim(),
         category: editCategory,
         isAnonymous: editCategory === 'grade' ? false : editIsAnonymous,
@@ -343,7 +346,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 )}
               </div>
 
-              <h2 className="detail-title">{question.title}</h2>
+              <h2 className="detail-title">{question.title || generateSummaryTitle(question.content)}</h2>
 
               <div className="detail-meta-row">
                 <div className="meta-author-info">
@@ -406,6 +409,75 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                   )}
                 </div>
               )}
+
+              {/* 첨부 파일 섹션 */}
+              {question.attachments && question.attachments.length > 0 && (
+                <div className="detail-attachments-box">
+                  <div className="attachments-title-row">
+                    <div className="attachments-title">
+                      <Paperclip size={16} />
+                      <span>첨부 파일 ({question.attachments.length})</span>
+                    </div>
+                    <span className="security-tag">🛡️ 보안 검증 및 무결성 확인 완료</span>
+                  </div>
+
+                  <div className="detail-attachments-grid">
+                    {question.attachments.map((att, idx) => {
+                      const downloadHref = att.downloadUrl || att.url || `/api/attachments/${att.id}/download`;
+                      const previewSrc = att.previewUrl || att.url || `/api/attachments/${att.id}`;
+
+                      return (
+                        <div key={att.id || idx} className="detail-attachment-card">
+                          {att.isImage ? (
+                            <div
+                              className="detail-att-thumb-wrap"
+                              onClick={() => setActivePreviewImage({ url: previewSrc, name: att.originalName })}
+                              title="클릭하여 원본 크기로 확대 보기"
+                            >
+                              <img src={previewSrc} alt={att.originalName} className="detail-att-thumb" />
+                              <div className="thumb-zoom-overlay">
+                                <ExternalLink size={14} />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="detail-att-icon-box">
+                              <FileText size={24} className="text-indigo-600" />
+                            </div>
+                          )}
+
+                          <div className="detail-att-meta">
+                            <span className="att-file-name" title={att.originalName}>
+                              {att.originalName}
+                            </span>
+                            <div className="att-size-info">
+                              {att.isCompressed ? (
+                                <span className="att-compressed-info">
+                                  ⚡ {formatFileSize(att.originalSize || att.fileSize)} → {formatFileSize(att.fileSize)} ({att.compressionRatio}% 압축)
+                                </span>
+                              ) : (
+                                <span className="att-normal-size">{formatFileSize(att.fileSize)}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <a
+                            href={downloadHref}
+                            download={att.originalName}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-download-att"
+                            title="안전 다운로드"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Download size={14} />
+                            <span>다운로드</span>
+                          </a>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -451,6 +523,27 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
           <div className="detail-prof-action-section">
             <h4 className="prof-action-title">교수 답변 작성</h4>
             <AnswerForm question={question} onAnswerAdded={handleAnswerAdded} />
+          </div>
+        )}
+
+        {/* 이미지 고화질 확대 뷰어 모달 */}
+        {activePreviewImage && (
+          <div className="image-viewer-modal-backdrop" onClick={() => setActivePreviewImage(null)}>
+            <div className="image-viewer-modal-box" onClick={(e) => e.stopPropagation()}>
+              <div className="image-viewer-header">
+                <span className="image-viewer-title">{activePreviewImage.name}</span>
+                <button
+                  type="button"
+                  className="btn-close-viewer"
+                  onClick={() => setActivePreviewImage(null)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="image-viewer-body">
+                <img src={activePreviewImage.url} alt={activePreviewImage.name} />
+              </div>
+            </div>
           </div>
         )}
       </div>

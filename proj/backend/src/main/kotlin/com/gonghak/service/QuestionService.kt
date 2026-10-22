@@ -61,7 +61,12 @@ class QuestionService(
         }
 
         // 5. Compute Word2Vec vector for question
-        val vector = similarityService.computeVector("${request.title} $finalRefinedContent")
+        val effectiveTitle = if (!request.title.isNullOrBlank()) {
+            request.title!!
+        } else {
+            generateSummaryTitle(finalRefinedContent.ifBlank { effectiveRaw })
+        }
+        val vector = similarityService.computeVector("$effectiveTitle $finalRefinedContent")
         val vectorJson = similarityService.serializeVector(vector)
 
         val qId = UUID.randomUUID()
@@ -73,7 +78,7 @@ class QuestionService(
             it[studentId] = currentUserId
             it[assignedProfessorId] = assignedProfId
             it[category] = request.category.name
-            it[title] = request.title
+            it[title] = effectiveTitle
             it[rawContent] = effectiveRaw
             it[refinedContent] = finalRefinedContent
             it[isAnonymous] = request.isAnonymous
@@ -82,13 +87,25 @@ class QuestionService(
             it[createdAt] = now
         }
 
+        // Link attachments if provided
+        if (request.attachmentIds.isNotEmpty()) {
+            val validUuids = request.attachmentIds.mapNotNull {
+                try { java.util.UUID.fromString(it) } catch (_: Exception) { null }
+            }
+            if (validUuids.isNotEmpty()) {
+                AttachmentsTable.update({ AttachmentsTable.id inList validUuids }) {
+                    it[AttachmentsTable.questionId] = qId
+                }
+            }
+        }
+
         // 6. Trigger notifications
         notificationService.notifyNewQuestion(
             assignedProfessorId = assignedProfId,
             courseId = courseUUID,
             courseName = courseName,
             questionId = qId,
-            questionTitle = request.title,
+            questionTitle = effectiveTitle,
             category = request.category
         )
 
@@ -111,6 +128,9 @@ class QuestionService(
         categoryFilter?.let { query.andWhere { QuestionsTable.category eq it.name } }
 
         query.orderBy(QuestionsTable.createdAt to SortOrder.DESC)
+
+        val allAttachments = AttachmentsTable.selectAll().toList()
+        val attachmentsByQuestionId = allAttachments.groupBy { it[AttachmentsTable.questionId] }
 
         val profUsers = UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
             .associate { it[UsersTable.id].value to it[UsersTable.name] }
@@ -181,6 +201,25 @@ class QuestionService(
                 hasAnswers = hasAnswers,
                 isAnsweredByAssignedProfessor = isAnsweredByAssignedProfessor,
                 answers = answerDtos,
+                attachmentCount = attachmentsByQuestionId[qId]?.size ?: 0,
+                attachments = attachmentsByQuestionId[qId]?.map { attRow ->
+                    val attIdStr = attRow[AttachmentsTable.id].value.toString()
+                    AttachmentDto(
+                        id = attIdStr,
+                        questionId = qId.toString(),
+                        originalName = attRow[AttachmentsTable.originalName],
+                        savedName = attRow[AttachmentsTable.savedName],
+                        fileSize = attRow[AttachmentsTable.fileSize],
+                        originalSize = attRow[AttachmentsTable.originalSize],
+                        mimeType = attRow[AttachmentsTable.mimeType],
+                        isImage = attRow[AttachmentsTable.isImage],
+                        isCompressed = attRow[AttachmentsTable.isCompressed],
+                        compressionRatio = attRow[AttachmentsTable.compressionRatio],
+                        url = "/api/attachments/",
+                        downloadUrl = "/api/attachments//download",
+                        createdAt = attRow[AttachmentsTable.createdAt].toString()
+                    )
+                } ?: emptyList(),
                 createdAt = row[QuestionsTable.createdAt].toString()
             )
         }
@@ -241,6 +280,27 @@ class QuestionService(
             isAnsweredByAssignedProfessor = isAnsweredByAssigned
         )
 
+        val attachmentDtos = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+            .orderBy(AttachmentsTable.createdAt to org.jetbrains.exposed.sql.SortOrder.ASC)
+            .map { attRow ->
+                val attIdStr = attRow[AttachmentsTable.id].value.toString()
+                AttachmentDto(
+                    id = attIdStr,
+                    questionId = questionId.toString(),
+                    originalName = attRow[AttachmentsTable.originalName],
+                    savedName = attRow[AttachmentsTable.savedName],
+                    fileSize = attRow[AttachmentsTable.fileSize],
+                    originalSize = attRow[AttachmentsTable.originalSize],
+                    mimeType = attRow[AttachmentsTable.mimeType],
+                    isImage = attRow[AttachmentsTable.isImage],
+                    isCompressed = attRow[AttachmentsTable.isCompressed],
+                    compressionRatio = attRow[AttachmentsTable.compressionRatio],
+                    url = "/api/attachments/",
+                    downloadUrl = "/api/attachments//download",
+                    createdAt = attRow[AttachmentsTable.createdAt].toString()
+                )
+            }
+
         return QuestionDetailDto(
             id = questionId.toString(),
             courseId = qRow[QuestionsTable.courseId].toString(),
@@ -264,6 +324,7 @@ class QuestionService(
             isAnsweredByAssignedProfessor = isAnsweredByAssigned,
             canAnswer = canAnswer,
             answers = answersList,
+            attachments = attachmentDtos,
             createdAt = qRow[QuestionsTable.createdAt].toString()
         )
     }
@@ -456,6 +517,18 @@ class QuestionService(
         }
 
         results.sortedByDescending { it.similarity }.take(limit)
+    }
+
+    private fun generateSummaryTitle(content: String): String {
+        val clean = content.trim()
+        if (clean.isBlank()) return "학업 질문"
+        val firstLine = clean.lines().firstOrNull { it.isNotBlank() } ?: clean
+        val stripped = firstLine.replace(Regex("^[#*\\-•\\d.]+\\s*"), "").replace(Regex("[\\[\\]]"), "").trim()
+        val sentenceMatch = Regex("^(.+?[.!?])(\\s|$)").find(stripped)
+        if (sentenceMatch != null && sentenceMatch.groupValues[1].length in 10..45) {
+            return sentenceMatch.groupValues[1]
+        }
+        return if (stripped.length <= 45) stripped.ifBlank { "학업 질문" } else stripped.take(45) + "..."
     }
 
     private fun calculateCanAnswer(

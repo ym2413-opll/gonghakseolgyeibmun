@@ -91,3 +91,17 @@ object NotificationsTable : UUIDTable("notifications") {
     val releaseAt = varchar("release_at", 50).nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
+
+object AttachmentsTable : UUIDTable("attachments") {
+    val questionId = uuid("question_id").references(QuestionsTable.id).nullable()
+    val uploaderId = uuid("uploader_id").references(UsersTable.id).nullable()
+    val originalName = varchar("original_name", 255)
+    val savedName = varchar("saved_name", 255)
+    val fileSize = long("file_size")
+    val originalSize = long("original_size")
+    val mimeType = varchar("mime_type", 100)
+    val isImage = bool("is_image").default(false)
+    val isCompressed = bool("is_compressed").default(false)
+    val compressionRatio = double("compression_ratio").default(0.0)
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}

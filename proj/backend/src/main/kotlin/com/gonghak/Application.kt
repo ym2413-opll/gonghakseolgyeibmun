@@ -31,6 +31,7 @@ fun Application.module() {
     val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
     val aiRefineService = AiRefineService(geminiApiKey)
     val userService = UserService()
+    val attachmentService = AttachmentService()
     val questionService = QuestionService(similarityService, notificationService, aiRefineService)
 
     // 3. Plugins
@@ -115,5 +116,6 @@ fun Application.module() {
         aiRoutes(aiRefineService)
         questionRoutes(questionService)
         notificationRoutes(notificationService)
+        attachmentRoutes(attachmentService)
     }
 }

@@ -3,6 +3,7 @@
 
 import { PRESET_USERS, INITIAL_QUESTIONS, INITIAL_NOTIFICATIONS, AI_INQUIRY_TEMPLATES } from './mockData';
 import { calculateSimilarQuestions } from '../utils/wordSimilarity';
+import { generateSummaryTitle } from '../utils/textSummary';
 
 const STORAGE_KEY_QUESTIONS = 'prof_qa_questions_v2';
 const STORAGE_KEY_SETTINGS = 'prof_qa_settings_v2';
@@ -276,7 +277,98 @@ export const api = {
     return questions.find(q => q.id === questionId) || null;
   },
 
+  // 4-1. 파일 첨부 (엄격 보안 검증 및 이미지 압축 업로드)
+  async uploadAttachment(file, meta = {}) {
+    const uid = getCurrentUserId();
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file, file.name);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const res = await fetch(`${API_BASE_URL}/attachments/upload`, {
+          method: 'POST',
+          headers: {
+            'X-User-Id': uid
+          },
+          body: formData,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const body = await res.json();
+          const att = body.attachment || body.data || body;
+          return {
+            success: true,
+            attachment: {
+              ...att,
+              url: att.url || `${API_BASE_URL}/attachments/${att.id}`,
+              downloadUrl: att.downloadUrl || `${API_BASE_URL}/attachments/${att.id}/download`,
+              previewUrl: meta.previewUrl || att.url || `${API_BASE_URL}/attachments/${att.id}`
+            },
+            message: body.message
+          };
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.message || '파일 보안 검사 실패 또는 업로드 오류입니다.');
+        }
+      } catch (e) {
+        console.warn('[API] Remote uploadAttachment failed or rejected:', e);
+        if (e.message && (e.message.includes('보안') || e.message.includes('시그니처') || e.message.includes('허용되지 않는') || e.message.includes('위조'))) {
+          throw e;
+        }
+      }
+    }
+
+    // 로컬 스토리지 / 오프라인 Fallback
+    const localId = `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const previewUrl = meta.previewUrl || (meta.isImage ? URL.createObjectURL(file) : '');
+    const localAttachment = {
+      id: localId,
+      originalName: file.name,
+      savedName: `${localId}_${file.name}`,
+      fileSize: file.size,
+      originalSize: meta.originalSize || file.size,
+      mimeType: file.type || 'application/octet-stream',
+      isImage: Boolean(meta.isImage),
+      isCompressed: Boolean(meta.isCompressed),
+      compressionRatio: meta.compressionRatio || 0,
+      url: previewUrl,
+      downloadUrl: previewUrl,
+      previewUrl: previewUrl,
+      createdAt: new Date().toISOString()
+    };
+
+    return {
+      success: true,
+      attachment: localAttachment,
+      message: meta.isCompressed ? `이미지가 성공적으로 압축되었습니다 (${meta.compressionRatio}% 절감).` : '파일이 첨부되었습니다.'
+    };
+  },
+
+  async deleteAttachment(attachmentId) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const uid = getCurrentUserId();
+        await fetch(`${API_BASE_URL}/attachments/${attachmentId}`, {
+          method: 'DELETE',
+          headers: { 'X-User-Id': uid }
+        });
+      } catch (e) {
+        console.warn('[API] Remote deleteAttachment failed', e);
+      }
+    }
+    return true;
+  },
+
   async createQuestion(questionData) {
+    const summaryTitle = questionData.title?.trim() || generateSummaryTitle(questionData.content);
+    const questionPayload = {
+      ...questionPayload,
+      title: summaryTitle
+    };
     const uid = getCurrentUserId(questionData.studentId);
     if (USE_REMOTE_BACKEND) {
       try {
@@ -288,7 +380,7 @@ export const api = {
             'Content-Type': 'application/json',
             'X-User-Id': uid
           },
-          body: JSON.stringify(questionData),
+          body: JSON.stringify(questionPayload),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -306,7 +398,7 @@ export const api = {
       id: `q-${Date.now()}`,
       createdAt: new Date().toISOString(),
       answers: [],
-      ...questionData
+      ...questionPayload
     };
     questions.unshift(newQuestion);
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
