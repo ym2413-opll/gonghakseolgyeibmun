@@ -84,11 +84,11 @@ export default function SettingsModal({ isOpen, onClose }) {
               <div className="notif-status-info">
                 <span className="status-label">현재 상태:</span>
                 {browserPermission === 'granted' ? (
-                  <span className="badge-notif-granted">🟢 알림 허용됨</span>
+                  <span className="badge-notif-granted">알림 허용됨</span>
                 ) : browserPermission === 'denied' ? (
-                  <span className="badge-notif-denied">🔴 브라우저에서 차단됨</span>
+                  <span className="badge-notif-denied">브라우저 차단됨</span>
                 ) : (
-                  <span className="badge-notif-default">🟡 권한 요청 대기 중</span>
+                  <span className="badge-notif-default">권한 요청 대기</span>
                 )}
               </div>
               {browserPermission !== 'granted' && (

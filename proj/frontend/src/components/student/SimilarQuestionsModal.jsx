@@ -24,7 +24,7 @@ export default function SimilarQuestionsModal({
         <div className="modal-header">
           <div className="modal-title">
             <Search size={18} />
-            <span>유사 질답 검색 결과 (Word2Vec 코사인 유사도 분석)</span>
+            <span>유사 질답 검색 결과</span>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="닫기">
             <X size={18} />

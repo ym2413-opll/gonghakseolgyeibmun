@@ -3,7 +3,7 @@ import React from 'react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import { generateSummaryTitle } from '../../utils/textSummary';
 import { useAuth } from '../../context/AuthContext';
-import { Sparkles, CheckCircle2, Clock, User, EyeOff, Users, Paperclip } from 'lucide-react';
+import { CheckCircle2, Clock, User, EyeOff, Users, Paperclip } from 'lucide-react';
 
 export default function QuestionCard({ question, onClick }) {
   const { currentUser, isProfessor } = useAuth();
@@ -54,11 +54,6 @@ export default function QuestionCard({ question, onClick }) {
         <div className="card-tags-left">
           <span className={`cat-pill ${catDef.badgeClass || ''}`}>{catDef.name || question.category}</span>
           <span className="course-tag">{question.courseName}</span>
-          {question.hasAiRefined && (
-            <span className="ai-applied-tag" title="AI 말투 교정이 적용된 질문입니다">
-              <Sparkles size={11} /> AI 윤문
-            </span>
-          )}
         </div>
 
         <div className="card-status-right">

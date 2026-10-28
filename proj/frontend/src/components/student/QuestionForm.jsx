@@ -11,7 +11,7 @@ import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
 import {
   Send,
-  Sparkles,
+  PenTool,
   Search,
   EyeOff,
   AlertCircle,
@@ -372,13 +372,13 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                     <p className="cat-desc-text">{cat.description}</p>
                     <div className="cat-constraints-info">
                       {cat.id === 'grade' && (
-                        <span className="constraint-warn">⚠️ 실명 필수 / 유사 질답 불가</span>
+                        <span className="constraint-warn">[실명 필수] 유사 질답 미제공</span>
                       )}
                       {cat.id === 'assignment' && (
-                        <span className="constraint-info">ℹ️ 익명 가능 / 타 분반 교수 답변 불가</span>
+                        <span className="constraint-info">[익명 가능] 타 분반 답변 불가</span>
                       )}
                       {cat.id === 'lecture' && (
-                        <span className="constraint-ok">✅ 익명 가능 / 같은 과목 다른 교수 답변 허용</span>
+                        <span className="constraint-ok">[익명 가능] 동일 과목 교수 답변 허용</span>
                       )}
                     </div>
                   </div>
@@ -393,7 +393,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               <div className="detect-text">
                 <Search size={16} />
                 <span>
-                  작성하신 내용과 유사한 기존 질문 <strong>{similarList.length}건</strong>이 있습니다! (최고 유사도{' '}
+                  작성하신 내용과 유사한 기존 질문 <strong>{similarList.length}건</strong>이 있습니다. (유사도{' '}
                   {similarList[0].similarityScore}%)
                 </span>
               </div>
@@ -407,7 +407,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             </div>
           )}
 
-          {/* 3. 본문 입력 & AI 질문 도우미 툴바 */}
+          {/* 3. 본문 입력 & 학술 문장 다듬기 툴바 */}
           <div className="form-group">
             <div className="content-label-row">
               <div className="content-label-group">
@@ -424,10 +424,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   type="button"
                   className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
                   onClick={() => setIsAiModalOpen(true)}
-                  title="학생이 작성한 본문을 정중하고 명확한 학술/질문 양식으로 교정 및 윤문합니다"
+                  title="학생이 작성한 본문을 정중하고 명확한 학술 서식으로 정제합니다"
                 >
-                  <Sparkles size={14} />
-                  <span>{hasAiRefined ? '✨ AI 교정 완료 (다시 다듬기)' : '✨ AI 질문 도우미 (본문 정중하게 윤색)'}</span>
+                  <PenTool size={14} />
+                  <span>{hasAiRefined ? '문장 다듬기 완료 (재검토)' : '학술 문장 다듬기'}</span>
                 </button>
 
                 {selectedCategory !== 'grade' && (
@@ -449,7 +449,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               id="q-content"
               rows={8}
               className={`textarea-content ${hasAiRefined ? 'has-refined-border' : ''}`}
-              placeholder="궁금한 사항을 상세히 작성해 주세요. 어조가 걱정되신다면 편하게 작성 후 상단의 [✨ AI 질문 도우미]를 클릭해보세요! (목록에 표기될 제목은 본문 내용에서 자동으로 생성됩니다)"
+              placeholder="궁금한 사항을 상세히 작성해 주세요. 필요 시 상단의 [학술 문장 다듬기]를 통해 정중한 학술 서식으로 정제할 수 있습니다. (목록에 표시될 제목은 본문 내용에서 자동 생성됩니다)"
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
@@ -460,7 +460,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             {hasAiRefined && (
               <div className="refined-status-hint">
                 <CheckCircle2 size={14} />
-                <span>AI가 질문 본문을 공손하고 명확한 학술 양식으로 윤색하였습니다. 원문은 안전하게 보관됩니다.</span>
+                <span>표준 학술 서식으로 문장이 정제되었습니다. (작성 원문 보존)</span>
               </div>
             )}
           </div>
@@ -486,7 +486,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   엄격 보안 검사
                 </span>
                 <span className="badge-compression-applied" title="고화질 이미지는 최적 압축되어 업로드 속도가 향상됩니다">
-                  ⚡ 이미지 자동 압축
+                  이미지 자동 최적화
                 </span>
               </div>
             </div>
@@ -564,7 +564,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                         {att.isCompressed ? (
                           <div className="compression-info-wrap">
                             <span className="file-size-badge compressed">
-                              ⚡ {formatFileSize(att.originalSize)} → {formatFileSize(att.fileSize)}
+                              {formatFileSize(att.originalSize)} → {formatFileSize(att.fileSize)}
                             </span>
                             <span className="compression-ratio-pill">
                               {att.compressionRatio}% 압축 완료

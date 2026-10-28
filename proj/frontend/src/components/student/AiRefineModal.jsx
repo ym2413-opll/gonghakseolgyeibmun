@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AI_INQUIRY_TEMPLATES } from '../../services/mockData';
-import { Sparkles, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X } from 'lucide-react';
+import { PenTool, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X, FileText, Loader2 } from 'lucide-react';
 
 export default function AiRefineModal({
   isOpen,
@@ -39,7 +39,7 @@ export default function AiRefineModal({
       setRefinedText(result.refined || '');
       setRefinedTitle(result.refinedTitle || '');
     } catch (err) {
-      console.error('AI refinement error', err);
+      console.error('Text refinement error', err);
     } finally {
       setIsLoading(false);
     }
@@ -83,10 +83,10 @@ export default function AiRefineModal({
       <div className="modal-content ai-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header ai-modal-header">
           <div className="modal-title">
-            <div className="ai-icon-pulse">
-              <Sparkles size={18} />
+            <div className="refine-icon-wrap">
+              <PenTool size={17} />
             </div>
-            <span>AI 질문 도우미 (제목 및 본문 정중한 윤색)</span>
+            <span>학술 문장 다듬기 (제목 및 서식 정제)</span>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="닫기">
             <X size={18} />
@@ -96,7 +96,7 @@ export default function AiRefineModal({
         <div className="modal-body">
           {/* 학업 문의 추천 서식 템플릿 */}
           <div className="ai-quick-templates">
-            <span className="template-label">💡 학업 문의 추천 서식 템플릿:</span>
+            <span className="template-label">학업 질의 표준 템플릿:</span>
             <div className="template-chips">
               {AI_INQUIRY_TEMPLATES.map((tmpl, idx) => (
                 <button
@@ -115,14 +115,14 @@ export default function AiRefineModal({
             {/* 좌측: 원문 (제목 & 본문) */}
             <div className="compare-card original-card">
               <div className="compare-header">
-                <span className="compare-tag origin-tag">학생 작성 원문</span>
+                <span className="compare-tag origin-tag">작성 원문</span>
                 <button
                   className="re-run-btn"
                   onClick={() => handleTriggerAI(originalText, originalTitle)}
                   disabled={isLoading || (!originalText.trim() && !originalTitle.trim())}
                 >
                   <RotateCw size={13} className={isLoading ? 'spinning' : ''} />
-                  다시 윤색
+                  다시 다듬기
                 </button>
               </div>
 
@@ -143,7 +143,7 @@ export default function AiRefineModal({
                   <textarea
                     value={originalText}
                     onChange={(e) => setOriginalText(e.target.value)}
-                    placeholder="교수님께 질문하고 싶은 내용을 편하게 입력하세요..."
+                    placeholder="질문하고 싶은 내용을 편하게 입력하세요..."
                     className="ai-textarea origin-textarea"
                     rows={8}
                   />
@@ -154,20 +154,20 @@ export default function AiRefineModal({
             {/* 중간 화살표 */}
             <div className="compare-arrow">
               <div className="arrow-circle">
-                <ArrowRight size={18} />
+                <ArrowRight size={16} />
               </div>
             </div>
 
-            {/* 우측: AI 교정 제안본 (제목 & 본문) */}
+            {/* 우측: 교정 제안본 (제목 & 본문) */}
             <div className="compare-card refined-card">
               <div className="compare-header">
                 <div className="refined-tag-group">
                   <span className="compare-tag ai-tag">
-                    <Sparkles size={13} /> AI 정중한 윤색본
+                    <FileText size={13} /> 정제 제안본
                   </span>
                   {aiResult && (
                     <span className="polite-score-badge">
-                      예의도 점수 {aiResult.politenessScore}%
+                      표준 서식 일치도 {aiResult.politenessScore}%
                     </span>
                   )}
                 </div>
@@ -185,51 +185,51 @@ export default function AiRefineModal({
               <div className="compare-card-body">
                 {isLoading ? (
                   <div className="ai-loading-box">
-                    <Sparkles size={32} className="spinning ai-spinner" />
-                    <p>AI가 질문 의도를 분석하여 예의 바르고 명확한 학술 서식으로 제목과 본문을 윤색하고 있습니다...</p>
+                    <Loader2 size={24} className="spinning ai-spinner" />
+                    <p>표준 학술 서식과 문맥을 검토하여 정제안을 생성하고 있습니다...</p>
                   </div>
                 ) : (refinedText || refinedTitle) ? (
                   <>
                     <div className="compare-field-wrap">
-                      <label className="ai-sub-label">AI 윤색 제목</label>
+                      <label className="ai-sub-label">정제된 제목</label>
                       <input
                         type="text"
                         value={refinedTitle}
                         onChange={(e) => setRefinedTitle(e.target.value)}
                         readOnly={!isEditingRefined}
                         className={`ai-title-input refined-title-input ${isEditingRefined ? 'editable' : ''}`}
-                        placeholder="AI가 윤색한 제목이 표시됩니다..."
+                        placeholder="정제된 제목이 표시됩니다..."
                       />
                     </div>
 
                     <div className="compare-field-wrap">
-                      <label className="ai-sub-label">AI 정중한 윤색 본문 (원문 직접 인용 배제)</label>
+                      <label className="ai-sub-label">정제된 본문</label>
                       <textarea
                         value={refinedText}
                         onChange={(e) => setRefinedText(e.target.value)}
                         readOnly={!isEditingRefined}
                         className={`ai-textarea refined-textarea ${isEditingRefined ? 'editable' : ''}`}
                         rows={8}
-                        placeholder="AI가 윤색한 본문이 표시됩니다..."
+                        placeholder="정제된 본문이 표시됩니다..."
                       />
                     </div>
                   </>
                 ) : (
                   <div className="ai-empty-prompt">
-                    <Sparkles size={28} />
-                    <p>원문 제목이나 본문을 입력한 후 [다시 윤색]을 누르면 정중한 표현으로 변환됩니다.</p>
+                    <FileText size={24} />
+                    <p>원문 제목이나 본문을 입력한 후 [다시 다듬기]를 누르면 표준 학술 서식으로 변환됩니다.</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* AI 교정 포인트 안내 */}
+          {/* 교정 포인트 안내 */}
           {aiResult?.changes && (
             <div className="ai-improvements-box">
               <div className="improv-title">
                 <CheckCircle2 size={15} />
-                <span>AI가 적용한 주요 개선점:</span>
+                <span>주요 검토 및 정제 사항:</span>
               </div>
               <ul className="improv-list">
                 {aiResult.changes.map((c, i) => (
@@ -242,7 +242,7 @@ export default function AiRefineModal({
           <div className="ai-disclaimer">
             <AlertTriangle size={14} />
             <span>
-              <strong>사용자 확인 필수:</strong> AI가 윤색한 제목과 본문이 질문자의 의도와 맞는지 직접 확인한 후 적용 버튼을 눌러주세요.
+              <strong>확인 안내:</strong> 정제된 제목과 본문이 질문 의도와 맞는지 확인하신 후 적용해 주세요.
             </span>
           </div>
         </div>
@@ -252,12 +252,12 @@ export default function AiRefineModal({
             원문 유지하고 닫기
           </button>
           <button
-            className="btn btn-ai-apply"
+            className="btn btn-primary"
             onClick={handleApply}
             disabled={(!refinedText && !refinedTitle) || isLoading}
           >
             <Check size={16} />
-            교정본 적용하기 (제목 & 본문)
+            정제안 적용하기
           </button>
         </div>
       </div>

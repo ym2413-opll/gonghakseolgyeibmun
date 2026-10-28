@@ -9,7 +9,7 @@ export const PRESET_USERS = [
     displayTag: '26_소프트_서영민',
     studentId: '20261101',
     department: '소프트웨어학과',
-    avatar: '👨‍🎓',
+    avatar: '서',
     courses: [
       { id: 'course-001', name: '공학설계입문', group: 'ENG_DESIGN', section: '01분반', profId: 'user-prof-001', profName: '김교수' },
       { id: 'course-002', name: '자료구조', group: 'DATA_STRUCT', section: '01분반', profId: 'user-prof-003', profName: '박교수' }
@@ -22,7 +22,7 @@ export const PRESET_USERS = [
     displayTag: '25_소프트_김민지',
     studentId: '20251102',
     department: '소프트웨어학과',
-    avatar: '👩‍🎓',
+    avatar: '김',
     courses: [
       { id: 'course-001', name: '공학설계입문', group: 'ENG_DESIGN', section: '02분반', profId: 'user-prof-002', profName: '이교수' },
       { id: 'course-002', name: '자료구조', group: 'DATA_STRUCT', section: '01분반', profId: 'user-prof-003', profName: '박교수' }
@@ -35,7 +35,7 @@ export const PRESET_USERS = [
     displayTag: '24_컴공_박준형',
     studentId: '20241103',
     department: '컴퓨터공학과',
-    avatar: '👨‍🎓',
+    avatar: '박',
     courses: [
       { id: 'course-002', name: '자료구조', group: 'DATA_STRUCT', section: '01분반', profId: 'user-prof-003', profName: '박교수' },
       { id: 'course-001', name: '공학설계입문', group: 'ENG_DESIGN', section: '01분반', profId: 'user-prof-001', profName: '김교수' }
@@ -48,7 +48,7 @@ export const PRESET_USERS = [
     displayTag: '소프트웨어학과 김교수',
     title: '교수',
     department: '소프트웨어학과',
-    avatar: '👨‍🏫',
+    avatar: '김',
     courses: [
       { id: 'course-001', name: '공학설계입문', group: 'ENG_DESIGN', section: '01분반' }
     ],
@@ -71,7 +71,7 @@ export const PRESET_USERS = [
     displayTag: '컴퓨터공학과 이교수',
     title: '교수',
     department: '컴퓨터공학과',
-    avatar: '👨‍🏫',
+    avatar: '이',
     courses: [
       { id: 'course-001', name: '공학설계입문', group: 'ENG_DESIGN', section: '02분반' }
     ],
@@ -94,7 +94,7 @@ export const PRESET_USERS = [
     displayTag: '컴퓨터공학과 박교수',
     title: '교수',
     department: '컴퓨터공학과',
-    avatar: '👨‍🏫',
+    avatar: '박',
     courses: [
       { id: 'course-002', name: '자료구조', group: 'DATA_STRUCT', section: '01분반' }
     ],

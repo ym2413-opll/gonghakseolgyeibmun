@@ -7,7 +7,7 @@ import AnswerForm from '../professor/AnswerForm';
 import AiRefineModal from './AiRefineModal';
 import {
   ArrowLeft,
-  Sparkles,
+  PenTool,
   User,
   EyeOff,
   Clock,
@@ -222,10 +222,10 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     type="button"
                     className="btn-ai-assist-inline"
                     onClick={() => setIsAiModalOpen(true)}
-                    title="AI로 제목과 본문 함께 정중하게 윤색하기"
+                    title="제목과 본문을 학술 서식에 맞게 정제하기"
                   >
-                    <Sparkles size={12} />
-                    <span>AI 제목·본문 윤색</span>
+                    <PenTool size={12} />
+                    <span>표현 정제</span>
                   </button>
                 </div>
                 <input
@@ -241,7 +241,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 />
               </div>
 
-              {/* 본문 수정 & AI 교정 버튼 */}
+              {/* 본문 수정 & 문장 다듬기 버튼 */}
               <div className="form-group">
                 <div className="content-label-row">
                   <label className="form-label" htmlFor="edit-content">
@@ -252,8 +252,8 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     className="btn-ai-assist"
                     onClick={() => setIsAiModalOpen(true)}
                   >
-                    <Sparkles size={14} />
-                    <span>✨ AI 질문 도우미 (제목·본문 윤색)</span>
+                    <PenTool size={14} />
+                    <span>학술 문장 다듬기</span>
                   </button>
                 </div>
 
@@ -271,7 +271,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 {editHasAiRefined && (
                   <div className="refined-status-hint">
                     <CheckCircle2 size={14} />
-                    <span>AI 교정 내용(제목 및 본문)이 반영되었습니다. 원문은 작성자에게만 보관됩니다.</span>
+                    <span>정제된 내용이 반영되었습니다. (작성 원문 보존)</span>
                   </div>
                 )}
               </div>
@@ -334,11 +334,6 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
               <div className="detail-badges">
                 <span className={`cat-pill ${catDef.badgeClass}`}>{catDef.name}</span>
                 <span className="course-tag">{question.courseName}</span>
-                {question.hasAiRefined && (
-                  <span className="ai-applied-tag">
-                    <Sparkles size={12} /> AI 교정 완료
-                  </span>
-                )}
                 {question.isEdited && (
                   <span className="edited-badge" title={updatedDate ? `${updatedDate}에 수정됨` : '수정됨'}>
                     <Edit3 size={11} /> 수정됨
@@ -395,15 +390,15 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     onClick={() => setShowOriginal(!showOriginal)}
                   >
                     <FileText size={14} />
-                    {showOriginal ? 'AI 교정 전 원문 접기' : 'AI 교정 전 내 질문 원문 비교 확인하기'}
+                    {showOriginal ? '작성 원문 접기' : '작성 원문 확인하기'}
                   </button>
 
                   {showOriginal && (
                     <div className="original-diff-content">
-                      <span className="diff-label">내가 작성했던 최초 원문:</span>
+                      <span className="diff-label">작성했던 원문:</span>
                       <p className="diff-text">"{question.originalContent}"</p>
                       <span className="diff-note">
-                        ※ 이 원문은 작성자 본인만 열람할 수 있습니다. 교수님과 다른 학생들에게는 AI가 정중하게 다듬은 교정본만 표시됩니다.
+                        ※ 이 원문은 작성자 본인만 열람할 수 있습니다. 교수님과 다른 학생들에게는 표준 학술 서식으로 정제된 본문이 표시됩니다.
                       </span>
                     </div>
                   )}
@@ -418,7 +413,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                       <Paperclip size={16} />
                       <span>첨부 파일 ({question.attachments.length})</span>
                     </div>
-                    <span className="security-tag">🛡️ 보안 검증 및 무결성 확인 완료</span>
+                    <span className="security-tag">보안 검증 및 무결성 확인 완료</span>
                   </div>
 
                   <div className="detail-attachments-grid">
@@ -452,7 +447,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                             <div className="att-size-info">
                               {att.isCompressed ? (
                                 <span className="att-compressed-info">
-                                  ⚡ {formatFileSize(att.originalSize || att.fileSize)} → {formatFileSize(att.fileSize)} ({att.compressionRatio}% 압축)
+                                  {formatFileSize(att.originalSize || att.fileSize)} → {formatFileSize(att.fileSize)} ({att.compressionRatio}% 압축)
                                 </span>
                               ) : (
                                 <span className="att-normal-size">{formatFileSize(att.fileSize)}</span>

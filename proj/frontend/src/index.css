@@ -11,41 +11,41 @@
   --font-size-2xl: 1.5rem;
   --font-size-3xl: 1.875rem;
 
-  /* 라이트 테마 변수 */
-  --bg-app: #f8fafc;
+  /* 라이트 테마 변수 (하양, 검정, 회색 무채색 기조) */
+  --bg-app: #f4f4f5;
   --bg-card: #ffffff;
-  --bg-card-subtle: #f1f5f9;
+  --bg-card-subtle: #fafafa;
   --bg-input: #ffffff;
-  --bg-hover: #f1f5f9;
-  --border-color: #e2e8f0;
-  --border-focus: #3b82f6;
+  --bg-hover: #f4f4f5;
+  --border-color: #e4e4e7;
+  --border-focus: #18181b;
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #71717a;
   --text-inverse: #ffffff;
 
-  --primary-color: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #eff6ff;
-  --primary-border: #bfdbfe;
+  --primary-color: #18181b;
+  --primary-hover: #27272a;
+  --primary-light: #f4f4f5;
+  --primary-border: #d4d4d8;
 
-  --success-color: #10b981;
-  --success-bg: #ecfdf5;
-  --warning-color: #f59e0b;
-  --warning-bg: #fffbeb;
-  --danger-color: #ef4444;
-  --danger-bg: #fef2f2;
-  --ai-purple: #8b5cf6;
-  --ai-purple-light: #f5f3ff;
+  --success-color: #3f3f46;
+  --success-bg: #f4f4f5;
+  --warning-color: #52525b;
+  --warning-bg: #f4f4f5;
+  --danger-color: #71717a;
+  --danger-bg: #f4f4f5;
+  --ai-purple: #27272a;
+  --ai-purple-light: #f4f4f5;
 
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-full: 9999px;
 }
 
@@ -63,39 +63,39 @@ html[data-font-size="xl"] {
   --font-size-base: 20px;
 }
 
-/* 다크 모드 속성 */
+/* 다크 모드 속성 (어두운 회색, 차콜, 흑백 무채색 기조) */
 html[data-theme="dark"] {
-  --bg-app: #0b0f19;
-  --bg-card: #151c2c;
-  --bg-card-subtle: #1e293b;
-  --bg-input: #1a2234;
-  --bg-hover: #232e44;
-  --border-color: #2a374f;
-  --border-focus: #60a5fa;
+  --bg-app: #09090b;
+  --bg-card: #18181b;
+  --bg-card-subtle: #27272a;
+  --bg-input: #18181b;
+  --bg-hover: #27272a;
+  --border-color: #27272a;
+  --border-focus: #f4f4f5;
 
-  --text-primary: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --text-inverse: #0f172a;
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-inverse: #09090b;
 
-  --primary-color: #3b82f6;
-  --primary-hover: #60a5fa;
-  --primary-light: #1e293b;
-  --primary-border: #3b82f6;
+  --primary-color: #f4f4f5;
+  --primary-hover: #e4e4e7;
+  --primary-light: #27272a;
+  --primary-border: #3f3f46;
 
-  --success-color: #34d399;
-  --success-bg: #064e3b;
-  --warning-color: #fbbf24;
-  --warning-bg: #451a03;
-  --danger-color: #f87171;
-  --danger-bg: #450a0a;
-  --ai-purple: #a78bfa;
-  --ai-purple-light: #2e1065;
+  --success-color: #d4d4d8;
+  --success-bg: #27272a;
+  --warning-color: #a1a1aa;
+  --warning-bg: #27272a;
+  --danger-color: #71717a;
+  --danger-bg: #27272a;
+  --ai-purple: #e4e4e7;
+  --ai-purple-light: #27272a;
 
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
 }
 
 *, *::before, *::after {

@@ -88,7 +88,7 @@ export const api = {
               return {
                 ...localUser,
                 ...remoteUser,
-                avatar: localUser?.avatar || (remoteUser.role === 'PROFESSOR' || remoteUser.role === 'professor' ? '👨‍🏫' : '👨‍🎓'),
+                avatar: localUser?.avatar || (remoteUser.name ? remoteUser.name.charAt(0) : 'U'),
                 courses: localUser?.courses || []
               };
             });
