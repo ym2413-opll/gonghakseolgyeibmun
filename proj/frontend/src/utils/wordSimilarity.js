@@ -2,21 +2,30 @@
 // Word2Vec / Cosine Similarity 시뮬레이션 알고리즘
 // 질문 검색 및 유사 질답 보기 기능용
 
+const STOPWORDS = new Set([
+  '안녕하십니까', '안녕하세요', '교수님', '학생입니다', '수강생입니다', '수강생', '학생',
+  '이번', '학기', '강의', '강의를', '수업을', '수업', '성실히', '수강하고', '있는',
+  '감사드립니다', '감사합니다', '다름이', '아니라', '관련하여', '관련', '대해', '대한',
+  '조심스럽게', '여쭙고자', '여쭙습니다', '문의드립니다', '질문드립니다', '질문', '문의',
+  '바쁘신', '일정', '중에', '시간', '내어', '주셔서', '건강', '유의하시기', '바랍니다',
+  '질의의', '학업', '학습', '문의의', '확인', '부탁드립니다', '있으신지', '궁금합니다'
+]);
+
 /**
  * 텍스트에서 단어 토큰 및 2-gram 추출
  */
 function tokenize(text) {
   if (!text) return [];
-  // 한글, 영문, 숫자 단어 추출
-  const cleaned = text.toLowerCase().replace(/[^a-z0-9가-힣\s]/g, ' ');
-  const words = cleaned.split(/\s+/).filter(w => w.length > 1);
+  const cleaned = text.toLowerCase().replace(/[^a-z0-9가-힣\s]/g, ' ').trim();
+  const words = cleaned.split(/\s+/).filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
-  // 문자 단위 바이그램 추가 (한국어 어미 및 복합어 유사도 보정)
   const ngrams = [];
-  for (let i = 0; i < cleaned.length - 1; i++) {
-    const pair = cleaned.slice(i, i + 2).trim();
-    if (pair.length === 2) {
-      ngrams.push(pair);
+  for (const word of words) {
+    for (let i = 0; i <= word.length - 2; i++) {
+      const pair = word.slice(i, i + 2);
+      if (!STOPWORDS.has(pair)) {
+        ngrams.push(pair);
+      }
     }
   }
   return [...words, ...ngrams];
@@ -96,7 +105,7 @@ export function calculateSimilarQuestions(queryText, questions, topN = 3) {
         similarityScore: Math.round(similarity * 100) // 백분율 점수 (0 ~ 100)
       };
     })
-    .filter(item => item.similarityScore >= 15) // 최소 유사도 15% 이상
+    .filter(item => item.similarityScore >= 25) // 최소 유사도 25% 이상만 표시
     .sort((a, b) => b.similarityScore - a.similarityScore)
     .slice(0, topN);
 

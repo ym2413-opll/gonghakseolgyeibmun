@@ -39,6 +39,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const [selectedCategory, setSelectedCategory] = useState('lecture');
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
+  const [refinedTitle, setRefinedTitle] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [hasAiRefined, setHasAiRefined] = useState(false);
 
@@ -81,7 +82,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
     if (selectedCategory !== 'grade' && searchText.length >= 6) {
       const timer = setTimeout(async () => {
-        const results = await api.getSimilarQuestions(searchText, selectedCategory);
+        const results = await api.getSimilarQuestions(searchText, selectedCategory, currentCourse.id);
         if (!cancel) {
           setSimilarList(results);
         }
@@ -93,11 +94,12 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     } else {
       setSimilarList([]);
     }
-  }, [content, selectedCategory]);
+  }, [content, selectedCategory, currentCourse.id]);
 
-  const handleApplyAiRefined = (refinedContent, originContent) => {
+  const handleApplyAiRefined = (refinedContent, originContent, aiTitle) => {
     if (refinedContent) setContent(refinedContent);
     if (originContent) setOriginalContent(originContent);
+    if (aiTitle) setRefinedTitle(aiTitle);
     setHasAiRefined(true);
   };
 
@@ -243,8 +245,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     setErrorMsg('');
 
     try {
-      // 제목은 별도 입력 없이 본문에서 자동으로 요약 생성
-      const summaryTitle = generateSummaryTitle(content);
+      // AI 정제 제목이 있으면 우선 사용하고, 없으면 본문에서 자동으로 요약 생성
+      const summaryTitle = (hasAiRefined && refinedTitle?.trim())
+        ? refinedTitle.trim()
+        : generateSummaryTitle(content);
 
       const payload = {
         courseId: currentCourse.id,
@@ -294,12 +298,8 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
       <div className="form-card">
         <div className="form-header">
           <div className="form-header-title">
-            <BookOpen size={20} className="primary-icon" />
-            <h3>교수님께 새 질문 작성하기</h3>
+            <h3>질문 작성</h3>
           </div>
-          <p className="form-header-subtitle">
-            작성하신 질문은 담당 교수님께 안전하게 전달되며, 별도의 제목 입력 없이 본문만 작성하시면 됩니다.
-          </p>
         </div>
 
         {errorMsg && (
@@ -309,18 +309,11 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
           </div>
         )}
 
-        {securitySuccessMsg && (
-          <div className="form-success-banner">
-            <ShieldCheck size={16} className="text-emerald-500" />
-            <span>{securitySuccessMsg}</span>
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="qa-form">
           {/* 1. 과목 선택 */}
           <div className="form-group">
             <label className="form-label">
-              질문할 과목 선택 <span className="req">*</span>
+              과목 <span className="req">*</span>
             </label>
             <div className="course-select-grid">
               {studentCourses.map((c) => (
@@ -339,16 +332,11 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             </div>
           </div>
 
-          {/* 2. 카테고리 선택 (필수 1개) */}
+          {/* 2. 카테고리 선택 */}
           <div className="form-group">
-            <div className="label-with-rule">
-              <label className="form-label">
-                카테고리 선택 (필수 1개) <span className="req">*</span>
-              </label>
-              <span className="cat-rule-summary">
-                카테고리별로 익명 가능 여부 및 답변 권한이 다릅니다.
-              </span>
-            </div>
+            <label className="form-label">
+              카테고리 <span className="req">*</span>
+            </label>
 
             <div className="category-select-grid">
               {CATEGORY_LIST.map((cat) => {
@@ -372,13 +360,13 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                     <p className="cat-desc-text">{cat.description}</p>
                     <div className="cat-constraints-info">
                       {cat.id === 'grade' && (
-                        <span className="constraint-warn">[실명 필수] 유사 질답 미제공</span>
+                        <span className="constraint-warn">실명 필수 · 유사 질답 미제공</span>
                       )}
                       {cat.id === 'assignment' && (
-                        <span className="constraint-info">[익명 가능] 타 분반 답변 불가</span>
+                        <span className="constraint-info">익명 가능 · 담당 교수만 답변</span>
                       )}
                       {cat.id === 'lecture' && (
-                        <span className="constraint-ok">[익명 가능] 동일 과목 교수 답변 허용</span>
+                        <span className="constraint-ok">익명 가능 · 동일 과목 교수 답변 허용</span>
                       )}
                     </div>
                   </div>
@@ -393,7 +381,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               <div className="detect-text">
                 <Search size={16} />
                 <span>
-                  작성하신 내용과 유사한 기존 질문 <strong>{similarList.length}건</strong>이 있습니다. (유사도{' '}
+                  유사한 기존 질문 <strong>{similarList.length}건</strong>이 있습니다. (최고 유사도{' '}
                   {similarList[0].similarityScore}%)
                 </span>
               </div>
@@ -402,21 +390,18 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 className="btn-view-similar"
                 onClick={() => setIsSimilarModalOpen(true)}
               >
-                유사 질답 바로 확인하기
+                확인하기
               </button>
             </div>
           )}
 
-          {/* 3. 본문 입력 & 학술 문장 다듬기 툴바 */}
+          {/* 3. 본문 입력 & 문장 다듬기 툴바 */}
           <div className="form-group">
             <div className="content-label-row">
               <div className="content-label-group">
                 <label className="form-label" htmlFor="q-content">
-                  질문 본문 <span className="req">*</span>
+                  본문 <span className="req">*</span>
                 </label>
-                <span className="title-omitted-hint">
-                  (제목을 별도로 쓰실 필요 없이 본문만 작성하시면 됩니다)
-                </span>
               </div>
 
               <div className="content-toolbar-actions">
@@ -424,10 +409,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   type="button"
                   className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
                   onClick={() => setIsAiModalOpen(true)}
-                  title="학생이 작성한 본문을 정중하고 명확한 학술 서식으로 정제합니다"
                 >
                   <PenTool size={14} />
-                  <span>{hasAiRefined ? '문장 다듬기 완료 (재검토)' : '학술 문장 다듬기'}</span>
+                  <span>{hasAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
                 </button>
 
                 {selectedCategory !== 'grade' && (
@@ -436,7 +420,6 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                     className="btn-similar-search"
                     onClick={() => setIsSimilarModalOpen(true)}
                     disabled={similarList.length === 0}
-                    title="기존에 답변된 유사 질답 보기"
                   >
                     <Search size={14} />
                     <span>유사 질답 ({similarList.length})</span>
@@ -449,7 +432,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               id="q-content"
               rows={8}
               className={`textarea-content ${hasAiRefined ? 'has-refined-border' : ''}`}
-              placeholder="궁금한 사항을 상세히 작성해 주세요. 필요 시 상단의 [학술 문장 다듬기]를 통해 정중한 학술 서식으로 정제할 수 있습니다. (목록에 표시될 제목은 본문 내용에서 자동 생성됩니다)"
+              placeholder="질문 내용을 입력하세요."
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
@@ -460,34 +443,19 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             {hasAiRefined && (
               <div className="refined-status-hint">
                 <CheckCircle2 size={14} />
-                <span>표준 학술 서식으로 문장이 정제되었습니다. (작성 원문 보존)</span>
+                <span>정제된 문장이 적용되었습니다.</span>
               </div>
             )}
           </div>
 
-          {/* 4. 파일 첨부 영역 (엄격 보안 검증 및 이미지 자동 압축) */}
+          {/* 4. 파일 첨부 영역 */}
           <div className="form-group attachment-section">
             <div className="attachment-header-row">
               <div className="attachment-label-wrap">
                 <label className="form-label">
                   <Paperclip size={15} />
-                  파일 첨부
-                  <span className="attachment-count-tag">
-                    ({attachments.length}/{MAX_ATTACHMENTS_COUNT})
-                  </span>
+                  첨부 파일 ({attachments.length}/{MAX_ATTACHMENTS_COUNT})
                 </label>
-                <span className="attachment-hint-text">
-                  과제 소스코드, 회로도, 실습 캡처 등을 첨부할 수 있습니다.
-                </span>
-              </div>
-              <div className="security-badges-wrap">
-                <span className="badge-security-verified" title="악성 실행 파일 및 확장자 위조 자동 차단">
-                  <ShieldCheck size={13} />
-                  엄격 보안 검사
-                </span>
-                <span className="badge-compression-applied" title="고화질 이미지는 최적 압축되어 업로드 속도가 향상됩니다">
-                  이미지 자동 최적화
-                </span>
               </div>
             </div>
 
@@ -516,20 +484,18 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
               {isProcessingFiles ? (
                 <div className="dropzone-processing">
-                  <Loader2 size={24} className="spin-icon text-indigo-600" />
+                  <Loader2 size={22} className="spin-icon" />
                   <span className="processing-text">{fileProcessStatus}</span>
-                  <span className="processing-subtext">보안 무결성 및 이미지 최적화를 진행 중입니다.</span>
                 </div>
               ) : (
                 <div className="dropzone-content">
-                  <UploadCloud size={28} className="upload-cloud-icon" />
+                  <UploadCloud size={24} className="upload-cloud-icon" />
                   <div className="dropzone-text-group">
                     <span className="dropzone-primary-text">
-                      클릭하여 파일을 선택하거나, 마우스로 파일을 여기에 끌어다 놓으세요
+                      파일 선택 또는 드래그 앤 드롭
                     </span>
                     <span className="dropzone-secondary-text">
-                      허용: PDF, Office, HWP, TXT, ZIP, 이미지 (PNG, JPG, WEBP, GIF) | 개당 최대 15MB
-                      <strong className="block text-rose-500 font-medium mt-0.5">※ 실행 파일(EXE/BAT/SH 등) 및 위조 확장자는 즉시 차단됩니다.</strong>
+                      PDF, Office, HWP, TXT, ZIP, 이미지 (최대 15MB)
                     </span>
                   </div>
                 </div>
@@ -541,7 +507,6 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               <div className="attached-files-list">
                 {attachments.map((att, idx) => (
                   <div key={att.id || idx} className="attached-file-card">
-                    {/* 이미지 썸네일 미리보기 */}
                     {att.isImage && (att.previewUrl || att.url) ? (
                       <div className="attached-file-thumb">
                         <img src={att.previewUrl || att.url} alt={att.originalName} />
@@ -555,26 +520,12 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                         <span className="file-name" title={att.originalName}>
                           {att.originalName}
                         </span>
-                        <span className="badge-safe-verified">
-                          <ShieldCheck size={11} /> 안전 검증됨
-                        </span>
                       </div>
 
                       <div className="file-meta-row">
-                        {att.isCompressed ? (
-                          <div className="compression-info-wrap">
-                            <span className="file-size-badge compressed">
-                              {formatFileSize(att.originalSize)} → {formatFileSize(att.fileSize)}
-                            </span>
-                            <span className="compression-ratio-pill">
-                              {att.compressionRatio}% 압축 완료
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="file-size-badge normal">
-                            {formatFileSize(att.fileSize)}
-                          </span>
-                        )}
+                        <span className="file-size-badge normal">
+                          {formatFileSize(att.fileSize)}
+                        </span>
                       </div>
                     </div>
 
@@ -585,7 +536,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                         e.stopPropagation();
                         handleRemoveAttachment(idx);
                       }}
-                      title="첨부 파일 삭제"
+                      title="삭제"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -595,7 +546,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             )}
           </div>
 
-          {/* 5. 익명 질문 체크박스 (성적 카테고리에서는 비활성화) */}
+          {/* 5. 익명 질문 체크박스 */}
           <div className="form-group anonymous-group">
             <div className="anon-check-wrapper">
               <label className={`checkbox-label ${selectedCategory === 'grade' ? 'disabled-label' : ''}`}>
@@ -606,19 +557,17 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   onChange={(e) => setIsAnonymous(e.target.checked)}
                 />
                 <span className="checkbox-text">
-                  <EyeOff size={16} />
                   익명으로 질문하기
                 </span>
               </label>
 
               {selectedCategory === 'grade' ? (
                 <span className="anon-disabled-reason">
-                  ※ '성적' 카테고리는 공정한 성적 조회 및 이의제기를 위해 익명으로 등록할 수 없습니다.
+                  성적 카테고리는 실명으로만 작성할 수 있습니다.
                 </span>
               ) : (
                 <span className="anon-rule-desc">
-                  타 학생 및 질문 목록에는 <strong>'{currentCourse?.name || '과목'} 수강생'</strong>으로 표시됩니다.
-                  (부당한 질문 방지를 위해 백엔드에는 본인 정보가 안전히 전달됩니다)
+                  목록에 '{currentCourse?.name || '과목'} 수강생'으로 표시됩니다.
                 </span>
               )}
             </div>
@@ -636,17 +585,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               className="btn btn-primary submit-btn"
               disabled={isSubmitting || isProcessingFiles}
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={16} className="spin-icon" />
-                  <span>등록 중...</span>
-                </>
-              ) : (
-                <>
-                  <Send size={16} />
-                  <span>질문 등록하기</span>
-                </>
-              )}
+              {isSubmitting ? '등록 중...' : '등록'}
             </button>
           </div>
         </form>

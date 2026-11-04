@@ -62,11 +62,6 @@ export default function CategorySettingsModal({ isOpen, onClose }) {
                       <span className="cat-status-badge">{isEnabled ? '접수 중' : '접수 마감'}</span>
                     </div>
                     <div className="cat-card-desc">{cat.description}</div>
-                    <ul className="cat-rule-hints">
-                      {cat.rules.map((r, idx) => (
-                        <li key={idx}>• {r}</li>
-                      ))}
-                    </ul>
                   </div>
 
                   <div className="cat-card-action">
@@ -83,13 +78,6 @@ export default function CategorySettingsModal({ isOpen, onClose }) {
               );
             })}
           </div>
-
-          <div className="backend-spec-notice">
-            <ShieldAlert size={14} />
-            <span>
-              비활성화된 카테고리는 학생들이 질문을 등록할 때 선택창에서 자동으로 비활성화 처리됩니다.
-            </span>
-          </div>
         </div>
 
         <div className="modal-footer">
@@ -97,15 +85,7 @@ export default function CategorySettingsModal({ isOpen, onClose }) {
             취소
           </button>
           <button className="btn btn-primary" onClick={handleSave} disabled={isSaved}>
-            {isSaved ? (
-              <>
-                <Check size={16} /> 저장 완료
-              </>
-            ) : (
-              <>
-                <Save size={16} /> 카테고리 설정 적용
-              </>
-            )}
+            {isSaved ? '저장됨' : '저장'}
           </button>
         </div>
       </div>

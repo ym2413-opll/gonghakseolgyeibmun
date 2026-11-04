@@ -22,9 +22,9 @@ export default function AiRefineModal({
   const [aiResult, setAiResult] = useState(null);
   const [isEditingRefined, setIsEditingRefined] = useState(false);
 
-  const handleTriggerAI = React.useCallback(async (textToRefine, titleToRefine) => {
-    const text = textToRefine !== undefined ? textToRefine : originalText;
-    const ttl = titleToRefine !== undefined ? titleToRefine : originalTitle;
+  const handleTriggerAI = React.useCallback(async (textToRefine, titleToRefine = '') => {
+    const text = textToRefine !== undefined ? textToRefine : '';
+    const ttl = titleToRefine !== undefined ? titleToRefine : '';
     if ((!text || !text.trim()) && (!ttl || !ttl.trim())) return;
 
     setIsLoading(true);
@@ -43,7 +43,7 @@ export default function AiRefineModal({
     } finally {
       setIsLoading(false);
     }
-  }, [originalText, originalTitle, currentUser, category]);
+  }, [currentUser, category]);
 
   useEffect(() => {
     if (isOpen) {
@@ -83,10 +83,7 @@ export default function AiRefineModal({
       <div className="modal-content ai-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header ai-modal-header">
           <div className="modal-title">
-            <div className="refine-icon-wrap">
-              <PenTool size={17} />
-            </div>
-            <span>학술 문장 다듬기 (제목 및 서식 정제)</span>
+            <span>문장 다듬기</span>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="닫기">
             <X size={18} />
@@ -96,14 +93,13 @@ export default function AiRefineModal({
         <div className="modal-body">
           {/* 학업 문의 추천 서식 템플릿 */}
           <div className="ai-quick-templates">
-            <span className="template-label">학업 질의 표준 템플릿:</span>
+            <span className="template-label">예시 문장:</span>
             <div className="template-chips">
               {AI_INQUIRY_TEMPLATES.map((tmpl, idx) => (
                 <button
                   key={idx}
                   className="template-chip-btn"
                   onClick={() => loadTemplate(tmpl)}
-                  title={`${tmpl.rawTitle || tmpl.title}: ${tmpl.rawText}`}
                 >
                   {tmpl.title}
                 </button>
@@ -112,40 +108,29 @@ export default function AiRefineModal({
           </div>
 
           <div className="ai-compare-grid">
-            {/* 좌측: 원문 (제목 & 본문) */}
+            {/* 좌측: 원문 */}
             <div className="compare-card original-card">
               <div className="compare-header">
-                <span className="compare-tag origin-tag">작성 원문</span>
+                <span className="compare-tag origin-tag">원문</span>
                 <button
                   className="re-run-btn"
                   onClick={() => handleTriggerAI(originalText, originalTitle)}
                   disabled={isLoading || (!originalText.trim() && !originalTitle.trim())}
                 >
                   <RotateCw size={13} className={isLoading ? 'spinning' : ''} />
-                  다시 다듬기
+                  다시 생성
                 </button>
               </div>
 
               <div className="compare-card-body">
                 <div className="compare-field-wrap">
-                  <label className="ai-sub-label">질문 제목 원문</label>
-                  <input
-                    type="text"
-                    value={originalTitle}
-                    onChange={(e) => setOriginalTitle(e.target.value)}
-                    placeholder="작성 중인 제목을 입력하세요..."
-                    className="ai-title-input origin-title-input"
-                  />
-                </div>
-
-                <div className="compare-field-wrap">
-                  <label className="ai-sub-label">질문 본문 원문</label>
+                  <label className="ai-sub-label">질문 본문 (수정 불가)</label>
                   <textarea
                     value={originalText}
-                    onChange={(e) => setOriginalText(e.target.value)}
-                    placeholder="질문하고 싶은 내용을 편하게 입력하세요..."
+                    readOnly
+                    placeholder="작성 화면에서 입력한 원문이 표시됩니다."
                     className="ai-textarea origin-textarea"
-                    rows={8}
+                    rows={11}
                   />
                 </div>
               </div>
@@ -162,14 +147,7 @@ export default function AiRefineModal({
             <div className="compare-card refined-card">
               <div className="compare-header">
                 <div className="refined-tag-group">
-                  <span className="compare-tag ai-tag">
-                    <FileText size={13} /> 정제 제안본
-                  </span>
-                  {aiResult && (
-                    <span className="polite-score-badge">
-                      표준 서식 일치도 {aiResult.politenessScore}%
-                    </span>
-                  )}
+                  <span className="compare-tag ai-tag">정제 결과</span>
                 </div>
                 {aiResult && (
                   <button
@@ -177,7 +155,7 @@ export default function AiRefineModal({
                     onClick={() => setIsEditingRefined(!isEditingRefined)}
                   >
                     <Edit3 size={13} />
-                    {isEditingRefined ? '수정 완료' : '직접 수정'}
+                    {isEditingRefined ? '완료' : '수정'}
                   </button>
                 )}
               </div>
@@ -185,79 +163,53 @@ export default function AiRefineModal({
               <div className="compare-card-body">
                 {isLoading ? (
                   <div className="ai-loading-box">
-                    <Loader2 size={24} className="spinning ai-spinner" />
-                    <p>표준 학술 서식과 문맥을 검토하여 정제안을 생성하고 있습니다...</p>
+                    <Loader2 size={22} className="spinning ai-spinner" />
+                    <p>문장을 다듬는 중입니다...</p>
                   </div>
                 ) : (refinedText || refinedTitle) ? (
                   <>
                     <div className="compare-field-wrap">
-                      <label className="ai-sub-label">정제된 제목</label>
+                      <label className="ai-sub-label">제목</label>
                       <input
                         type="text"
                         value={refinedTitle}
                         onChange={(e) => setRefinedTitle(e.target.value)}
                         readOnly={!isEditingRefined}
                         className={`ai-title-input refined-title-input ${isEditingRefined ? 'editable' : ''}`}
-                        placeholder="정제된 제목이 표시됩니다..."
                       />
                     </div>
 
                     <div className="compare-field-wrap">
-                      <label className="ai-sub-label">정제된 본문</label>
+                      <label className="ai-sub-label">본문</label>
                       <textarea
                         value={refinedText}
                         onChange={(e) => setRefinedText(e.target.value)}
                         readOnly={!isEditingRefined}
                         className={`ai-textarea refined-textarea ${isEditingRefined ? 'editable' : ''}`}
                         rows={8}
-                        placeholder="정제된 본문이 표시됩니다..."
                       />
                     </div>
                   </>
                 ) : (
                   <div className="ai-empty-prompt">
-                    <FileText size={24} />
-                    <p>원문 제목이나 본문을 입력한 후 [다시 다듬기]를 누르면 표준 학술 서식으로 변환됩니다.</p>
+                    <p>원문이 입력되면 정제된 문장이 표시됩니다.</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
-
-          {/* 교정 포인트 안내 */}
-          {aiResult?.changes && (
-            <div className="ai-improvements-box">
-              <div className="improv-title">
-                <CheckCircle2 size={15} />
-                <span>주요 검토 및 정제 사항:</span>
-              </div>
-              <ul className="improv-list">
-                {aiResult.changes.map((c, i) => (
-                  <li key={i}>{c}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="ai-disclaimer">
-            <AlertTriangle size={14} />
-            <span>
-              <strong>확인 안내:</strong> 정제된 제목과 본문이 질문 의도와 맞는지 확인하신 후 적용해 주세요.
-            </span>
-          </div>
         </div>
 
         <div className="modal-footer ai-modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>
-            원문 유지하고 닫기
+            취소
           </button>
           <button
             className="btn btn-primary"
             onClick={handleApply}
             disabled={(!refinedText && !refinedTitle) || isLoading}
           >
-            <Check size={16} />
-            정제안 적용하기
+            적용
           </button>
         </div>
       </div>

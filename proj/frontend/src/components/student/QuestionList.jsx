@@ -48,22 +48,21 @@ export default function QuestionList({
 
   return (
     <div className="student-question-list">
-      {/* 학생 상단 환영 & 새 질문 CTA */}
+      {/* 학생 상단 정보 & 질문 작성 */}
       <div className="student-banner-card">
         <div className="student-banner-left">
           <div className="student-avatar-box">{currentUser.avatar}</div>
           <div className="student-info-meta">
-            <h3>{currentUser.name} 학생, 반갑습니다!</h3>
+            <h3>{currentUser.name}</h3>
             <p className="student-sub">
-              {currentUser.department} · 학번 {currentUser.studentId} · 수강 중:{' '}
-              {currentUser.courses?.map((c) => c.name).join(', ')}
+              {currentUser.department} · 수강 과목: {currentUser.courses?.map((c) => c.name).join(', ')}
             </p>
           </div>
         </div>
 
         <button className="btn btn-primary new-q-btn" onClick={onOpenNewQuestion}>
-          <Plus size={18} />
-          <span>새 질문 작성하기</span>
+          <Plus size={16} />
+          <span>질문 작성</span>
         </button>
       </div>
 
@@ -74,7 +73,7 @@ export default function QuestionList({
           <input
             type="text"
             className="search-input"
-            placeholder="과목명, 질문 키워드로 검색해보세요..."
+            placeholder="과목명, 제목, 내용 검색"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />

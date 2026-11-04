@@ -366,7 +366,7 @@ export const api = {
   async createQuestion(questionData) {
     const summaryTitle = questionData.title?.trim() || generateSummaryTitle(questionData.content);
     const questionPayload = {
-      ...questionPayload,
+      ...questionData,
       title: summaryTitle
     };
     const uid = getCurrentUserId(questionData.studentId);
@@ -545,8 +545,8 @@ export const api = {
     return newAnswer;
   },
 
-  // 6. 유사 질답 검색 (Word2Vec / Cosine Similarity)
-  async getSimilarQuestions(queryText, category) {
+  // 6. 유사 질답 검색
+  async getSimilarQuestions(queryText, category, courseId) {
     if (category?.toLowerCase() === 'grade') {
       return []; // 성적 카테고리는 사용 불가 명세
     }
@@ -558,14 +558,23 @@ export const api = {
         const res = await fetch(`${API_BASE_URL}/questions/similar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: queryText, category }),
+          body: JSON.stringify({ text: queryText, category, courseId }),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
         if (res.ok) {
           const body = await res.json();
           const list = Array.isArray(body) ? body : (Array.isArray(body?.data) ? body.data : null);
-          if (Array.isArray(list)) return list;
+          if (Array.isArray(list)) {
+            return list
+              .map(item => ({
+                ...item,
+                similarityScore: item.similarityScore !== undefined
+                  ? item.similarityScore
+                  : Math.round((item.similarity || 0) * 100)
+              }))
+              .filter(item => item.similarityScore >= 25);
+          }
         }
       } catch (e) {
         console.warn('[API] Remote similar search failed, using local engine', e);

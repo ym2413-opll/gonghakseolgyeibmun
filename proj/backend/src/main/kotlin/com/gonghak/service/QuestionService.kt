@@ -18,7 +18,16 @@ class QuestionService(
         currentUserId: UUID,
         request: CreateQuestionRequest
     ): QuestionDetailDto = dbQuery {
-        val courseUUID = com.gonghak.routes.parseCourseId(request.courseId)
+        val parsedCourseUUID = com.gonghak.routes.parseCourseId(request.courseId)
+        val courseRow = CoursesTable.select { CoursesTable.id eq parsedCourseUUID }.singleOrNull()
+            ?: request.courseName?.takeIf { it.isNotBlank() }?.let { cName ->
+                CoursesTable.select { CoursesTable.name eq cName }.firstOrNull()
+            }
+            ?: CoursesTable.selectAll().firstOrNull()
+            ?: throw IllegalArgumentException("등록된 강의 정보를 찾을 수 없습니다.")
+
+        val courseUUID = courseRow[CoursesTable.id].value
+        val courseName = courseRow[CoursesTable.name]
 
         // 1. Validate Category Rules
         if (request.category == QuestionCategory.GRADE && request.isAnonymous) {
@@ -30,11 +39,19 @@ class QuestionService(
             (EnrollmentsTable.studentId eq currentUserId) and (EnrollmentsTable.courseId eq courseUUID)
         }.singleOrNull()
 
-        val assignedProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId) ?: run {
-            CourseProfessorsTable.select { CourseProfessorsTable.courseId eq courseUUID }
-                .firstOrNull()?.get(CourseProfessorsTable.professorId)
-                ?: UUID.fromString("22222222-2222-2222-2222-222222222201")
+        val requestedProfUUID = request.profId?.takeIf { it.isNotBlank() }?.let {
+            com.gonghak.routes.parseUserId(it)
+        }?.takeIf { pId ->
+            UsersTable.select { (UsersTable.id eq pId) and (UsersTable.role eq UserRole.PROFESSOR.name) }.count() > 0
         }
+
+        val assignedProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId)
+            ?: requestedProfUUID
+            ?: CourseProfessorsTable.select { CourseProfessorsTable.courseId eq courseUUID }
+                .firstOrNull()?.get(CourseProfessorsTable.professorId)
+            ?: UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
+                .firstOrNull()?.get(UsersTable.id)?.value
+            ?: UUID.fromString("22222222-2222-2222-2222-222222222201")
 
         // 3. Validate if professor has enabled this category
         val categorySetting = ProfessorCategorySettingsTable.select {
@@ -46,9 +63,6 @@ class QuestionService(
         if (categorySetting != null && !categorySetting[ProfessorCategorySettingsTable.isEnabled]) {
             throw IllegalStateException("담당 교수님에 의해 '${request.category}' 카테고리 질문 접수가 비활성화되어 있습니다.")
         }
-
-        val course = CoursesTable.select { CoursesTable.id eq courseUUID }.single()
-        val courseName = course[CoursesTable.name]
 
         // 4. Calculate refined content if not provided or refine using AI service
         val effectiveRaw = request.effectiveRawContent
@@ -215,8 +229,8 @@ class QuestionService(
                         isImage = attRow[AttachmentsTable.isImage],
                         isCompressed = attRow[AttachmentsTable.isCompressed],
                         compressionRatio = attRow[AttachmentsTable.compressionRatio],
-                        url = "/api/attachments/",
-                        downloadUrl = "/api/attachments//download",
+                        url = "/api/attachments/$attIdStr",
+                        downloadUrl = "/api/attachments/$attIdStr/download",
                         createdAt = attRow[AttachmentsTable.createdAt].toString()
                     )
                 } ?: emptyList(),
@@ -233,20 +247,23 @@ class QuestionService(
         val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
             ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
-        val course = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }.single()
-        val author = UsersTable.select { UsersTable.id eq qRow[QuestionsTable.studentId] }.single()
-        val assignedProf = UsersTable.select { UsersTable.id eq qRow[QuestionsTable.assignedProfessorId] }.single()
-        val currentUser = UsersTable.select { UsersTable.id eq currentUserId }.single()
+        val course = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }.singleOrNull()
+        val author = UsersTable.select { UsersTable.id eq qRow[QuestionsTable.studentId] }.singleOrNull()
+        val assignedProf = UsersTable.select { UsersTable.id eq qRow[QuestionsTable.assignedProfessorId] }.singleOrNull()
+        val currentUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
 
-        val currentUserRole = UserRole.valueOf(currentUser[UsersTable.role])
+        val currentUserRole = currentUser?.let { UserRole.valueOf(it[UsersTable.role]) } ?: UserRole.STUDENT
         val isMyQuestion = (qRow[QuestionsTable.studentId] == currentUserId)
         val isAnonymous = qRow[QuestionsTable.isAnonymous]
-        val courseName = course[CoursesTable.name]
+        val courseName = course?.get(CoursesTable.name) ?: "강의"
+        val authorTag = author?.get(UsersTable.displayTag) ?: "수강생"
+        val authorName = author?.get(UsersTable.name) ?: "학생"
+        val assignedProfName = assignedProf?.get(UsersTable.name) ?: "담당교수"
 
         val authorDisplayName = when {
-            isMyQuestion -> "${author[UsersTable.displayTag]} (나)"
+            isMyQuestion -> "$authorTag (나)"
             isAnonymous -> "$courseName 수강생"
-            else -> author[UsersTable.displayTag]
+            else -> authorTag
         }
 
         // Answers
@@ -295,8 +312,8 @@ class QuestionService(
                     isImage = attRow[AttachmentsTable.isImage],
                     isCompressed = attRow[AttachmentsTable.isCompressed],
                     compressionRatio = attRow[AttachmentsTable.compressionRatio],
-                    url = "/api/attachments/",
-                    downloadUrl = "/api/attachments//download",
+                    url = "/api/attachments/$attIdStr",
+                    downloadUrl = "/api/attachments/$attIdStr/download",
                     createdAt = attRow[AttachmentsTable.createdAt].toString()
                 )
             }
@@ -306,21 +323,21 @@ class QuestionService(
             courseId = qRow[QuestionsTable.courseId].toString(),
             courseName = courseName,
             profId = assignedProfId.toString(),
-            profName = assignedProf[UsersTable.name],
+            profName = assignedProfName,
             category = category,
             title = qRow[QuestionsTable.title],
             content = qRow[QuestionsTable.refinedContent].ifBlank { qRow[QuestionsTable.rawContent] },
             originalContent = qRow[QuestionsTable.rawContent],
             rawContent = qRow[QuestionsTable.rawContent],
             refinedContent = qRow[QuestionsTable.refinedContent],
-            studentId = author[UsersTable.id].value.toString(),
-            studentTag = author[UsersTable.displayTag],
-            studentName = author[UsersTable.name],
+            studentId = qRow[QuestionsTable.studentId].toString(),
+            studentTag = authorTag,
+            studentName = authorName,
             authorDisplayName = authorDisplayName,
             isAnonymous = isAnonymous,
             isMyQuestion = isMyQuestion,
             assignedProfessorId = assignedProfId.toString(),
-            assignedProfessorName = assignedProf[UsersTable.name],
+            assignedProfessorName = assignedProfName,
             isAnsweredByAssignedProfessor = isAnsweredByAssigned,
             canAnswer = canAnswer,
             answers = answersList,
@@ -463,12 +480,13 @@ class QuestionService(
             return@dbQuery emptyList()
         }
 
-        val queryVec = similarityService.computeVector(queryText)
-
         val questions = QuestionsTable.select {
             (QuestionsTable.courseId eq courseId) and
                     (QuestionsTable.category eq category.name)
         }.toList()
+
+        val profNames = UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
+            .associate { it[UsersTable.id].value to it[UsersTable.name] }
 
         val results = mutableListOf<SimilarQuestionDto>()
 
@@ -476,9 +494,10 @@ class QuestionService(
             val qId = row[QuestionsTable.id].value
             if (excludeQuestionId != null && qId == excludeQuestionId) continue
 
-            val vecJson = row[QuestionsTable.vectorData]
-            val docVec = similarityService.deserializeVector(vecJson)
-            val sim = similarityService.cosineSimilarity(queryVec, docVec)
+            val docText = "${row[QuestionsTable.title]} ${row[QuestionsTable.refinedContent]} ${row[QuestionsTable.rawContent]}"
+            val sim = similarityService.computeTextSimilarity(queryText, docText)
+            val simScore = (sim * 100).toInt()
+            if (simScore < 25) continue
 
             val answers = AnswersTable.select { AnswersTable.questionId eq qId }
                 .orderBy(AnswersTable.createdAt to SortOrder.ASC)
@@ -488,11 +507,13 @@ class QuestionService(
             val snippet = row[QuestionsTable.refinedContent].take(100)
 
             val answerDtos = answers.map { aRow ->
+                val pId = aRow[AnswersTable.professorId]
+                val pName = profNames[pId] ?: "담당교수"
                 AnswerDto(
                     id = aRow[AnswersTable.id].value.toString(),
                     questionId = qId.toString(),
-                    professorId = aRow[AnswersTable.professorId].toString(),
-                    professorName = "",
+                    professorId = pId.toString(),
+                    professorName = pName,
                     professorDepartment = "",
                     content = aRow[AnswersTable.content],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
@@ -508,7 +529,7 @@ class QuestionService(
                     content = snippet,
                     category = category,
                     similarity = sim,
-                    similarityScore = (sim * 100).toInt(),
+                    similarityScore = simScore,
                     answerCount = answers.size,
                     topAnswerSnippet = topAnswer?.take(150),
                     answers = answerDtos

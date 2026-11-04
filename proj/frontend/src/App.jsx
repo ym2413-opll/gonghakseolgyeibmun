@@ -76,7 +76,7 @@ function MainApp() {
     setSelectedQuestionId(newQ.id);
     setCurrentView('detail');
     loadNotifications(true);
-    showToast('학업 문의가 성공적으로 접수되었습니다!');
+    showToast('질문이 등록되었습니다.');
   };
 
   const handleUpdateQuestion = (updatedQ, toastMsg) => {
@@ -85,7 +85,7 @@ function MainApp() {
       (Array.isArray(prev) ? prev : []).map((q) => (q.id === updatedQ.id ? updatedQ : q))
     );
     loadNotifications(true);
-    showToast(toastMsg || '질문 정보가 성공적으로 반영되었습니다.');
+    showToast(toastMsg || '수정되었습니다.');
   };
 
   const safeQuestions = Array.isArray(questions) ? questions : [];

@@ -224,8 +224,12 @@ data class RefineQuestionResponse(
 
 @Serializable
 data class CreateQuestionRequest(
-    val courseId: String,
-    val category: QuestionCategory,
+    val courseId: String = "",
+    val courseName: String? = null,
+    val courseGroup: String? = null,
+    val profId: String? = null,
+    val profName: String? = null,
+    val category: QuestionCategory = QuestionCategory.LECTURE,
     val title: String? = null,
     val rawContent: String? = null,
     val content: String? = null,

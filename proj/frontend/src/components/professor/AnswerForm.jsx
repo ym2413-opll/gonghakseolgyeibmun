@@ -120,15 +120,14 @@ export default function AnswerForm({ question, onAnswerAdded }) {
           <textarea
             rows={5}
             className="ans-textarea"
-            placeholder="학생의 성장을 돕는 명확하고 친절한 답변을 작성해 주세요..."
+            placeholder="답변 내용을 입력하세요."
             value={content}
             onChange={(e) => setContent(e.target.value)}
           />
 
           <div className="ans-submit-row">
             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-              <Send size={15} />
-              <span>{isSubmitting ? '등록 중...' : '답변 등록하기'}</span>
+              <span>{isSubmitting ? '등록 중...' : '답변 등록'}</span>
             </button>
           </div>
         </form>

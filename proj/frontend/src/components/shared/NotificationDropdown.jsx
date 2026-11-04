@@ -47,24 +47,18 @@ export default function NotificationDropdown({ isOpen, onClose, onSelectQuestion
       </div>
 
       {/* 브라우저 시스템 알림 허용 안내 바 */}
-      {browserPermission !== 'granted' && browserPermission !== 'unsupported' ? (
+      {browserPermission !== 'granted' && browserPermission !== 'unsupported' && (
         <div className="browser-notif-bar">
-          <Globe size={13} />
-          <span>실제 브라우저 팝업 알림을 받으시겠습니까?</span>
+          <span>브라우저 알림 권한이 꺼져 있습니다.</span>
           <button
             type="button"
             className="btn-enable-browser-notif"
             onClick={requestPermission}
           >
-            알림 허용
+            허용
           </button>
         </div>
-      ) : browserPermission === 'granted' ? (
-        <div className="browser-notif-active-bar">
-          <span className="dot-active">●</span>
-          <span>브라우저 시스템 알림 켜짐 (질문/답변 시 데스크톱 알림 수신)</span>
-        </div>
-      ) : null}
+      )}
 
       {/* 교수 방해 금지 모드 활성화 알림 */}
       {inDnd && (

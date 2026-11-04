@@ -62,7 +62,13 @@ class AiRefineService(private val apiKey: String? = null) {
         courseName: String?,
         category: QuestionCategory?
     ): RefinedResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
+        val preferredModel = System.getenv("GEMINI_MODEL")
+            ?.trim()
+            ?.trim('"', '\'')
+            ?.removePrefix("models/")
+            ?.takeIf { it.isNotBlank() }
+            ?: "gemini-2.5-flash"
+        val modelsToTry = listOf(preferredModel, "gemini-2.5-flash", "gemini-2.0-flash").distinct()
 
         val categoryDesc = when (category) {
             QuestionCategory.GRADE -> "성적 및 평가 관련 문의"
@@ -106,37 +112,44 @@ class AiRefineService(private val apiKey: String? = null) {
             }
         }
 
-        val response = httpClient.post(url) {
-            contentType(ContentType.Application.Json)
-            setBody(requestBody.toString())
-        }
+        var lastStatus: HttpStatusCode? = null
+        for (model in modelsToTry) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
+            val response = httpClient.post(url) {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody.toString())
+            }
+            lastStatus = response.status
 
-        if (response.status.isSuccess()) {
-            val responseText = response.body<String>()
-            val json = Json.parseToJsonElement(responseText).jsonObject
-            val candidates = json["candidates"]?.jsonArray
-            val firstCandidate = candidates?.firstOrNull()?.jsonObject
-            val parts = firstCandidate?.get("content")?.jsonObject?.get("parts")?.jsonArray
-            val text = parts?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content
-            if (!text.isNullOrBlank()) {
-                val cleanedText = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                try {
-                    val parsed = Json.parseToJsonElement(cleanedText).jsonObject
-                    val title = parsed["title"]?.jsonPrimitive?.contentOrNull?.trim()
-                    val content = parsed["content"]?.jsonPrimitive?.contentOrNull?.trim()
-                    if (!content.isNullOrBlank()) {
-                        val finalTitle = title?.takeIf { it.isNotBlank() } ?: fallbackRefine(rawContent, rawTitle, courseName, category).title
-                        return RefinedResult(finalTitle, content)
+            if (response.status.isSuccess()) {
+                val responseText = response.body<String>()
+                val json = Json.parseToJsonElement(responseText).jsonObject
+                val candidates = json["candidates"]?.jsonArray
+                val firstCandidate = candidates?.firstOrNull()?.jsonObject
+                val parts = firstCandidate?.get("content")?.jsonObject?.get("parts")?.jsonArray
+                val text = parts?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content
+                if (!text.isNullOrBlank()) {
+                    val cleanedText = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                    try {
+                        val parsed = Json.parseToJsonElement(cleanedText).jsonObject
+                        val title = parsed["title"]?.jsonPrimitive?.contentOrNull?.trim()
+                        val content = parsed["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                        if (!content.isNullOrBlank()) {
+                            val finalTitle = title?.takeIf { it.isNotBlank() } ?: fallbackRefine(rawContent, rawTitle, courseName, category).title
+                            return RefinedResult(finalTitle, content)
+                        }
+                    } catch (e: Exception) {
+                        logger.warn("Failed to parse Gemini JSON output, using clean text directly: ${e.message}")
+                        val fallback = fallbackRefine(rawContent, rawTitle, courseName, category)
+                        return RefinedResult(fallback.title, cleanedText)
                     }
-                } catch (e: Exception) {
-                    logger.warn("Failed to parse Gemini JSON output, using clean text directly: ${e.message}")
-                    val fallback = fallbackRefine(rawContent, rawTitle, courseName, category)
-                    return RefinedResult(fallback.title, cleanedText)
                 }
+            } else if (response.status != HttpStatusCode.NotFound) {
+                break
             }
         }
 
-        throw RuntimeException("Gemini API response unsuccessful: status=${response.status}")
+        throw RuntimeException("Gemini API response unsuccessful: status=$lastStatus")
     }
 
     private fun fallbackRefine(

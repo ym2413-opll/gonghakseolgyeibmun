@@ -91,11 +91,10 @@ export default function NotificationSettingsModal({ isOpen, onClose }) {
             <div className="settings-row-between">
               <div>
                 <div className="item-title-with-badge">
-                  <Users size={16} />
-                  <span className="item-title">'같은 과목 다른 교수' 알림 수신</span>
+                  <span className="item-title">동일 과목 타 분반 질문 알림 수신</span>
                 </div>
                 <p className="item-desc">
-                  동일 과목의 타 분반 강의 질문이 등록되었을 때 알림을 수신할지 설정합니다. 활성화 시 동료 교수의 강의 질문에 신속히 답변을 지원할 수 있습니다.
+                  동일 과목의 타 분반 강의 질문 등록 시 알림을 수신합니다.
                 </p>
               </div>
               <label className="switch">
@@ -108,11 +107,6 @@ export default function NotificationSettingsModal({ isOpen, onClose }) {
               </label>
             </div>
           </div>
-
-          <div className="backend-spec-notice">
-            <Clock size={14} />
-            <span>설정 값은 백엔드로 전송되어 서버 스케줄러 및 푸시 시스템에 즉시 반영됩니다.</span>
-          </div>
         </div>
 
         <div className="modal-footer">
@@ -120,15 +114,7 @@ export default function NotificationSettingsModal({ isOpen, onClose }) {
             취소
           </button>
           <button className="btn btn-primary" onClick={handleSave} disabled={isSaved}>
-            {isSaved ? (
-              <>
-                <Check size={16} /> 저장 완료
-              </>
-            ) : (
-              <>
-                <Save size={16} /> 설정 저장하기
-              </>
-            )}
+            {isSaved ? '저장됨' : '저장'}
           </button>
         </div>
       </div>

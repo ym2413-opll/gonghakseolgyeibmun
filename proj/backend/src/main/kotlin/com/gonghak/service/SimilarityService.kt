@@ -8,6 +8,46 @@ class SimilarityService {
     private val vectorDimension = 64
     private val json = Json { ignoreUnknownKeys = true }
 
+    private val stopwords = setOf(
+        "안녕하십니까", "안녕하세요", "교수님", "학생입니다", "수강생입니다", "수강생", "학생",
+        "이번", "학기", "강의", "강의를", "수업을", "수업", "성실히", "수강하고", "있는",
+        "감사드립니다", "감사합니다", "다름이", "아니라", "관련하여", "관련", "대해", "대한",
+        "조심스럽게", "여쭙고자", "여쭙습니다", "문의드립니다", "질문드립니다", "질문", "문의",
+        "바쁘신", "일정", "중에", "시간", "내어", "주셔서", "건강", "유의하시기", "바랍니다",
+        "질의의", "학업", "학습", "문의의", "확인", "부탁드립니다", "있으신지", "궁금합니다"
+    )
+
+    /**
+     * Compute lexical + character 2-gram similarity between two texts (0.0 to 1.0).
+     */
+    fun computeTextSimilarity(queryText: String, docText: String): Double {
+        val qTokens = tokenize(queryText)
+        val dTokens = tokenize(docText)
+        if (qTokens.isEmpty() || dTokens.isEmpty()) return 0.0
+
+        val qCounts = qTokens.groupingBy { it }.eachCount()
+        val dCounts = dTokens.groupingBy { it }.eachCount()
+
+        val sharedKeys = qCounts.keys.intersect(dCounts.keys)
+        if (sharedKeys.isEmpty()) return 0.0
+
+        var dot = 0.0
+        var normQ = 0.0
+        var normD = 0.0
+
+        for ((_, c) in qCounts) normQ += c * c
+        for ((_, c) in dCounts) normD += c * c
+        for (k in sharedKeys) {
+            dot += (qCounts[k] ?: 0) * (dCounts[k] ?: 0)
+        }
+
+        val denom = sqrt(normQ) * sqrt(normD)
+        if (denom < 1e-9) return 0.0
+
+        val sim = dot / denom
+        return (sim.coerceIn(0.0, 1.0) * 1000).toInt() / 1000.0
+    }
+
     /**
      * Compute embedding vector for a given text (Word2Vec / Token Average Embedding).
      */
@@ -81,16 +121,20 @@ class SimilarityService {
     }
 
     private fun tokenize(text: String): List<String> {
-        val cleaned = text.replace(Regex("[^\\p{L}\\p{Nd}]+"), " ").trim()
-        val words = cleaned.split("\\s+".toRegex()).filter { it.length >= 2 }
-        
-        // Also add character 2-grams for rich subword representation in Korean
+        val cleaned = text.lowercase().replace(Regex("[^\\p{L}\\p{Nd}]+"), " ").trim()
+        val words = cleaned.split("\\s+".toRegex())
+            .filter { it.length >= 2 && it !in stopwords }
+
+        // Add character 2-grams from meaningful words for Korean subword matching
         val ngrams = mutableListOf<String>()
         ngrams.addAll(words)
         for (word in words) {
             if (word.length >= 2) {
                 for (i in 0..word.length - 2) {
-                    ngrams.add(word.substring(i, i + 2))
+                    val bg = word.substring(i, i + 2)
+                    if (bg !in stopwords) {
+                        ngrams.add(bg)
+                    }
                 }
             }
         }

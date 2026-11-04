@@ -85,7 +85,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
       ...question,
       answers: [...(question.answers || []), newAnswer]
     };
-    if (onUpdateQuestion) onUpdateQuestion(updated, '교수님 답변이 성공적으로 등록되었습니다!');
+    if (onUpdateQuestion) onUpdateQuestion(updated, '답변이 등록되었습니다.');
   };
 
   // AI 교정 전 원문과의 차이 여부
@@ -131,10 +131,9 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
     }
   };
 
-  const handleApplyAiInEdit = (refinedContent, originContent, refinedTitle, originTitle) => {
+  const handleApplyAiInEdit = (refinedContent, originContent) => {
     if (refinedContent) setEditContent(refinedContent);
     if (originContent) setEditOriginalContent(originContent);
-    if (refinedTitle) setEditTitle(refinedTitle);
     setEditHasAiRefined(true);
   };
 
@@ -212,35 +211,6 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 </div>
               </div>
 
-              {/* 제목 수정 */}
-              <div className="form-group">
-                <div className="title-label-row">
-                  <label className="form-label" htmlFor="edit-title">
-                    질문 제목 <span className="req">*</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="btn-ai-assist-inline"
-                    onClick={() => setIsAiModalOpen(true)}
-                    title="제목과 본문을 학술 서식에 맞게 정제하기"
-                  >
-                    <PenTool size={12} />
-                    <span>표현 정제</span>
-                  </button>
-                </div>
-                <input
-                  id="edit-title"
-                  type="text"
-                  className={`input-text ${editHasAiRefined ? 'has-refined-border' : ''}`}
-                  value={editTitle}
-                  onChange={(e) => {
-                    setEditTitle(e.target.value);
-                    if (editHasAiRefined) setEditHasAiRefined(false);
-                  }}
-                  maxLength={120}
-                />
-              </div>
-
               {/* 본문 수정 & 문장 다듬기 버튼 */}
               <div className="form-group">
                 <div className="content-label-row">
@@ -253,7 +223,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     onClick={() => setIsAiModalOpen(true)}
                   >
                     <PenTool size={14} />
-                    <span>학술 문장 다듬기</span>
+                    <span>문장 다듬기</span>
                   </button>
                 </div>
 
@@ -271,7 +241,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 {editHasAiRefined && (
                   <div className="refined-status-hint">
                     <CheckCircle2 size={14} />
-                    <span>정제된 내용이 반영되었습니다. (작성 원문 보존)</span>
+                    <span>정제된 문장이 반영되었습니다.</span>
                   </div>
                 )}
               </div>
@@ -286,12 +256,12 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                     onChange={(e) => setEditIsAnonymous(e.target.checked)}
                   />
                   <span className="checkbox-text">
-                    <EyeOff size={16} /> 익명으로 표시하기
+                    익명으로 표시하기
                   </span>
                 </label>
                 {editCategory === 'grade' && (
                   <span className="anon-disabled-reason">
-                    ※ '성적' 카테고리는 익명으로 설정할 수 없습니다.
+                    성적 카테고리는 익명으로 설정할 수 없습니다.
                   </span>
                 )}
               </div>
@@ -310,8 +280,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                   className="btn btn-primary"
                   disabled={isSaving}
                 >
-                  <Save size={15} />
-                  <span>{isSaving ? '저장 중...' : '수정 완료하기'}</span>
+                  <span>{isSaving ? '저장 중...' : '저장'}</span>
                 </button>
               </div>
             </form>
@@ -319,7 +288,6 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
             <AiRefineModal
               isOpen={isAiModalOpen}
               onClose={() => setIsAiModalOpen(false)}
-              initialTitle={editTitle}
               initialText={editContent}
               category={editCategory}
               onApplyRefined={handleApplyAiInEdit}
@@ -379,27 +347,18 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                   ======================================================== */}
               {isMine && hasOriginalDiff && (
                 <div className="original-diff-box author-only-box">
-                  <div className="diff-privacy-tag">
-                    <Lock size={12} />
-                    <span>작성자 본인 전용 (교수님과 타 학생에게는 보이지 않습니다)</span>
-                  </div>
-
                   <button
                     type="button"
                     className="btn-toggle-original"
                     onClick={() => setShowOriginal(!showOriginal)}
                   >
                     <FileText size={14} />
-                    {showOriginal ? '작성 원문 접기' : '작성 원문 확인하기'}
+                    {showOriginal ? '원문 접기' : '작성 원문 보기 (본인만 열람)'}
                   </button>
 
                   {showOriginal && (
                     <div className="original-diff-content">
-                      <span className="diff-label">작성했던 원문:</span>
-                      <p className="diff-text">"{question.originalContent}"</p>
-                      <span className="diff-note">
-                        ※ 이 원문은 작성자 본인만 열람할 수 있습니다. 교수님과 다른 학생들에게는 표준 학술 서식으로 정제된 본문이 표시됩니다.
-                      </span>
+                      <p className="diff-text">{question.originalContent}</p>
                     </div>
                   )}
                 </div>
@@ -413,7 +372,6 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                       <Paperclip size={16} />
                       <span>첨부 파일 ({question.attachments.length})</span>
                     </div>
-                    <span className="security-tag">보안 검증 및 무결성 확인 완료</span>
                   </div>
 
                   <div className="detail-attachments-grid">
@@ -489,8 +447,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
           <div className="answers-list">
             {!question.answers || question.answers.length === 0 ? (
               <div className="no-answers-box">
-                <Clock size={24} />
-                <p>아직 등록된 답변이 없습니다. 교수님의 피드백을 기다리고 있습니다.</p>
+                <p>등록된 답변이 없습니다.</p>
               </div>
             ) : (
               question.answers.map((ans) => (

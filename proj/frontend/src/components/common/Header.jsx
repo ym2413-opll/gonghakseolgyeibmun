@@ -72,17 +72,9 @@ export default function Header({
   return (
     <header className="main-header">
       <div className="header-container">
-        {/* 좌측: 광운대학교 공식 학업 Q&A 센터 브랜딩 */}
         <div className="header-brand" onClick={onGoHome} role="button" tabIndex={0}>
-          <div className="brand-logo-icon">
-            <GraduationCap size={24} />
-          </div>
           <div className="brand-text">
-            <div className="brand-univ-tag">KWANGWOON UNIVERSITY</div>
-            <h1 className="brand-title">학업 Q&A 센터</h1>
-            <span className="brand-subtitle">
-              {isProfessor ? '2026학년도 2학기 교수자 질문관리 포털' : '2026학년도 2학기 학부생 학업 질답 시스템'}
-            </span>
+            <h1 className="brand-title">학업 Q&A</h1>
           </div>
         </div>
 
@@ -169,12 +161,12 @@ export default function Header({
                     </div>
                     <div className="card-sub-info">
                       <span>{currentUser?.department}</span>
-                      <span> · </span>
-                      <span>{isProfessor ? `교번 ${currentUser?.identifier || 'P2011'}` : `학번 ${currentUser?.studentId || currentUser?.identifier || '20261101'}`}</span>
-                    </div>
-                    <div className="card-login-status">
-                      <ShieldCheck size={12} className="status-shield-icon" />
-                      <span>통합정보시스템 본인인증 완료</span>
+                      {(currentUser?.studentId || currentUser?.identifier) && (
+                        <>
+                          <span> · </span>
+                          <span>{currentUser?.studentId || currentUser?.identifier}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -184,8 +176,7 @@ export default function Header({
                 {/* 2. 등록 계정 빠른 전환 목록 */}
                 <div className="account-switcher-section">
                   <div className="switcher-header">
-                    <UserCheck size={14} />
-                    <span>포털 등록 사용자 계정 전환</span>
+                    <span>계정 전환</span>
                   </div>
 
                   {/* 학부생 계정 그룹 */}
@@ -250,10 +241,9 @@ export default function Header({
                   <button
                     className="dropdown-footer-btn"
                     onClick={handleSyncData}
-                    title="로컬 저장소를 서버 초기 데이터와 동기화"
                   >
                     <RotateCcw size={13} />
-                    <span>데이터 동기화 및 캐시 새로고침</span>
+                    <span>초기화</span>
                   </button>
                 </div>
               </div>

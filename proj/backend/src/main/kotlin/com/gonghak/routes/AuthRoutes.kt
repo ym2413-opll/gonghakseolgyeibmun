@@ -9,9 +9,14 @@ import io.ktor.server.routing.*
 
 fun Route.authRoutes(userService: UserService) {
     route("/api/auth") {
-        // List demo accounts for exhibition
+        // List demo accounts for exhibition/demo role switcher (can be disabled in production via ENABLE_DEMO_USERS=false)
         get("/users") {
-            val users = userService.getAllDemoUsers()
+            val enableDemoUsers = System.getenv("ENABLE_DEMO_USERS")?.lowercase() != "false"
+            if (!enableDemoUsers) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = "프로덕션 환경에서는 계정 목록 조회가 비활성화되어 있습니다."))
+                return@get
+            }
+            val users = userService.getAllDemoUsers().map { it.copy(identifier = "") }
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = users))
         }
 

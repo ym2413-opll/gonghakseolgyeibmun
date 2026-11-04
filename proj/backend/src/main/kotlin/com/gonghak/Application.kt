@@ -76,7 +76,7 @@ fun Application.module() {
             call.application.environment.log.error("Unhandled exception: ${cause.message}", cause)
             call.respond(
                 HttpStatusCode.InternalServerError,
-                com.gonghak.dto.ErrorResponse(success = false, message = "서버 내부 오류가 발생했습니다: ${cause.message}")
+                com.gonghak.dto.ErrorResponse(success = false, message = "서버 내부 오류가 발생했습니다.")
             )
         }
     }
