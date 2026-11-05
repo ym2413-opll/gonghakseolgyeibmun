@@ -107,7 +107,6 @@ function MainApp() {
           onSelectQuestion={handleSelectQuestion}
           currentView={currentView}
           isMobile={isMobile}
-          onResetData={fetchQuestions}
         />
 
         <main className={`main-content-area ${isMobile ? 'mobile-main-content' : ''}`}>

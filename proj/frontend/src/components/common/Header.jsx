@@ -7,7 +7,6 @@ import { useTheme } from '../../context/ThemeContext';
 import { useNotifications } from '../../context/NotificationContext';
 import NotificationDropdown from '../shared/NotificationDropdown';
 import SettingsModal from '../shared/SettingsModal';
-import { api } from '../../services/api';
 import {
   GraduationCap,
   Bell,
@@ -19,7 +18,6 @@ import {
   Moon,
   ChevronDown,
   UserCheck,
-  RotateCcw,
   Check,
   ShieldCheck,
   BookOpen
@@ -30,8 +28,7 @@ export default function Header({
   onOpenNewQuestion,
   onSelectQuestion,
   currentView,
-  isMobile,
-  onResetData
+  isMobile
 }) {
   const { currentUser, presetUsers, switchUser, isProfessor } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -58,13 +55,6 @@ export default function Header({
     };
   }, [isUserMenuOpen]);
 
-  const handleSyncData = async () => {
-    if (window.confirm('로컬 캐시를 초기화하고 서버의 최신 학사 및 질답 데이터를 새로고침하시겠습니까?')) {
-      await api.resetToDefaults();
-      if (onResetData) await onResetData();
-      window.location.reload();
-    }
-  };
 
   const studentUsers = presetUsers.filter(u => u.role === 'student' || u.role === 'STUDENT');
   const profUsers = presetUsers.filter(u => u.role === 'professor' || u.role === 'PROFESSOR');
@@ -232,19 +222,6 @@ export default function Header({
                       );
                     })}
                   </div>
-                </div>
-
-                <div className="account-dropdown-divider" />
-
-                {/* 3. 데이터 동기화 액션 */}
-                <div className="dropdown-footer-actions">
-                  <button
-                    className="dropdown-footer-btn"
-                    onClick={handleSyncData}
-                  >
-                    <RotateCcw size={13} />
-                    <span>초기화</span>
-                  </button>
                 </div>
               </div>
             )}
