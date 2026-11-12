@@ -1,89 +1,120 @@
 // src/context/AuthContext.jsx
-// 광운대학교 학업 Q&A 센터 포털 사용자 인증 및 계정 관리 컨텍스트
-
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { PRESET_USERS } from '../services/mockData';
 import { api } from '../services/api';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
-export function AuthProvider({ children }) {
-  const [presetUsers, setPresetUsers] = useState(PRESET_USERS);
+export const AuthProvider = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState(() => api.getCurrentSessionUser());
+  const [departments, setDepartments] = useState([]);
+  const [allCourses, setAllCourses] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authModalMode, setAuthModalMode] = useState('login'); // 'login' | 'register'
 
-  const [currentUser, setCurrentUser] = useState(() => {
-    const savedId = localStorage.getItem('prof_qa_current_user_id');
-    const matched = PRESET_USERS.find(u => u.id === savedId);
-    return matched || PRESET_USERS[0];
-  });
-
-  // 백엔드 사용자 목록 및 최신 강좌 목록 비동기 동기화
-  const syncRemoteCourses = useCallback(async (user) => {
-    if (!user) return;
+  const refreshCatalog = useCallback(async () => {
     try {
-      const courses = await api.getCourses(user.id);
-      if (Array.isArray(courses) && courses.length > 0) {
-        setCurrentUser(prev => {
-          if (prev.id === user.id) {
-            return { ...prev, courses };
-          }
-          return prev;
-        });
-      }
+      const [deptList, courseList] = await Promise.all([
+        api.getDepartments(),
+        api.getAllCourses()
+      ]);
+      if (Array.isArray(deptList)) setDepartments(deptList);
+      if (Array.isArray(courseList)) setAllCourses(courseList);
     } catch (err) {
-      console.warn('Failed to sync remote courses', err);
+      console.error('Failed to load catalog:', err);
     }
   }, []);
 
-  useEffect(() => {
-    async function loadServerUsers() {
-      try {
-        const users = await api.getPresetUsers();
-        if (Array.isArray(users) && users.length > 0) {
-          setPresetUsers(users);
-          const savedId = localStorage.getItem('prof_qa_current_user_id');
-          const matched = users.find(u => u.id === savedId) || users[0];
-          setCurrentUser(matched);
-          syncRemoteCourses(matched);
+  const refreshCurrentUser = useCallback(async () => {
+    const sessionUser = api.getCurrentSessionUser();
+    if (!sessionUser?.id) {
+      setCurrentUser(null);
+      return null;
+    }
+    try {
+      const updated = await api.getUser(sessionUser.id);
+      if (updated) {
+        if (updated.isWithdrawn) {
+          api.logout();
+          setCurrentUser(null);
+          return null;
         }
-      } catch (err) {
-        console.warn('Failed to load server users', err);
+        setCurrentUser(updated);
+        return updated;
       }
+    } catch (err) {
+      console.warn('Session refresh warning:', err);
     }
-    loadServerUsers();
-  }, [syncRemoteCourses]);
+    return sessionUser;
+  }, []);
 
-  const switchUser = (userId) => {
-    const target = presetUsers.find(u => u.id === userId);
-    if (target) {
-      setCurrentUser(target);
-      localStorage.setItem('prof_qa_current_user_id', target.id);
-      syncRemoteCourses(target);
-    }
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      await refreshCatalog();
+      const sessionUser = api.getCurrentSessionUser();
+      if (sessionUser?.id && mounted) {
+        await refreshCurrentUser();
+      }
+      if (mounted) setIsLoading(false);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshCatalog, refreshCurrentUser]);
+
+  const login = async (username, password) => {
+    const result = await api.login(username, password);
+    setCurrentUser(result.user);
+    await refreshCatalog();
+    return result.user;
   };
 
-  const isProfessor = currentUser.role === 'PROFESSOR' || currentUser.role === 'professor';
-  const isStudent = currentUser.role === 'STUDENT' || currentUser.role === 'student';
+  const register = async (payload) => {
+    const result = await api.register(payload);
+    setCurrentUser(result.user);
+    await refreshCatalog();
+    return result.user;
+  };
+
+  const logout = () => {
+    api.logout();
+    setCurrentUser(null);
+  };
+
+  const isAuthenticated = Boolean(currentUser && currentUser.id && !currentUser.isWithdrawn);
+  const isStudent = isAuthenticated && currentUser?.role === 'student';
+  const isProfessor = isAuthenticated && currentUser?.role === 'professor';
+  const isAdmin = isAuthenticated && Boolean(currentUser?.isAdmin);
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
-        presetUsers,
-        switchUser,
-        isProfessor,
+        isAuthenticated,
         isStudent,
-        syncRemoteCourses
+        isProfessor,
+        isAdmin,
+        isLoading,
+        departments,
+        allCourses,
+        authModalMode,
+        setAuthModalMode,
+        login,
+        register,
+        logout,
+        refreshCatalog,
+        refreshCurrentUser
       }}
     >
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};

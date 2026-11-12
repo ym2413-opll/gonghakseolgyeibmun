@@ -6,81 +6,48 @@
 - **Ktor (v2.3.12, Netty)**: 백엔드 비동기 HTTP API 처리 및 Ktor Client(CIO) 외부 API 호출 담당.
   - **Exposed (v0.52.0)**: 백엔드에서의 데이터베이스와의 통신(ORM/DSL) 담당.
   - **HikariCP (v5.1.0)**: 데이터베이스 커넥션 풀(Connection Pool) 관리 (`maximumPoolSize = 10`, `TRANSACTION_REPEATABLE_READ`).
+- **암호화 및 보안 (`PasswordSecurity`)**:
+  - `PBKDF2WithHmacSHA256` (65,536회 반복 + `SecureRandom` 16바이트 솔트) 기반 비밀번호 단방향 해싱 및 `MessageDigest.isEqual` 상수 시간 검증.
+  - `HmacSHA256` 서명 기반 인증 토큰 발급 및 검증(`RouteUtils.getCurrentUserId()`).
+- **이메일 발송 및 콘솔 관리 (`EmailService`, `AdminConsoleManager`)**:
+  - 교수 질문 알림 이메일 발송(SMTP 연동 지원 + `EmailLogsTable` 영구 로깅).
+  - 서버 표준 입력(`stdin`) 데몬 스레드에서 `admin <id>`, `revoke-admin <id>`, `users`, `help` 명령어를 실시간 수신하여 관리자 권한 제어.
 - **PostgreSQL / H2**: 데이터베이스 (`DB_URL` 미지정 시 PostgreSQL 호환 모드의 인메모리 H2 자동 폴백).
-- **Kotlinx.serialization**: JSON 직렬화 및 역직렬화.
 - **Java AWT / ImageIO**: 서버 측 이미지 리사이징(최대 1920px), JPEG 0.82 재인코딩 압축 및 EXIF 제거.
 
-# 기반
-- **계정 단위로 작동함.**
-  - **모든 엔티티(계정, 강좌, 질문, 답변, 알림, 첨부파일)를 UUID (`UUIDTable`)로 부여하여 관리 (`X-User-Id` / `Bearer` 헤더 식별).**
-- **실제 학사 개설과목 시간표 데이터(`courses_data.json`) 자동 시딩 지원.**
-- **프로덕션 보안 제어**: `ENABLE_DEMO_USERS=false` 설정 시 데모 계정 목록 조회 API(`/api/auth/users`)를 차단(403 Forbidden).
+# 기반 (R3 스키마 확장)
+- **`UsersTable`**: `username` (고유 ID), `passwordHash` (`PBKDF2` 해시), `email`, `isAdmin`, `isWithdrawn` (탈퇴 여부), `questionBanUntil` (질문 제한 만료 시각), `answerBanUntil` (답변 제한 만료 시각) 컬럼 추가.
+- **`DepartmentsTable`**: 학과 정식 명칭(`name`), 약칭(`shortName`), 영문 코드(`code`) 동적 관리 테이블 추가.
+- **`QuestionsTable` & `AnswersTable`**: 관리자 게시물 가리기 상태 컬럼(`isHidden`) 추가.
+- **`ProfessorNotificationSettingsTable` & `EmailLogsTable`**: 교수 이메일 알림 활성화(`emailEnabled`), 수신 이메일 주소(`notificationEmail`), 이메일 발송 내역(`EmailLogsTable`) 추가.
 
 # 기능
-## 교수용
-### 질문 알림
-- 새 질문이 온 경우 `NotificationsTable`에 알림 저장.
-- 알림을 받지 않을 시간대(방해 금지 시간대, `Asia/Seoul` 기준)를 설정 가능.
-  - **프론트엔드에서 설정한 값을 DB(`ProfessorNotificationSettingsTable`)에 저장한 후, 해당 시간대 내 발생한 알림은 `isHeld = true`로 보류(큐잉)하고 시간 경과 후 조회 시 일괄 전달함.**
-- **같은 과목 다른 교수** 기능 알림도 받을지 설정 가능.
-  - **프론트엔드에서 설정한 값을 받아 해당 설정(`notifyOtherProfessorQuestions`)이 활성화된 동일 과목 교수에게만 강의 질문 알림을 생성함.**
+## 인증 및 전시용 회원가입 (`AuthRoutes`, `UserService`)
+- **`POST /api/auth/register`**:
+  - **학생 계정**: 학번(`identifier`), 학과(`department`), 이름(`name`), ID(`username`), 비밀번호(`password`)를 검증하고 학번·ID 중복 가입을 차단한 뒤 `PBKDF2` 해시로 저장 및 전체 개설 강좌 자동 수강 연결.
+  - **교수 계정**: 학과(`department`), 담당 과목(`courseIds` / `courseNames`), 이메일(`email`), 이름(`name`), ID(`username`), 비밀번호(`password`)를 검증하고 이메일·ID 중복 가입을 차단한 뒤 담당 강좌 및 이메일 알림 설정 자동 생성.
+- **`POST /api/auth/login`**:
+  - ID/비밀번호 상수 시간 해시 검증 및 탈퇴(`isWithdrawn`) 계정 로그인 차단(`403 Forbidden`).
 
-### 같은 과목 다른 교수
-- 특정한 과목을 강의하는 교수 모두가 해당 과목의 **강의** 카테고리 질문에 대해 답변 가능.
-- 질문자의 담당교수가 답변을 남긴 경우 다른 교수는 답변 불가능.
-  - **프론트엔드에서 질문 조회 시 담당 교수의 답변 존재 여부(`isAnsweredByAssignedProfessor`)와 현재 사용자의 답변 가능 여부(`canAnswer`)를 판별하여 응답하며, 답변 등록 시에도 권한을 재검증함.**
+## 관리 모드 (`AdminRoutes`, `AdminConsoleManager`)
+- **서버 터미널 콘솔 전용 관리자 권한 부여**:
+  - 브라우저·HTTP API(`POST /api/admin/console-grant`, `sanction` 내 권한 부여 등)를 통한 관리자 권한 부여는 완전히 차단되며, 오직 백엔드 서버 표준 입력 터미널 콘솔(`admin <id>`, `revoke-admin <id>`)에서만 권한을 부여/회수할 수 있습니다.
+  - 모든 관리자 HTTP 엔드포인트(`/api/admin/**`)는 HMAC-SHA256 서명 기반 `Authorization: Bearer <token>` 검증(`getVerifiedTokenUserId()`) 및 DB 관리자·탈퇴 여부 확인을 필수로 요구합니다.
+- **학과 및 과목 동적 추가**:
+  - `POST /api/admin/departments`, `POST /api/admin/courses` (관리자 권한 검증 필수).
+- **익명 질문의 실제 질문자 표시 (`QuestionService`)**:
+  - 조회 요청자가 관리자(`isAdmin == true`)인 경우 익명 질문에서도 `realStudentName`, `realStudentTag`, `realStudentIdentifier`에 실제 작성자 정보를 담아 반환 (일반 사용자에게는 `null`).
+- **질문 및 답변 가리기 (`PATCH /api/admin/questions/{id}/hide`, `PATCH /api/admin/answers/{id}/hide`)**:
+  - `isHidden = true` 설정 시 일반 사용자에게는 제목과 본문을 비표시 마스킹 문구로 치환하여 반환하고, 관리자에게는 원본과 가림 배지를 함께 반환.
+- **일반 계정 탈퇴 및 기간별 질문·답변 제한 (`POST /api/admin/users/{id}/sanction`)**:
+  - `WITHDRAW` / `RESTORE` (탈퇴 및 복구).
+  - `BAN_QUESTION` / `UNBAN_QUESTION` (`durationHours` / `durationDays` 기간을 받아 `questionBanUntil` 설정, 만료 전 질문 작성 시 `403 Forbidden` 차단).
+  - `BAN_ANSWER` / `UNBAN_ANSWER` (`durationHours` / `durationDays` 기간을 받아 `answerBanUntil` 설정, 만료 전 답변 작성 시 `403 Forbidden` 차단).
 
-### 카테고리별 질문 활성화/비활성화
-- 과목·카테고리별로 해당 카테고리로의 질문이 가능할지를 설정 가능.
-  - **프론트엔드에서 설정(`ProfessorCategorySettingsTable`)을 받아 저장하고, 질문 창 진입 시 활성화된 카테고리 상태를 응답하며 질문 생성 요청 시 비활성 카테고리는 차단함.**
+## 교수용 질문 알림 및 이메일 발송 (`NotificationService`, `EmailService`)
+- 학생이 질문을 등록하면 담당 교수(및 강의 카테고리의 동일 과목 교수)의 연동 이메일 주소(`notificationEmail` 또는 계정 `email`)로 질문 제목·카테고리·작성자·본문이 포함된 알림 이메일을 즉시 발송하고 `EmailLogsTable`에 기록(`GET /api/notifications/emails`로 조회 가능).
 
-## 학생용
-### 답변 알림
-- 답변이 등록된 경우 질문 작성 학생에게 알림 생성.
+## 학생용 및 공통 기능
+- **AI 질문 도우미 (`AiRefineService`)**, **유사 질답 보기 (`SimilarityService`)**, **파일·이미지 보안 첨부 (`AttachmentService`)**, **초록색조 테마(`green`)를 포함한 계정별 설정 저장 (`UserSettingRoutes`)** 지원.
 
-### 익명 질문
-- 질문자가 누구인지 다른 사람에게 표시되지 않음.
-  - ex. `26_소프트_서영민` -> `공학설계입문 수강생` (질문자 본인 조회 시 `(나)` 표기).
-  - **질문자 원본 UUID 정보를 받아 DB에 저장한 후, 조회 API 응답 시에만 익명 마스킹하여 반환함.**
-
-### 질문 제목 생략 및 본문 요약
-- 질문 생성 요청(`CreateQuestionRequest`)에서 `title` 필드를 선택 값(Nullable)으로 처리.
-  - **제목이 생략된 경우 본문 내용의 첫 문장 또는 최대 45자를 자동 요약(`generateSummaryTitle`)하여 저장·반환함.**
-
-### 파일 및 이미지 첨부 (`AttachmentService` / `AttachmentRoutes`)
-- 멀티파트 파일 업로드(`/api/attachments/upload`), 조회/다운로드(`/api/attachments/{id}`), 삭제 지원.
-  - **3단계 보안 검증(최대 10MB, 허용 확장자 화이트리스트·이중 확장자 차단, 바이너리 매직 바이트 검사, 경로 순회 방지 파일명 정제)을 수행함.**
-  - **이미지 파일은 최대 1920px 다운스케일링 및 JPEG 0.82 품질 재인코딩 압축(EXIF 제거) 후 저장하며, 질문 생성·수정 시 첨부파일 ID를 연결함.**
-
-### AI 질문 도우미
-- 학생이 입력한 질문 내용을 AI가 처리하여 말투나 표현 등을 교정·윤문.
-
-#### 구현
-- **Google Gemini API (`gemini-2.5-flash` 우선, `GEMINI_MODEL` 환경변수로 지정 가능, 실패 시 `gemini-2.0-flash` 순차 폴백)를 호출하여 프론트엔드에서 받은 원문을 정중한 대학 학술 문의체로 순화한 후 반환함.**
-- **API 키 미설정 또는 API 호출 오류 시 서버 내장 규칙 기반 윤문 폴백 엔진으로 중단 없이 처리함.**
-
-### 유사 질답 보기
-- 질문 시 기존에 질문과 답변이 이루어진 내용을 볼 수 있는 기능.
-
-#### 구현
-- **질문 등록 시 AI가 처리한 내용과 제목을 바탕으로 64차원 해시 투영 + 문자 2-gram 벡터를 사전 계산하여 DB(`vectorData`)에 저장함.**
-- **유사 질답 조회 시 한국어 학술 불용어(Stopwords)를 제거한 뒤 어휘 및 문자 2-gram 코사인 유사도(`computeTextSimilarity`)를 계산하여 유사도 25% 이상인 상위 질답 및 답변 목록으로 응답함.**
-
-### 질문 카테고리
-- 질문에 맞는 카테고리를 선택하여 카테고리별 기능을 사용 가능.
-- 질문 시 카테고리 선택은 필수, 1개만 가능.
-
-#### 카테고리
-- 성적: 채점 기준이나 이의제기 등. 익명으로 질문 불가능. **유사 질답 보기**, **같은 과목 다른 교수** 기능 사용 불가.
-- 과제: 과제 채점 기준이나 제출 형식 등. **같은 과목 다른 교수** 기능 사용 불가.
-- 강의: 강의 내용에 대한 질문. 사용 불가능한 기능 없음.
-
-## 공용
-### 테마
-- 글자 크기나 라이트/다크 테마 등 설정 가능.
-  - **프론트엔드와 `UserSettingsTable` 설정 값을 주고받아 계정별로 영구 저장 및 조회함.**
-
-### 전시용
-- 전시용 프로젝트이므로 사전에 설정된 학생/교수 계정 몇 개 중에 하나를 선택 가능하도록 데모 계정 목록(`/api/auth/users`)을 제공함 (`ENABLE_DEMO_USERS=false` 시 비활성화).
-
-<sub>r2p1 26. 11. 12. 19:29</sub>
+<sub>r3 26. 11. 12. 23:45</sub>

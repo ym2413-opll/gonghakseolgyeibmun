@@ -1,15 +1,44 @@
 package com.gonghak.routes
 
 import com.gonghak.dto.ApiResponse
+import com.gonghak.dto.LoginRequest
+import com.gonghak.dto.RegisterRequest
 import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
 fun Route.authRoutes(userService: UserService) {
     route("/api/auth") {
-        // List demo accounts for exhibition/demo role switcher (can be disabled in production via ENABLE_DEMO_USERS=false)
+        // Register new student or professor account
+        post("/register") {
+            val request = call.receive<RegisterRequest>()
+            try {
+                val authRes = userService.registerUser(request)
+                call.respond(HttpStatusCode.Created, ApiResponse(success = true, data = authRes, message = "회원가입이 완료되었습니다."))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
+        // Login with username and password
+        post("/login") {
+            val request = call.receive<LoginRequest>()
+            try {
+                val authRes = userService.loginUser(request)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = authRes, message = "로그인되었습니다."))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.Unauthorized, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
+        // List demo accounts (for legacy test compatibility)
         get("/users") {
             val enableDemoUsers = System.getenv("ENABLE_DEMO_USERS")?.lowercase() != "false"
             if (!enableDemoUsers) {

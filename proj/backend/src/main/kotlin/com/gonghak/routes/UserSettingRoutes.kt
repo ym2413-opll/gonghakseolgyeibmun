@@ -13,143 +13,111 @@ fun Route.userSettingRoutes(
     userService: UserService,
     notificationService: NotificationService
 ) {
-    // 1. Unified /api/settings endpoint for frontend integration
+    suspend fun buildUnifiedSettings(userId: java.util.UUID): UnifiedSettingDto {
+        val userSetting = userService.getUserSetting(userId)
+        val profSetting = notificationService.getProfessorNotificationSetting(userId)
+        val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
+
+        return UnifiedSettingDto(
+            userId = userId.toString(),
+            theme = if (userSetting.themeMode == "system") "light" else userSetting.themeMode,
+            themeMode = userSetting.themeMode,
+            fontSize = when (userSetting.fontSize) {
+                "small" -> "sm"
+                "large" -> "lg"
+                "xlarge" -> "xl"
+                else -> if (userSetting.fontSize in listOf("sm", "md", "lg", "xl")) userSetting.fontSize else "md"
+            },
+            dndEnabled = profSetting.quietHoursEnabled,
+            dndStartTime = profSetting.quietHoursStart,
+            dndEndTime = profSetting.quietHoursEnd,
+            coProfNotification = profSetting.notifyOtherProfessorQuestions,
+            emailEnabled = profSetting.emailEnabled,
+            notificationEmail = profSetting.notificationEmail,
+            activeCategories = categoriesMap
+        )
+    }
+
+    suspend fun applyUnifiedUpdate(userId: java.util.UUID, request: UpdateUnifiedSettingRequest): UnifiedSettingDto {
+        val mappedTheme = request.theme ?: request.themeMode
+        val mappedFont = request.fontSize
+        if (mappedTheme != null || mappedFont != null) {
+            userService.updateUserSetting(
+                userId,
+                UpdateUserSettingRequest(
+                    themeMode = mappedTheme,
+                    fontSize = mappedFont
+                )
+            )
+        }
+
+        if (request.dndEnabled != null ||
+            request.dndStartTime != null ||
+            request.dndEndTime != null ||
+            request.coProfNotification != null ||
+            request.emailEnabled != null ||
+            request.notificationEmail != null
+        ) {
+            notificationService.updateProfessorNotificationSetting(
+                userId,
+                UpdateProfessorNotificationSettingRequest(
+                    quietHoursEnabled = request.dndEnabled,
+                    quietHoursStart = request.dndStartTime,
+                    quietHoursEnd = request.dndEndTime,
+                    notifyOtherProfessorQuestions = request.coProfNotification,
+                    emailEnabled = request.emailEnabled,
+                    notificationEmail = request.notificationEmail
+                )
+            )
+        }
+
+        if (request.activeCategories != null) {
+            userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
+        }
+
+        return buildUnifiedSettings(userId)
+    }
+
     route("/api/settings") {
         get {
             val userId = call.getCurrentUserId()
-            val userSetting = userService.getUserSetting(userId)
-            val profSetting = notificationService.getProfessorNotificationSetting(userId)
-            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
-
-            val combined = UnifiedSettingDto(
-                userId = userId.toString(),
-                theme = if (userSetting.themeMode == "system") "light" else userSetting.themeMode,
-                themeMode = userSetting.themeMode,
-                fontSize = when (userSetting.fontSize) {
-                    "small" -> "sm"
-                    "large" -> "lg"
-                    "xlarge" -> "xl"
-                    else -> if (userSetting.fontSize in listOf("sm", "md", "lg", "xl")) userSetting.fontSize else "md"
-                },
-                dndEnabled = profSetting.quietHoursEnabled,
-                dndStartTime = profSetting.quietHoursStart,
-                dndEndTime = profSetting.quietHoursEnd,
-                coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = categoriesMap
-            )
-            call.respond(HttpStatusCode.OK, combined)
+            call.respond(HttpStatusCode.OK, buildUnifiedSettings(userId))
         }
 
         post {
             val request = call.receive<UpdateUnifiedSettingRequest>()
-            val userId = request.userId?.let { parseUserId(it) } ?: call.getCurrentUserId()
-
-            // Update user theme/font settings
-            val mappedTheme = request.theme ?: request.themeMode
-            val mappedFont = request.fontSize
-            if (mappedTheme != null || mappedFont != null) {
-                userService.updateUserSetting(
-                    userId,
-                    UpdateUserSettingRequest(
-                        themeMode = mappedTheme,
-                        fontSize = mappedFont
-                    )
-                )
+            val tokenUserId = call.getVerifiedTokenUserId()
+            val userId = tokenUserId
+                ?: (if (isDemoModeEnabled()) request.userId?.let { parseDemoUserIdOrNull(it) } else null)
+                ?: call.getCurrentUserId()
+            try {
+                val updated = applyUnifiedUpdate(userId, request)
+                call.respond(HttpStatusCode.OK, updated)
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }
-
-            // Update professor settings if provided
-            if (request.dndEnabled != null || request.dndStartTime != null || request.dndEndTime != null || request.coProfNotification != null) {
-                notificationService.updateProfessorNotificationSetting(
-                    userId,
-                    UpdateProfessorNotificationSettingRequest(
-                        quietHoursEnabled = request.dndEnabled,
-                        quietHoursStart = request.dndStartTime,
-                        quietHoursEnd = request.dndEndTime,
-                        notifyOtherProfessorQuestions = request.coProfNotification
-                    )
-                )
-            }
-
-            // Update category settings if provided
-            if (request.activeCategories != null) {
-                userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
-            }
-
-            val userSetting = userService.getUserSetting(userId)
-            val profSetting = notificationService.getProfessorNotificationSetting(userId)
-            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
-
-            val updated = UnifiedSettingDto(
-                userId = userId.toString(),
-                theme = if (userSetting.themeMode == "system") "light" else userSetting.themeMode,
-                themeMode = userSetting.themeMode,
-                fontSize = if (userSetting.fontSize in listOf("sm", "md", "lg", "xl")) userSetting.fontSize else "md",
-                dndEnabled = profSetting.quietHoursEnabled,
-                dndStartTime = profSetting.quietHoursStart,
-                dndEndTime = profSetting.quietHoursEnd,
-                coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = categoriesMap
-            )
-            call.respond(HttpStatusCode.OK, updated)
         }
 
         put {
             val request = call.receive<UpdateUnifiedSettingRequest>()
-            val userId = request.userId?.let { parseUserId(it) } ?: call.getCurrentUserId()
-
-            val mappedTheme = request.theme ?: request.themeMode
-            val mappedFont = request.fontSize
-            if (mappedTheme != null || mappedFont != null) {
-                userService.updateUserSetting(
-                    userId,
-                    UpdateUserSettingRequest(
-                        themeMode = mappedTheme,
-                        fontSize = mappedFont
-                    )
-                )
+            val tokenUserId = call.getVerifiedTokenUserId()
+            val userId = tokenUserId
+                ?: (if (isDemoModeEnabled()) request.userId?.let { parseDemoUserIdOrNull(it) } else null)
+                ?: call.getCurrentUserId()
+            try {
+                val updated = applyUnifiedUpdate(userId, request)
+                call.respond(HttpStatusCode.OK, updated)
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }
-
-            if (request.dndEnabled != null || request.dndStartTime != null || request.dndEndTime != null || request.coProfNotification != null) {
-                notificationService.updateProfessorNotificationSetting(
-                    userId,
-                    UpdateProfessorNotificationSettingRequest(
-                        quietHoursEnabled = request.dndEnabled,
-                        quietHoursStart = request.dndStartTime,
-                        quietHoursEnd = request.dndEndTime,
-                        notifyOtherProfessorQuestions = request.coProfNotification
-                    )
-                )
-            }
-
-            if (request.activeCategories != null) {
-                userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
-            }
-
-            val userSetting = userService.getUserSetting(userId)
-            val profSetting = notificationService.getProfessorNotificationSetting(userId)
-            val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
-
-            val updated = UnifiedSettingDto(
-                userId = userId.toString(),
-                theme = if (userSetting.themeMode == "system") "light" else userSetting.themeMode,
-                themeMode = userSetting.themeMode,
-                fontSize = if (userSetting.fontSize in listOf("sm", "md", "lg", "xl")) userSetting.fontSize else "md",
-                dndEnabled = profSetting.quietHoursEnabled,
-                dndStartTime = profSetting.quietHoursStart,
-                dndEndTime = profSetting.quietHoursEnd,
-                coProfNotification = profSetting.notifyOtherProfessorQuestions,
-                activeCategories = categoriesMap
-            )
-            call.respond(HttpStatusCode.OK, updated)
         }
     }
 
-    // 2. Original granular endpoints
     route("/api/user/settings") {
         get {
             val userId = call.getCurrentUserId()
-            val settings = userService.getUserSetting(userId)
-            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = settings))
+            val setting = userService.getUserSetting(userId)
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = setting))
         }
 
         put {
@@ -160,11 +128,11 @@ fun Route.userSettingRoutes(
         }
     }
 
-    route("/api/professor/settings") {
+    route("/api/professor/notification-settings") {
         get {
             val profId = call.getCurrentUserId()
-            val settings = notificationService.getProfessorNotificationSetting(profId)
-            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = settings))
+            val setting = notificationService.getProfessorNotificationSetting(profId)
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = setting))
         }
 
         put {

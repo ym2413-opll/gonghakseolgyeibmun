@@ -1,238 +1,301 @@
 // src/components/common/Header.jsx
-// 광운대학교 학업 Q&A 센터 공식 상단 헤더 및 계정 관리 유틸리티
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { useNotifications } from '../../context/NotificationContext';
-import NotificationDropdown from '../shared/NotificationDropdown';
-import SettingsModal from '../shared/SettingsModal';
+import { api } from '../../services/api';
 import {
-  GraduationCap,
   Bell,
   Settings,
-  Plus,
-  Monitor,
-  Smartphone,
   Sun,
   Moon,
-  ChevronDown,
-  UserCheck,
-  Check,
-  ShieldCheck,
-  BookOpen
+  Leaf,
+  GraduationCap,
+  BookOpen,
+  ShieldAlert,
+  Sliders,
+  CheckCheck,
+  LogIn,
+  UserPlus,
+  LogOut
 } from 'lucide-react';
 
-export default function Header({
-  onGoHome,
-  onOpenNewQuestion,
+const Header = ({
+  onOpenSettings,
+  onOpenProfSettings,
+  onOpenAdminModal,
   onSelectQuestion,
-  currentView,
-  isMobile
-}) {
-  const { currentUser, presetUsers, switchUser, isProfessor } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  const { unreadCount } = useNotifications();
+  refreshTrigger
+}) => {
+  const {
+    currentUser,
+    isAuthenticated,
+    isProfessor,
+    isAdmin,
+    logout,
+    setAuthModalMode
+  } = useAuth();
+  const { theme, toggleTheme, settings } = useTheme();
 
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
 
-  const userMenuRef = useRef(null);
+  const notifRef = useRef(null);
 
-  // 외부 클릭 시 사용자 메뉴 닫기
   useEffect(() => {
-    function handleClickOutside(e) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
-        setIsUserMenuOpen(false);
+    let mounted = true;
+    async function loadNotifs() {
+      if (!isAuthenticated || !currentUser?.id) {
+        if (mounted) setNotifications([]);
+        return;
+      }
+      const list = await api.getNotifications(currentUser.id);
+      if (mounted) setNotifications(list);
+    }
+    loadNotifs();
+    return () => {
+      mounted = false;
+    };
+  }, [isAuthenticated, currentUser?.id, refreshTrigger]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setShowNotifMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  const handleNotifClick = async (notif) => {
+    await api.markNotificationRead(notif.id, currentUser?.id);
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
+    );
+    setShowNotifMenu(false);
+    if (notif.questionId && onSelectQuestion) {
+      onSelectQuestion(notif.questionId);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    for (const n of notifications) {
+      if (!n.isRead) {
+        await api.markNotificationRead(n.id, currentUser?.id);
       }
     }
-    if (isUserMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isUserMenuOpen]);
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  };
 
+  const renderThemeIcon = () => {
+    if (theme === 'light') return <Leaf size={18} />;
+    if (theme === 'green') return <Moon size={18} />;
+    return <Sun size={18} />;
+  };
 
-  const studentUsers = presetUsers.filter(u => u.role === 'student' || u.role === 'STUDENT');
-  const profUsers = presetUsers.filter(u => u.role === 'professor' || u.role === 'PROFESSOR');
+  const themeTooltip =
+    theme === 'light'
+      ? '초록색조(눈 보호) 테마로 전환'
+      : theme === 'green'
+      ? '다크 모드로 전환'
+      : '라이트 모드로 전환';
 
   return (
-    <header className="main-header">
-      <div className="header-container">
-        <div className="header-brand" onClick={onGoHome} role="button" tabIndex={0}>
+    <header className="app-header">
+      <div className="header-inner">
+        {/* 좌측 브랜드 로고 */}
+        <div
+          className="brand-area"
+          onClick={() => onSelectQuestion && onSelectQuestion(null)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSelectQuestion && onSelectQuestion(null);
+          }}
+        >
+          <div className="brand-logo">
+            <GraduationCap size={24} />
+          </div>
           <div className="brand-text">
-            <h1 className="brand-title">학업 Q&A</h1>
+            <span className="brand-univ">KWANGWOON UNIVERSITY FORUM</span>
+            <h1 className="brand-title">광운 학업 Q&amp;A 포럼</h1>
           </div>
         </div>
 
-        {/* 우측 유틸리티 액션 */}
+        {/* 우측 컨트롤 바 */}
         <div className="header-actions">
-          {/* 학생 전용: 상단 질문 작성 버튼 (데스크톱 화면용) */}
-          {!isProfessor && (
+          {/* 관리자 모드 버튼 (관리자 권한 보유 시 표시) */}
+          {isAdmin && (
             <button
-              className="header-action-btn write-btn hide-on-mobile-strict"
-              onClick={onOpenNewQuestion}
+              type="button"
+              className="btn btn-danger btn-sm header-admin-btn"
+              onClick={onOpenAdminModal}
+              title="관리자 모드 (과목/학과 추가, 회원 제재, 익명 실명 열람, 게시물 가리기)"
             >
-              <Plus size={16} />
-              <span>질문하기</span>
+              <ShieldAlert size={16} />
+              <span className="hide-mobile">관리 모드</span>
             </button>
           )}
 
-          {/* 테마 간편 전환 버튼 */}
-          <button
-            className="header-icon-btn theme-toggle-btn"
-            onClick={toggleTheme}
-            title={`화면 테마 전환 (현재: ${theme === 'dark' ? '다크 모드' : '라이트 모드'})`}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
-          {/* 알림 버튼 & 드롭다운 */}
-          <div className="notif-wrapper">
+          {/* 교수 전용 알림·이메일·카테고리 설정 버튼 */}
+          {isProfessor && (
             <button
-              className={`header-icon-btn ${isNotifOpen ? 'active' : ''}`}
-              onClick={() => setIsNotifOpen(!isNotifOpen)}
-              title="학업 알림함"
+              type="button"
+              className="btn btn-outline btn-sm prof-setting-btn"
+              onClick={onOpenProfSettings}
+              title="교수용 질문 알림·이메일 및 카테고리 설정"
             >
-              <Bell size={19} />
-              {unreadCount > 0 && <span className="header-notif-dot">{unreadCount}</span>}
+              <Sliders size={16} />
+              <span className="hide-mobile">알림·이메일 설정</span>
+              {settings?.dndEnabled && (
+                <span className="dnd-badge">
+                  DND {settings.dndStartTime}~{settings.dndEndTime}
+                </span>
+              )}
             </button>
+          )}
 
-            <NotificationDropdown
-              isOpen={isNotifOpen}
-              onClose={() => setIsNotifOpen(false)}
-              onSelectQuestion={onSelectQuestion}
-            />
-          </div>
-
-          {/* 화면 설정 버튼 (글자 크기, 테마 상세) */}
+          {/* 빠른 테마 전환 버튼 (Light -> Green -> Dark) */}
           <button
-            className="header-icon-btn"
-            onClick={() => setIsSettingsOpen(true)}
-            title="화면 및 글자 크기 설정"
+            type="button"
+            className="btn-icon"
+            onClick={toggleTheme}
+            title={themeTooltip}
+            aria-label="테마 전환"
           >
-            <Settings size={19} />
+            {renderThemeIcon()}
           </button>
 
-          {/* 포털 로그인 프로필 칩 및 사용자 전환 드롭다운 */}
-          <div className="user-profile-menu-container" ref={userMenuRef}>
-            <div
-              className={`header-user-chip ${isUserMenuOpen ? 'active' : ''}`}
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              role="button"
-              tabIndex={0}
-              title="포털 계정 정보 및 사용자 전환"
-            >
-              <div className="chip-avatar">{currentUser?.avatar}</div>
-              <div className="chip-details hide-on-mobile-strict">
-                <span className="chip-name">{currentUser?.name}</span>
-                <span className="chip-role">
-                  {isProfessor ? `${currentUser?.department || ''} 교수` : `${currentUser?.department || '학생'}`}
-                </span>
-              </div>
-              <ChevronDown size={14} className={`chip-chevron ${isUserMenuOpen ? 'rotated' : ''}`} />
-            </div>
+          {/* 글자 크기 및 테마 상세 설정 모달 버튼 */}
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={onOpenSettings}
+            title="화면 테마 및 글자 크기 설정"
+            aria-label="화면 설정"
+          >
+            <Settings size={18} />
+          </button>
 
-            {/* 통합포털 계정 관리 드롭다운 메뉴 */}
-            {isUserMenuOpen && (
-              <div className="user-account-dropdown">
-                {/* 1. 현재 로그인 사용자 카드 */}
-                <div className="current-user-card">
-                  <div className="card-avatar-large">{currentUser?.avatar}</div>
-                  <div className="card-info">
-                    <div className="card-name-row">
-                      <span className="card-name">{currentUser?.name}</span>
-                      <span className={`card-role-badge ${isProfessor ? 'prof-badge' : 'student-badge'}`}>
-                        {isProfessor ? '교원' : '학부생'}
-                      </span>
+          {/* 로그인 상태일 때만 알림 드롭다운 및 프로필/로그아웃 표시 */}
+          {isAuthenticated ? (
+            <>
+              <div className="dropdown-wrapper" ref={notifRef}>
+                <button
+                  type="button"
+                  className="btn-icon notif-trigger"
+                  onClick={() => setShowNotifMenu((prev) => !prev)}
+                  title="알림 목록"
+                  aria-label="알림"
+                >
+                  <Bell size={18} />
+                  {unreadCount > 0 && (
+                    <span className="notif-count">{unreadCount}</span>
+                  )}
+                </button>
+
+                {showNotifMenu && (
+                  <div className="dropdown-menu notif-dropdown">
+                    <div className="dropdown-header">
+                      <span className="dropdown-title">알림 센터</span>
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          className="btn-text-xs"
+                          onClick={handleMarkAllRead}
+                        >
+                          <CheckCheck size={14} /> 모두 읽음
+                        </button>
+                      )}
                     </div>
-                    <div className="card-sub-info">
-                      <span>{currentUser?.department}</span>
-                      {(currentUser?.studentId || currentUser?.identifier) && (
-                        <>
-                          <span> · </span>
-                          <span>{currentUser?.studentId || currentUser?.identifier}</span>
-                        </>
+
+                    <div className="notif-list">
+                      {notifications.length === 0 ? (
+                        <div className="notif-empty">새로운 알림이 없습니다.</div>
+                      ) : (
+                        notifications.map((n) => (
+                          <div
+                            key={n.id}
+                            className={`notif-item ${!n.isRead ? 'unread' : ''}`}
+                            onClick={() => handleNotifClick(n)}
+                          >
+                            <div className="notif-item-header">
+                              <span className="notif-item-title">{n.title}</span>
+                              {!n.isRead && <span className="unread-dot" />}
+                            </div>
+                            <p className="notif-item-msg">{n.message}</p>
+                            <span className="notif-item-time">
+                              {new Date(n.createdAt).toLocaleString('ko-KR', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                        ))
                       )}
                     </div>
                   </div>
-                </div>
-
-                <div className="account-dropdown-divider" />
-
-                {/* 2. 등록 계정 빠른 전환 목록 */}
-                <div className="account-switcher-section">
-                  <div className="switcher-header">
-                    <span>계정 전환</span>
-                  </div>
-
-                  {/* 학부생 계정 그룹 */}
-                  <div className="account-group">
-                    <div className="group-title">학부생 (수강생)</div>
-                    {studentUsers.map((u) => {
-                      const isCurrent = u.id === currentUser?.id;
-                      return (
-                        <button
-                          key={u.id}
-                          className={`account-switch-item ${isCurrent ? 'selected' : ''}`}
-                          onClick={() => {
-                            switchUser(u.id);
-                            setIsUserMenuOpen(false);
-                          }}
-                        >
-                          <span className="switch-item-avatar">{u.avatar}</span>
-                          <div className="switch-item-details">
-                            <span className="switch-item-name">{u.name}</span>
-                            <span className="switch-item-meta">
-                              {u.department} · {u.studentId || u.identifier}
-                            </span>
-                          </div>
-                          {isCurrent && <Check size={15} className="switch-item-check" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* 교수자 계정 그룹 */}
-                  <div className="account-group">
-                    <div className="group-title">교원 (담당교수)</div>
-                    {profUsers.map((u) => {
-                      const isCurrent = u.id === currentUser?.id;
-                      return (
-                        <button
-                          key={u.id}
-                          className={`account-switch-item ${isCurrent ? 'selected' : ''}`}
-                          onClick={() => {
-                            switchUser(u.id);
-                            setIsUserMenuOpen(false);
-                          }}
-                        >
-                          <span className="switch-item-avatar">{u.avatar}</span>
-                          <div className="switch-item-details">
-                            <span className="switch-item-name">{u.name}</span>
-                            <span className="switch-item-meta">
-                              {u.department} · {u.displayTag || '교수'}
-                            </span>
-                          </div>
-                          {isCurrent && <Check size={15} className="switch-item-check" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                )}
               </div>
-            )}
-          </div>
+
+              <div className="auth-user-pill">
+                <div className={`user-avatar role-${currentUser.role}`}>
+                  {currentUser.avatar || currentUser.name?.charAt(0) || 'U'}
+                </div>
+                <div className="user-info-text hide-mobile">
+                  <span className="user-role-badge">
+                    {isProfessor ? (
+                      <>
+                        <BookOpen size={11} /> 교수
+                      </>
+                    ) : (
+                      <>
+                        <GraduationCap size={11} /> 학생
+                      </>
+                    )}
+                    {isAdmin && <strong className="admin-mini-tag"> · ADMIN</strong>}
+                  </span>
+                  <span className="user-display-tag">{currentUser.displayTag}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-xs logout-btn"
+                  onClick={logout}
+                  title="로그아웃"
+                >
+                  <LogOut size={14} />
+                  <span className="hide-mobile">로그아웃</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="header-guest-btns">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setAuthModalMode('login')}
+              >
+                <LogIn size={15} />
+                <span>로그인</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setAuthModalMode('register')}
+              >
+                <UserPlus size={15} />
+                <span className="hide-mobile">전시용 </span>회원가입
+              </button>
+            </div>
+          )}
         </div>
       </div>
-
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
     </header>
   );
-}
+};
+
+export default Header;

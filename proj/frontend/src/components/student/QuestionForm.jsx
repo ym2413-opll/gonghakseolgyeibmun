@@ -29,12 +29,12 @@ import {
 } from 'lucide-react';
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
-  const { currentUser } = useAuth();
+  const { currentUser, allCourses } = useAuth();
   const { profSettings } = useNotifications();
   const fileInputRef = useRef(null);
 
   // 학생의 수강 과목 목록
-  const studentCourses = currentUser?.courses || [];
+  const studentCourses = (currentUser?.courses?.length ? currentUser.courses : allCourses || []).slice(0, 12);
   const [selectedCourseId, setSelectedCourseId] = useState(studentCourses[0]?.id || '');
   const [selectedCategory, setSelectedCategory] = useState('lecture');
   const [content, setContent] = useState('');
@@ -275,7 +275,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
       if (onQuestionCreated) onQuestionCreated(created);
     } catch (err) {
       console.error('Failed to submit question', err);
-      setErrorMsg('질문 등록 중 오류가 발생했습니다.');
+      setErrorMsg(err.message || '질문 등록 중 오류가 발생했습니다.');
     } finally {
       setIsSubmitting(false);
     }

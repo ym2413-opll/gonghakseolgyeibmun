@@ -5,12 +5,26 @@ import org.jetbrains.exposed.sql.javatime.timestamp
 import java.time.Instant
 
 object UsersTable : UUIDTable("users") {
+    val username = varchar("username", 100).nullable().uniqueIndex()
+    val passwordHash = varchar("password_hash", 255).nullable()
+    val email = varchar("email", 150).nullable()
     val name = varchar("name", 100)
-    val role = varchar("role", 20) // STUDENT, PROFESSOR
+    val role = varchar("role", 20) // STUDENT, PROFESSOR, ADMIN
     val identifier = varchar("identifier", 50) // 학번 또는 교번
     val department = varchar("department", 100)
     val displayTag = varchar("display_tag", 100)
     val isDemo = bool("is_demo").default(false)
+    val isAdmin = bool("is_admin").default(false)
+    val isWithdrawn = bool("is_withdrawn").default(false)
+    val questionBanUntil = timestamp("question_ban_until").nullable()
+    val answerBanUntil = timestamp("answer_ban_until").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}
+
+object DepartmentsTable : UUIDTable("departments") {
+    val name = varchar("name", 100).uniqueIndex()
+    val college = varchar("college", 100).default("")
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
 object CoursesTable : UUIDTable("courses") {
@@ -50,12 +64,14 @@ object ProfessorNotificationSettingsTable : UUIDTable("professor_notification_se
     val quietHoursStart = varchar("quiet_hours_start", 10).default("22:00")
     val quietHoursEnd = varchar("quiet_hours_end", 10).default("08:00")
     val notifyOtherProfessorQuestions = bool("notify_other_professor_questions").default(false)
+    val emailEnabled = bool("email_enabled").default(true)
+    val notificationEmail = varchar("notification_email", 150).nullable()
 }
 
 object UserSettingsTable : UUIDTable("user_settings") {
     val userId = uuid("user_id").references(UsersTable.id).uniqueIndex()
-    val themeMode = varchar("theme_mode", 20).default("system") // light, dark, system
-    val fontSize = varchar("font_size", 20).default("medium") // small, medium, large
+    val themeMode = varchar("theme_mode", 20).default("light") // light, dark, green, system
+    val fontSize = varchar("font_size", 20).default("md") // sm, md, lg, xl
 }
 
 object QuestionsTable : UUIDTable("questions") {
@@ -67,6 +83,7 @@ object QuestionsTable : UUIDTable("questions") {
     val rawContent = text("raw_content")
     val refinedContent = text("refined_content")
     val isAnonymous = bool("is_anonymous").default(false)
+    val isHidden = bool("is_hidden").default(false)
     val vectorData = text("vector_data").default("[]")
     val status = varchar("status", 20).default(QuestionStatus.OPEN.name)
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
@@ -77,6 +94,7 @@ object AnswersTable : UUIDTable("answers") {
     val professorId = uuid("professor_id").references(UsersTable.id)
     val content = text("content")
     val isAssignedProfessor = bool("is_assigned_professor").default(false)
+    val isHidden = bool("is_hidden").default(false)
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -103,5 +121,15 @@ object AttachmentsTable : UUIDTable("attachments") {
     val isImage = bool("is_image").default(false)
     val isCompressed = bool("is_compressed").default(false)
     val compressionRatio = double("compression_ratio").default(0.0)
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}
+
+object EmailLogsTable : UUIDTable("email_logs") {
+    val recipientEmail = varchar("recipient_email", 150)
+    val professorId = uuid("professor_id").nullable()
+    val questionId = uuid("question_id").nullable()
+    val subject = varchar("subject", 255)
+    val body = text("body")
+    val status = varchar("status", 50).default("SENT")
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }

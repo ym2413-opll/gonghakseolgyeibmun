@@ -4197,3 +4197,1310 @@ input:checked + .slider:before {
   color: var(--text-secondary, #64748b);
   font-weight: normal;
 }
+
+
+/* ============================================================================
+   R3 OVERHAUL STYLES:
+   1) 비로그인 블러 게이트 & 회원가입/로그인 오버레이
+   2) 서양식 포럼 (Western-Style Forum: Topic Board + Chronological Post Stream)
+   3) 눈이 편한 초록색조 테마 (Green Theme) 카드/프리뷰
+   4) 관리 모드 (Admin Control Center)
+   5) 3단계 반응형 레이아웃 (Desktop / Tablet+Landscape+ZFold / Smartphone)
+   ============================================================================ */
+
+/* --- Header R3 Extensions --- */
+.app-header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 120;
+  box-shadow: var(--shadow-sm);
+}
+
+.header-inner {
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brand-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brand-univ {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.header-guest-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-user-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 4px 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.user-info-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.user-role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.user-display-tag {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.admin-mini-tag {
+  color: var(--danger-color);
+  font-weight: 800;
+}
+
+.header-admin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #dc2626;
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.header-admin-btn:hover {
+  background: #b91c1c;
+}
+
+.logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+/* --- 1. 비로그인 블러 영역 & 인증 유도 오버레이 (AuthGateOverlay) --- */
+.forum-stage-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 68px);
+}
+
+.forum-main-stage {
+  flex: 1;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+.forum-main-stage.is-blurred-locked {
+  filter: blur(9px) saturate(0.85);
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  max-height: calc(100vh - 72px);
+  opacity: 0.52;
+}
+
+.auth-gate-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px 64px;
+  background: rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(3px);
+  overflow-y: auto;
+}
+
+.auth-gate-card {
+  width: 100%;
+  max-width: 640px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: 28px;
+  color: var(--text-primary);
+}
+
+.auth-gate-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 18px;
+}
+
+.auth-gate-lock-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.auth-gate-kicker {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.auth-gate-heading {
+  font-size: 1.25rem;
+  font-weight: 800;
+  margin: 2px 0 6px;
+  color: var(--text-primary);
+}
+
+.auth-gate-desc {
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.auth-gate-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: var(--bg-card-subtle);
+  padding: 5px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  margin-bottom: 18px;
+}
+
+.auth-gate-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.auth-gate-tab.active {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-sm);
+}
+
+.auth-gate-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.auth-gate-alert.error {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+  border: 1px solid var(--danger-color);
+}
+
+.auth-gate-alert.success {
+  background: var(--success-bg);
+  color: var(--success-color);
+  border: 1px solid var(--success-color);
+}
+
+.auth-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.role-selector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.role-select-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.role-select-card.active {
+  border-color: var(--primary-color);
+  background: var(--primary-light);
+}
+
+.role-select-title {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.role-select-sub {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+}
+
+.course-checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 145px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+}
+
+.course-checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.course-checkbox-pill.checked {
+  border-color: var(--primary-color);
+  background: var(--primary-light);
+  color: var(--text-primary);
+}
+
+.auth-security-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px dashed var(--border-color);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.auth-submit-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 12px 18px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.auth-gate-switch-prompt {
+  text-align: center;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.auth-link-btn {
+  font-weight: 700;
+  color: var(--primary-color);
+  text-decoration: underline;
+}
+
+.auth-console-hint {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.auth-console-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+/* --- 2. 서양식 포럼 (Western-Style Forum: Topic Board + Thread Post Stream) --- */
+.forum-desktop-split {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.15fr) minmax(440px, 0.95fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.forum-split-right {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
+}
+
+.forum-board-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.forum-board-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.forum-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.forum-hero-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--primary-light);
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.forum-board-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.forum-board-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.btn-new-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 서양식 포럼 토픽 테이블 헤더 */
+.forum-table-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 120px 135px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.forum-topic-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.forum-topic-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 120px 135px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.forum-topic-row:last-child {
+  border-bottom: none;
+}
+
+.forum-topic-row:hover {
+  background: var(--bg-hover);
+}
+
+.forum-topic-row.selected {
+  background: var(--primary-light);
+  border-left: 4px solid var(--primary-color);
+}
+
+.forum-topic-row.is-hidden-topic {
+  opacity: 0.65;
+  background: var(--danger-bg);
+}
+
+.forum-topic-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.forum-topic-status-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.forum-topic-status-icon.solved {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.forum-topic-status-icon.open {
+  background: var(--bg-card-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.forum-topic-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.forum-topic-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.forum-course-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.forum-topic-title {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.forum-topic-excerpt {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+
+.forum-topic-submeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.anon-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  font-size: 0.68rem;
+}
+
+.admin-real-author-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.btn-admin-inline-hide {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--danger-color);
+}
+
+.btn-admin-inline-hide:hover {
+  background: var(--danger-bg);
+}
+
+.forum-avatar-stack {
+  display: flex;
+  align-items: center;
+}
+
+.forum-mini-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -6px;
+}
+
+.forum-mini-avatar:first-child {
+  margin-left: 0;
+}
+
+.forum-mini-avatar.role-professor {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.forum-mini-avatar.role-assigned-pending {
+  background: var(--bg-card-subtle);
+  color: var(--text-muted);
+  border-color: var(--border-color);
+}
+
+.forum-topic-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.forum-stat-replies,
+.forum-stat-posts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+}
+
+.stat-num {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.forum-stat-replies.has-replies .stat-num {
+  color: var(--success-color);
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.forum-topic-activity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.forum-status-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.forum-status-chip.answered {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.forum-status-chip.pending {
+  background: var(--warning-bg);
+  color: var(--warning-color);
+}
+
+.forum-activity-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* --- 서양식 포럼 상세 스레드 (Chronological Thread Stream) --- */
+.forum-thread-view {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.forum-thread-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.forum-thread-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.forum-thread-title-box {
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.detail-badges-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.forum-thread-h2 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.forum-post-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.forum-post-card {
+  display: grid;
+  grid-template-columns: 155px minmax(0, 1fr);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.forum-post-card.op-post {
+  border-width: 1.5px;
+  border-color: var(--primary-border);
+}
+
+.forum-post-card.primary-prof-post {
+  border-left: 4px solid var(--success-color);
+}
+
+.forum-post-card.post-hidden-state {
+  opacity: 0.75;
+  border-color: var(--danger-color);
+}
+
+.forum-post-sidebar {
+  background: var(--bg-card-subtle);
+  border-right: 1px solid var(--border-color);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.forum-post-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.05rem;
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+.forum-post-avatar.professor {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.forum-post-author-name {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.forum-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.forum-role-tag.solution {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.forum-post-body-col {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.forum-post-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.post-index-badge {
+  font-weight: 800;
+  font-size: 0.74rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  color: var(--text-secondary);
+}
+
+.forum-post-text {
+  font-size: 0.94rem;
+  color: var(--text-primary);
+  line-height: 1.68;
+  word-break: break-word;
+}
+
+.forum-stream-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 4px 0;
+}
+
+.forum-stream-divider::before,
+.forum-stream-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+/* --- 3. 초록색조 테마 프리뷰 및 3열 테마 그리드 --- */
+.theme-selector-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.green-preview {
+  background: #eaf2ec;
+  color: #1f6e43;
+  border: 1px solid #9ec4ad;
+}
+
+/* --- 4. 관리자 모달 (AdminModal) --- */
+.modal-xl {
+  max-width: 1040px;
+  width: 95%;
+}
+
+.admin-sub-badge {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.admin-tabs-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--bg-card-subtle);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+
+.admin-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.admin-tab-btn.active {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+.admin-catalog-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.admin-panel-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--bg-card-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.admin-compact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-chip-list-wrap {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.admin-chip-header {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.admin-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-dept-chip {
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.admin-sanction-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  margin-bottom: 12px;
+  font-size: 0.84rem;
+}
+
+.admin-duration-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.admin-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.admin-data-table th,
+.admin-data-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-data-table th {
+  background: var(--bg-card-subtle);
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.row-withdrawn {
+  opacity: 0.62;
+  background: var(--danger-bg);
+}
+
+.admin-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-inline-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #dc2626;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.status-pill.success {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.status-pill.warning {
+  background: var(--warning-bg);
+  color: var(--warning-color);
+}
+
+.status-pill.danger {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+}
+
+.admin-email-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 290px;
+  overflow-y: auto;
+}
+
+.admin-email-log-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  font-size: 0.8rem;
+}
+
+.admin-email-log-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.admin-email-log-subject {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.email-log-mini-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.email-log-mini-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.74rem;
+  padding: 2px 0;
+}
+
+/* ============================================================================
+   5. 3단계 반응형 미디어 쿼리
+      - Desktop (>= 1025px)
+      - Tablet + Smartphone Landscape + Galaxy Z Fold (641px ~ 1024px)
+      - Smartphone Portrait (<= 640px)
+   ============================================================================ */
+
+/* 태블릿 + 스마트폰 가로모드 + Galaxy Z Fold 시리즈 (641px ~ 1024px) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .header-inner {
+    padding: 10px 16px;
+  }
+
+  .forum-main-stage {
+    padding: 16px 16px 36px;
+  }
+
+  .forum-table-header,
+  .forum-topic-row {
+    grid-template-columns: minmax(0, 1fr) 86px 96px 115px;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .forum-post-card {
+    grid-template-columns: 128px minmax(0, 1fr);
+  }
+
+  .admin-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-selector-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* 스마트폰 세로모드 (<= 640px) */
+@media (max-width: 640px) {
+  .hide-mobile {
+    display: none !important;
+  }
+
+  .header-inner {
+    padding: 10px 12px;
+  }
+
+  .brand-title {
+    font-size: 1rem;
+  }
+
+  .forum-main-stage {
+    padding: 12px 10px 84px;
+  }
+
+  .forum-board-hero {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px;
+  }
+
+  .btn-new-topic {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .forum-table-header {
+    display: none;
+  }
+
+  .forum-topic-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .forum-topic-participants {
+    display: none;
+  }
+
+  .forum-topic-stats {
+    justify-content: flex-start;
+  }
+
+  .forum-topic-activity {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-color);
+  }
+
+  .forum-post-card {
+    grid-template-columns: 1fr;
+  }
+
+  .forum-post-sidebar {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    padding: 10px 14px;
+  }
+
+  .forum-post-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 0.9rem;
+  }
+
+  .auth-gate-card {
+    padding: 18px 14px;
+  }
+
+  .auth-form-grid-2,
+  .role-selector-grid,
+  .theme-selector-grid-3,
+  .admin-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+}

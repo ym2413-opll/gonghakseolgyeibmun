@@ -26,14 +26,46 @@ data class UserDto(
     val identifier: String,
     val department: String,
     val displayTag: String,
-    val isDemo: Boolean
+    val isDemo: Boolean = false,
+    val username: String? = null,
+    val email: String? = null,
+    val isAdmin: Boolean = false,
+    val isWithdrawn: Boolean = false,
+    val questionBanUntil: String? = null,
+    val answerBanUntil: String? = null,
+    val courses: List<CourseDto> = emptyList()
+)
+
+@Serializable
+data class RegisterRequest(
+    val role: UserRole = UserRole.STUDENT,
+    val username: String,
+    val password: String,
+    val name: String? = null,
+    val department: String,
+    val identifier: String? = null, // 학생 학번 또는 교번
+    val email: String? = null,      // 교수 이메일
+    val courseIds: List<String> = emptyList(),
+    val courseNames: List<String> = emptyList()
+)
+
+@Serializable
+data class LoginRequest(
+    val username: String,
+    val password: String
+)
+
+@Serializable
+data class AuthResponse(
+    val token: String,
+    val user: UserDto
 )
 
 @Serializable
 data class UserSettingDto(
     val userId: String,
-    val themeMode: String, // light, dark, system
-    val fontSize: String   // small, medium, large
+    val themeMode: String, // light, dark, green, system
+    val fontSize: String   // sm, md, lg, xl
 )
 
 @Serializable
@@ -48,7 +80,9 @@ data class ProfessorNotificationSettingDto(
     val quietHoursEnabled: Boolean,
     val quietHoursStart: String,
     val quietHoursEnd: String,
-    val notifyOtherProfessorQuestions: Boolean
+    val notifyOtherProfessorQuestions: Boolean,
+    val emailEnabled: Boolean = true,
+    val notificationEmail: String? = null
 )
 
 @Serializable
@@ -56,7 +90,9 @@ data class UpdateProfessorNotificationSettingRequest(
     val quietHoursEnabled: Boolean? = null,
     val quietHoursStart: String? = null,
     val quietHoursEnd: String? = null,
-    val notifyOtherProfessorQuestions: Boolean? = null
+    val notifyOtherProfessorQuestions: Boolean? = null,
+    val emailEnabled: Boolean? = null,
+    val notificationEmail: String? = null
 )
 
 @Serializable
@@ -69,6 +105,8 @@ data class UnifiedSettingDto(
     val dndStartTime: String = "22:00",
     val dndEndTime: String = "08:00",
     val coProfNotification: Boolean = true,
+    val emailEnabled: Boolean = true,
+    val notificationEmail: String? = null,
     val activeCategories: Map<String, Boolean> = mapOf("grade" to true, "assignment" to true, "lecture" to true)
 )
 
@@ -82,6 +120,8 @@ data class UpdateUnifiedSettingRequest(
     val dndStartTime: String? = null,
     val dndEndTime: String? = null,
     val coProfNotification: Boolean? = null,
+    val emailEnabled: Boolean? = null,
+    val notificationEmail: String? = null,
     val activeCategories: Map<String, Boolean>? = null
 )
 
@@ -123,6 +163,35 @@ data class CourseDto(
 )
 
 @Serializable
+data class DepartmentDto(
+    val id: String,
+    val name: String,
+    val college: String = "",
+    val createdAt: String = ""
+)
+
+@Serializable
+data class CreateDepartmentRequest(
+    val name: String,
+    val college: String = ""
+)
+
+@Serializable
+data class CreateCourseRequest(
+    val name: String,
+    val code: String = "",
+    val semester: String = "2026-2",
+    val college: String = "",
+    val department: String = "",
+    val major: String = "",
+    val completionType: String = "전선",
+    val credit: Int = 3,
+    val professorId: String? = null,
+    val section: String = "01분반",
+    val schedule: String = ""
+)
+
+@Serializable
 data class CourseListResponse(
     val total: Long,
     val page: Int,
@@ -137,7 +206,8 @@ data class CourseSummaryDto(
     val totalCourses: Long,
     val totalSections: Long,
     val totalProfessors: Long,
-    val colleges: List<String> = emptyList()
+    val colleges: List<String> = emptyList(),
+    val departments: List<String> = emptyList()
 )
 
 @Serializable
@@ -279,7 +349,8 @@ data class AnswerDto(
     val authorId: String = professorId,
     val authorName: String = professorName,
     val authorTitle: String = if (isAssignedProfessor) "담당교수" else "같은 과목 교수 (공동 답변)",
-    val isPrimaryProf: Boolean = isAssignedProfessor
+    val isPrimaryProf: Boolean = isAssignedProfessor,
+    val isHidden: Boolean = false
 )
 
 @Serializable
@@ -303,6 +374,11 @@ data class QuestionListItemDto(
     val studentId: String? = null,
     val studentTag: String? = null,
     val studentName: String? = null,
+    val realStudentId: String? = null,
+    val realStudentName: String? = null,
+    val realStudentTag: String? = null,
+    val realStudentIdentifier: String? = null,
+    val isHidden: Boolean = false,
     val answers: List<AnswerDto> = emptyList(),
     val attachmentCount: Int = 0,
     val attachments: List<AttachmentDto> = emptyList()
@@ -333,6 +409,11 @@ data class QuestionDetailDto(
     val studentId: String? = null,
     val studentTag: String? = null,
     val studentName: String? = null,
+    val realStudentId: String? = null,
+    val realStudentName: String? = null,
+    val realStudentTag: String? = null,
+    val realStudentIdentifier: String? = null,
+    val isHidden: Boolean = false,
     val attachments: List<AttachmentDto> = emptyList()
 )
 
@@ -410,4 +491,35 @@ data class FileUploadResponse(
     val success: Boolean = true,
     val attachment: AttachmentDto,
     val message: String? = null
+)
+
+@Serializable
+data class ToggleHideRequest(
+    val isHidden: Boolean
+)
+
+@Serializable
+data class UserSanctionRequest(
+    val action: String, // WITHDRAW, RESTORE, BAN_QUESTION, UNBAN_QUESTION, BAN_ANSWER, UNBAN_ANSWER
+    val durationDays: Int? = null,
+    val durationHours: Int? = null,
+    val until: String? = null
+)
+
+@Serializable
+data class ConsoleAdminRequest(
+    val username: String,
+    val grant: Boolean = true
+)
+
+@Serializable
+data class EmailLogDto(
+    val id: String,
+    val recipientEmail: String,
+    val professorId: String? = null,
+    val questionId: String? = null,
+    val subject: String,
+    val body: String,
+    val status: String,
+    val createdAt: String
 )

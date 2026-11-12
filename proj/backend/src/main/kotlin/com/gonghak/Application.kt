@@ -27,12 +27,16 @@ fun Application.module() {
 
     // 2. Services
     val similarityService = SimilarityService()
-    val notificationService = NotificationService()
+    val emailService = EmailService()
+    val notificationService = NotificationService(emailService)
     val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
     val aiRefineService = AiRefineService(geminiApiKey)
     val userService = UserService()
     val attachmentService = AttachmentService()
     val questionService = QuestionService(similarityService, notificationService, aiRefineService)
+
+    // Start interactive server console listener for admin grant commands (`admin <id>`)
+    AdminConsoleManager.startConsoleListener(userService)
 
     // 3. Plugins
     install(ContentNegotiation) {
@@ -57,6 +61,12 @@ fun Application.module() {
 
     install(CallLogging) {
         level = Level.INFO
+    }
+
+    intercept(ApplicationCallPipeline.Plugins) {
+        call.response.header("X-Content-Type-Options", "nosniff")
+        call.response.header("X-Frame-Options", "DENY")
+        call.response.header("Referrer-Policy", "strict-origin-when-cross-origin")
     }
 
     install(StatusPages) {
@@ -86,25 +96,25 @@ fun Application.module() {
         get("/") {
             call.respondText(
                 """
-                |=== 교수질문센터 백엔드 API 서버 (Ktor + Exposed) ===
+                |=== 교수질문센터 학업 포럼 백엔드 API 서버 (Ktor + Exposed, r3) ===
                 |API 엔드포인트:
-                | - GET  /api/auth/users
+                | - POST /api/auth/register
+                | - POST /api/auth/login
                 | - GET  /api/auth/me
-                | - GET  /api/user/settings
-                | - PUT  /api/user/settings
-                | - GET  /api/professor/settings
-                | - PUT  /api/professor/settings
+                | - GET  /api/departments
                 | - GET  /api/courses
-                | - GET  /api/courses/{courseId}/categories
-                | - PUT  /api/courses/{courseId}/categories
-                | - POST /api/ai/refine
+                | - GET  /api/admin/users
+                | - POST /api/admin/users/{id}/sanction
+                | - POST /api/admin/departments
+                | - POST /api/admin/courses
+                | - PATCH /api/admin/questions/{id}/hide
+                | - PATCH /api/admin/answers/{id}/hide
                 | - GET  /api/questions
                 | - POST /api/questions
-                | - GET  /api/questions/similar
                 | - GET  /api/questions/{id}
                 | - POST /api/questions/{id}/answers
                 | - GET  /api/notifications
-                | - POST /api/notifications/{id}/read
+                | - GET  /api/notifications/emails
                 """.trimMargin(),
                 ContentType.Text.Plain.withCharset(Charsets.UTF_8)
             )
@@ -115,7 +125,8 @@ fun Application.module() {
         courseRoutes(userService)
         aiRoutes(aiRefineService)
         questionRoutes(questionService)
-        notificationRoutes(notificationService)
+        notificationRoutes(notificationService, emailService, userService)
         attachmentRoutes(attachmentService)
+        adminRoutes(userService, questionService, emailService)
     }
 }

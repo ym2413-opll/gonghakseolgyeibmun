@@ -115,9 +115,11 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
 
             val (dto, file) = pair
             val encodedName = URLEncoder.encode(dto.originalName, StandardCharsets.UTF_8.toString()).replace("+", "%20")
+            val dispositionType = if (dto.isImage) "inline" else "attachment"
 
-            call.response.header(HttpHeaders.ContentDisposition, "inline; filename=\"$encodedName\"; filename*=UTF-8''$encodedName")
+            call.response.header(HttpHeaders.ContentDisposition, "$dispositionType; filename=\"$encodedName\"; filename*=UTF-8''$encodedName")
             call.response.header("X-Content-Type-Options", "nosniff")
+            call.response.header("Content-Security-Policy", "sandbox")
             call.respondFile(file)
         }
 

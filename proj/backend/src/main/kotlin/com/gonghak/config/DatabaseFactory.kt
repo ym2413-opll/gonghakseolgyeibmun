@@ -27,8 +27,9 @@ object DatabaseFactory {
         Database.connect(pool)
 
         transaction {
-            SchemaUtils.create(
+            val tables = arrayOf(
                 UsersTable,
+                DepartmentsTable,
                 CoursesTable,
                 CourseProfessorsTable,
                 EnrollmentsTable,
@@ -38,8 +39,16 @@ object DatabaseFactory {
                 QuestionsTable,
                 AnswersTable,
                 NotificationsTable,
-                AttachmentsTable
+                AttachmentsTable,
+                EmailLogsTable
             )
+            SchemaUtils.create(*tables)
+            runCatching {
+                SchemaUtils.createMissingTablesAndColumns(*tables)
+            }.onFailure {
+                logger.warn("createMissingTablesAndColumns warning: ${it.message}")
+            }
+            seedDefaultDepartments()
             seedConvertedCoursesData()
             seedDemoData()
         }
@@ -86,6 +95,34 @@ object DatabaseFactory {
     suspend fun <T> dbQuery(block: suspend () -> T): T =
         newSuspendedTransaction(Dispatchers.IO) { block() }
 
+    private fun seedDefaultDepartments() {
+        val initialDepartments = listOf(
+            "소프트웨어학과" to "인공지능융합대학",
+            "컴퓨터공학과" to "인공지능융합대학",
+            "정보융합학부" to "인공지능융합대학",
+            "로봇학부" to "인공지능융합대학",
+            "전자공학과" to "전자정보공과대학",
+            "전자통신공학과" to "전자정보공과대학",
+            "전자융합공학과" to "전자정보공과대학",
+            "전기공학과" to "전자정보공과대학",
+            "반도체시스템공학부" to "전자정보공과대학",
+            "화학공학과" to "공과대학",
+            "건축공학과" to "공과대학",
+            "수학교육과" to "자연과학대학",
+            "미디어커뮤니케이션학부" to "인문사회과학대학",
+            "경영학부" to "경영대학"
+        )
+        initialDepartments.forEach { (deptName, collegeName) ->
+            if (DepartmentsTable.select { DepartmentsTable.name eq deptName }.count() == 0L) {
+                DepartmentsTable.insert {
+                    it[id] = UUID.randomUUID()
+                    it[name] = deptName
+                    it[college] = collegeName
+                }
+            }
+        }
+    }
+
     private fun seedConvertedCoursesData() {
         if (CoursesTable.selectAll().count() > 0) {
             return
@@ -121,14 +158,25 @@ object DatabaseFactory {
                             "${prof.department} ${prof.name} 교수"
                         else
                             "${prof.name} 교수"
-                        it[isDemo] = false
+                        it[isDemo] = true
                     }
                 }
             }
 
-            // 2. Insert courses and sections
+            // 2. Insert courses, departments, and sections
             courseDataFile.courses.forEach { c ->
                 val cId = UUID.fromString(c.id)
+                val cleanDept = c.department.trim()
+                if (cleanDept.isNotBlank() && cleanDept != "공통") {
+                    if (DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.count() == 0L) {
+                        DepartmentsTable.insert {
+                            it[id] = UUID.randomUUID()
+                            it[name] = cleanDept
+                            it[college] = c.college.ifBlank { "광운대학교" }
+                        }
+                    }
+                }
+
                 if (CoursesTable.select { CoursesTable.id eq cId }.count() == 0L) {
                     CoursesTable.insert {
                         it[id] = cId
@@ -164,11 +212,11 @@ object DatabaseFactory {
     }
 
     private fun seedDemoData() {
-        if (UsersTable.select { UsersTable.isDemo eq true }.count() > 0) {
+        if (UsersTable.select { UsersTable.id eq UUID.fromString("11111111-1111-1111-1111-111111111101") }.count() > 0) {
             return
         }
 
-        logger.info("Seeding initial demo data for exhibition...")
+        logger.info("Seeding base courses & test fixture records...")
 
         val student1Id = UUID.fromString("11111111-1111-1111-1111-111111111101")
         val student2Id = UUID.fromString("11111111-1111-1111-1111-111111111102")
@@ -178,7 +226,6 @@ object DatabaseFactory {
         val prof2Id = UUID.fromString("22222222-2222-2222-2222-222222222202")
         val prof3Id = UUID.fromString("22222222-2222-2222-2222-222222222203")
 
-        // 1. Users
         UsersTable.insert {
             it[id] = student1Id
             it[name] = "서영민"
@@ -214,6 +261,7 @@ object DatabaseFactory {
             it[identifier] = "P2011"
             it[department] = "소프트웨어학과"
             it[displayTag] = "소프트웨어학과 김교수"
+            it[email] = "kim.prof@kw.ac.kr"
             it[isDemo] = true
         }
         UsersTable.insert {
@@ -223,6 +271,7 @@ object DatabaseFactory {
             it[identifier] = "P2012"
             it[department] = "컴퓨터공학과"
             it[displayTag] = "컴퓨터공학과 이교수"
+            it[email] = "lee.prof@kw.ac.kr"
             it[isDemo] = true
         }
         UsersTable.insert {
@@ -232,6 +281,7 @@ object DatabaseFactory {
             it[identifier] = "P2013"
             it[department] = "컴퓨터공학과"
             it[displayTag] = "컴퓨터공학과 박교수"
+            it[email] = "park.prof@kw.ac.kr"
             it[isDemo] = true
         }
 
@@ -290,31 +340,37 @@ object DatabaseFactory {
             }
         }
 
-        // 4. Enrollments (학생 담당 교수 배정)
+        // 4. Enrollments
         EnrollmentsTable.insert {
             it[courseId] = course1Id
             it[studentId] = student1Id
-            it[assignedProfessorId] = prof1Id // 서영민 담당: 김교수
+            it[assignedProfessorId] = prof1Id
         }
         EnrollmentsTable.insert {
             it[courseId] = course1Id
             it[studentId] = student2Id
-            it[assignedProfessorId] = prof2Id // 김민지 담당: 이교수
+            it[assignedProfessorId] = prof2Id
         }
         EnrollmentsTable.insert {
             it[courseId] = course2Id
             it[studentId] = student3Id
-            it[assignedProfessorId] = prof3Id // 박준형 담당: 박교수
+            it[assignedProfessorId] = prof3Id
         }
 
         // 5. Professor Notification Settings
-        listOf(prof1Id, prof2Id, prof3Id).forEach { pId ->
+        listOf(
+            prof1Id to "kim.prof@kw.ac.kr",
+            prof2Id to "lee.prof@kw.ac.kr",
+            prof3Id to "park.prof@kw.ac.kr"
+        ).forEach { (pId, mail) ->
             ProfessorNotificationSettingsTable.insert {
                 it[professorId] = pId
                 it[quietHoursEnabled] = false
                 it[quietHoursStart] = "22:00"
                 it[quietHoursEnd] = "08:00"
-                it[notifyOtherProfessorQuestions] = true // 데모용으로 같은과목 다른교수 알림 ON
+                it[notifyOtherProfessorQuestions] = true
+                it[emailEnabled] = true
+                it[notificationEmail] = mail
             }
         }
 
@@ -322,12 +378,12 @@ object DatabaseFactory {
         listOf(student1Id, student2Id, student3Id, prof1Id, prof2Id, prof3Id).forEach { uId ->
             UserSettingsTable.insert {
                 it[userId] = uId
-                it[themeMode] = "system"
-                it[fontSize] = "medium"
+                it[themeMode] = "light"
+                it[fontSize] = "md"
             }
         }
 
-        // 7. Category Settings (기본 모두 true)
+        // 7. Category Settings
         listOf(prof1Id, prof2Id).forEach { pId ->
             QuestionCategory.values().forEach { cat ->
                 ProfessorCategorySettingsTable.insert {
@@ -339,7 +395,7 @@ object DatabaseFactory {
             }
         }
 
-        // 8. Sample Questions & Answers for Exhibition
+        // 8. Sample Forum Threads
         val q1Id = UUID.fromString("44444444-4444-4444-4444-444444444401")
         val q1Title = "Ktor 서버 아키텍처 및 라우팅 설정 관련 문의"
         val q1Raw = "교수님 이번 과제에서 Ktor 라우팅 설정할 때 Application.module 안에 작성해야 하나요 아니면 routing 확장 함수로 분리하는 게 좋나요?"
@@ -355,6 +411,7 @@ object DatabaseFactory {
             it[rawContent] = q1Raw
             it[refinedContent] = q1Refined
             it[isAnonymous] = true
+            it[isHidden] = false
             it[status] = QuestionStatus.ANSWERED.name
             it[createdAt] = Instant.now().minusSeconds(86400)
         }
@@ -364,6 +421,7 @@ object DatabaseFactory {
             it[professorId] = prof1Id
             it[content] = "좋은 질문입니다. 실무 프로젝트에서는 라우팅을 도메인별(예: AuthRoutes, CourseRoutes)로 확장 함수로 분리하여 Application.module에서 호출하도록 구성하는 것이 유지보수와 협업에 훨씬 유리합니다."
             it[isAssignedProfessor] = true
+            it[isHidden] = false
             it[createdAt] = Instant.now().minusSeconds(80000)
         }
 
@@ -382,10 +440,11 @@ object DatabaseFactory {
             it[rawContent] = q2Raw
             it[refinedContent] = q2Refined
             it[isAnonymous] = false
+            it[isHidden] = false
             it[status] = QuestionStatus.OPEN.name
             it[createdAt] = Instant.now().minusSeconds(3600)
         }
 
-        logger.info("Demo data seeding completed successfully.")
+        logger.info("Base data seeding completed successfully.")
     }
 }

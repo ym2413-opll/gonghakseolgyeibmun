@@ -1,0 +1,643 @@
+// src/components/admin/AdminModal.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { api } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import {
+  ShieldAlert,
+  X,
+  Building2,
+  BookPlus,
+  Users,
+  EyeOff,
+  Eye,
+  Ban,
+  UserX,
+  UserCheck,
+  Mail,
+  Terminal,
+  PlusCircle,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw
+} from 'lucide-react';
+
+const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
+  const { departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
+  const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'users' | 'posts' | 'emails'
+  const [users, setUsers] = useState([]);
+  const [emailLogs, setEmailLogs] = useState([]);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Catalog form state
+  const [deptName, setDeptName] = useState('');
+  const [deptShortName, setDeptShortName] = useState('');
+  const [deptCode, setDeptCode] = useState('');
+
+  const [courseCode, setCourseCode] = useState('');
+  const [courseName, setCourseName] = useState('');
+  const [courseSemester, setCourseSemester] = useState('2026-1');
+  const [courseDept, setCourseDept] = useState('');
+  const [courseProfName, setCourseProfName] = useState('');
+
+  // User sanction duration state
+  const [banDurationHours, setBanDurationHours] = useState(24);
+
+  const loadAdminData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [userList, emails] = await Promise.all([
+        api.getAdminUsers(),
+        api.getEmailLogs()
+      ]);
+      setUsers(Array.isArray(userList) ? userList : []);
+      setEmailLogs(Array.isArray(emails) ? emails : []);
+    } catch (err) {
+      console.warn('Admin data load warning:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadAdminData();
+      if (!courseDept && departments.length > 0) {
+        setCourseDept(departments[0].name);
+      }
+    }
+  }, [isOpen, loadAdminData, departments, courseDept]);
+
+  if (!isOpen) return null;
+
+  const notifySuccess = (msg) => {
+    setErrorMessage('');
+    setStatusMessage(msg);
+    setTimeout(() => setStatusMessage(''), 4000);
+  };
+
+  const notifyError = (msg) => {
+    setStatusMessage('');
+    setErrorMessage(msg);
+  };
+
+  const handleAddDepartment = async (e) => {
+    e.preventDefault();
+    if (!deptName.trim()) return;
+    try {
+      await api.createDepartment({
+        name: deptName.trim(),
+        shortName: deptShortName.trim() || deptName.trim().slice(0, 3),
+        code: deptCode.trim() || 'DEPT'
+      });
+      setDeptName('');
+      setDeptShortName('');
+      setDeptCode('');
+      await refreshCatalog();
+      notifySuccess(`학과 '${deptName}'이(가) 동적으로 추가되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '학과 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleAddCourse = async (e) => {
+    e.preventDefault();
+    if (!courseCode.trim() || !courseName.trim()) return;
+    try {
+      await api.createCourse({
+        code: courseCode.trim(),
+        name: courseName.trim(),
+        semester: courseSemester.trim() || '2026-1',
+        department: courseDept || departments[0]?.name || '소프트웨어학과',
+        professorName: courseProfName.trim() || '김교수'
+      });
+      setCourseCode('');
+      setCourseName('');
+      setCourseProfName('');
+      await refreshCatalog();
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`과목 '${courseName} (${courseCode})'이(가) 동적으로 추가되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleSanction = async (targetUser, action) => {
+    try {
+      await api.sanctionUser(targetUser.id, {
+        action,
+        durationHours: Number(banDurationHours) || 24,
+        durationDays: 0
+      });
+      await loadAdminData();
+      await refreshCurrentUser();
+      notifySuccess(`'${targetUser.name} (${targetUser.username || targetUser.identifier})' 계정에 [${action}] 조치가 적용되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '제재 적용에 실패했습니다.');
+    }
+  };
+
+  const handleToggleQuestionHide = async (q) => {
+    try {
+      await api.toggleHideQuestion(q.id, !q.isHidden);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`질문 #${q.id.slice(0, 6)} ${!q.isHidden ? '가리기(비표시)' : '표시 복구'} 처리 완료`);
+    } catch (err) {
+      notifyError(err.message || '게시물 상태 변경 실패');
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-container modal-xl admin-modal-container"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header admin-modal-header">
+          <div className="modal-title">
+            <ShieldAlert size={22} className="text-danger" />
+            <div>
+              <span>시스템 관리자 모드 (Admin Control Center)</span>
+              <span className="admin-sub-badge">R3 Security & Forum Governance</span>
+            </div>
+          </div>
+          <button className="btn-icon" onClick={onClose} aria-label="닫기">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="admin-tabs-bar">
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'catalog' ? 'active' : ''}`}
+            onClick={() => setActiveTab('catalog')}
+          >
+            <Building2 size={16} />
+            학과 · 과목 동적 관리
+          </button>
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users')}
+          >
+            <Users size={16} />
+            계정 관리 · 제재 ({users.length})
+          </button>
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'posts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('posts')}
+          >
+            <EyeOff size={16} />
+            익명 실명 확인 · 게시물 가리기 ({questions.length})
+          </button>
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'emails' ? 'active' : ''}`}
+            onClick={() => setActiveTab('emails')}
+          >
+            <Mail size={16} />
+            이메일 알림 로그 ({emailLogs.length})
+          </button>
+        </div>
+
+        <div className="modal-body admin-modal-body">
+          {statusMessage && (
+            <div className="auth-gate-alert success" style={{ marginBottom: 14 }}>
+              <CheckCircle2 size={16} />
+              <span>{statusMessage}</span>
+            </div>
+          )}
+          {errorMessage && (
+            <div className="auth-gate-alert error" style={{ marginBottom: 14 }}>
+              <AlertTriangle size={16} />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {activeTab === 'catalog' && (
+            <div className="admin-catalog-grid">
+              <div className="admin-panel-card">
+                <h3 className="admin-panel-title">
+                  <Building2 size={18} />
+                  학과(Department) 동적 추가
+                </h3>
+                <form onSubmit={handleAddDepartment} className="admin-compact-form">
+                  <div className="form-group">
+                    <label className="form-label">학과 정식 명칭 *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 인공지능융합학과"
+                      value={deptName}
+                      onChange={(e) => setDeptName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">약칭 (태그 표시용)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 인사융"
+                        value={deptShortName}
+                        onChange={(e) => setDeptShortName(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">영문 코드</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: AI"
+                        value={deptCode}
+                        onChange={(e) => setDeptCode(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn btn-primary btn-sm">
+                    <PlusCircle size={15} />
+                    학과 즉시 추가
+                  </button>
+                </form>
+
+                <div className="admin-chip-list-wrap">
+                  <div className="admin-chip-header">현재 등록된 학과 ({departments.length}개)</div>
+                  <div className="admin-chip-list">
+                    {departments.map((d) => (
+                      <span key={d.id || d.name} className="admin-dept-chip">
+                        {d.name} <small>({d.shortName})</small>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-panel-card">
+                <h3 className="admin-panel-title">
+                  <BookPlus size={18} />
+                  교과목(Course) 동적 추가
+                </h3>
+                <form onSubmit={handleAddCourse} className="admin-compact-form">
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">학수번호(코드) *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: SW401-01"
+                        value={courseCode}
+                        onChange={(e) => setCourseCode(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">개설 학기</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 2026-1"
+                        value={courseSemester}
+                        onChange={(e) => setCourseSemester(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">교과목명 *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 클라우드네이티브아키텍처"
+                      value={courseName}
+                      onChange={(e) => setCourseName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">주관 학과</label>
+                      <select
+                        className="form-select"
+                        value={courseDept}
+                        onChange={(e) => setCourseDept(e.target.value)}
+                      >
+                        {departments.map((d) => (
+                          <option key={d.id || d.name} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">담당 교수명</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 김교수"
+                        value={courseProfName}
+                        onChange={(e) => setCourseProfName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <button type="submit" className="btn btn-primary btn-sm">
+                    <PlusCircle size={15} />
+                    교과목 즉시 추가
+                  </button>
+                </form>
+
+                <div className="admin-chip-list-wrap">
+                  <div className="admin-chip-header">최근 등록 교과목 ({allCourses.length}개)</div>
+                  <div className="admin-chip-list">
+                    {allCourses.slice(0, 16).map((c) => (
+                      <span key={c.id} className="admin-dept-chip">
+                        {c.name} <small>({c.code})</small>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'users' && (
+            <div>
+              <div className="admin-sanction-toolbar">
+                <div>
+                  <strong>질문/답변 제한 기간 설정:</strong> 제재 버튼 클릭 시 아래 선택한 기간만큼 작성 권한이 제한됩니다.
+                </div>
+                <div className="admin-duration-select-wrap">
+                  <label>제한 기간:</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={banDurationHours}
+                    onChange={(e) => setBanDurationHours(Number(e.target.value))}
+                  >
+                    <option value={1}>1시간</option>
+                    <option value={6}>6시간</option>
+                    <option value={24}>1일 (24시간)</option>
+                    <option value={72}>3일 (72시간)</option>
+                    <option value={168}>7일 (1주일)</option>
+                    <option value={720}>30일 (1개월)</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={loadAdminData}
+                  >
+                    <RefreshCw size={14} /> 새로고침
+                  </button>
+                </div>
+              </div>
+
+              {users.length === 0 ? (
+                <div className="empty-state-box">
+                  가입된 일반 계정이 아직 없습니다. 회원가입으로 새 계정을 생성해보세요.
+                </div>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table className="admin-data-table">
+                    <thead>
+                      <tr>
+                        <th>ID / 이름</th>
+                        <th>역할 / 학과</th>
+                        <th>학번 / 이메일</th>
+                        <th>상태 (탈퇴 · 제한 만료일)</th>
+                        <th>관리 조치 (탈퇴 / 질문·답변 제한)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((u) => {
+                        const qBanned =
+                          u.questionBanUntil && new Date(u.questionBanUntil) > new Date();
+                        const aBanned =
+                          u.answerBanUntil && new Date(u.answerBanUntil) > new Date();
+                        return (
+                          <tr key={u.id} className={u.isWithdrawn ? 'row-withdrawn' : ''}>
+                            <td>
+                              <div className="font-semibold">
+                                {u.name}{' '}
+                                {u.isAdmin && (
+                                  <span className="admin-inline-badge">ADMIN</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-muted">@{u.username || u.id.slice(0, 8)}</div>
+                            </td>
+                            <td>
+                              <span className="badge badge-role">
+                                {String(u.role).toUpperCase() === 'PROFESSOR' ? '교수' : '학생'}
+                              </span>
+                              <div className="text-xs text-muted">{u.department}</div>
+                            </td>
+                            <td>
+                              <div className="text-xs">{u.identifier || '-'}</div>
+                              {u.email && <div className="text-xs text-muted">{u.email}</div>}
+                            </td>
+                            <td>
+                              {u.isWithdrawn ? (
+                                <span className="status-pill danger">탈퇴(차단됨)</span>
+                              ) : (
+                                <span className="status-pill success">정상 활동</span>
+                              )}
+                              {qBanned && (
+                                <div className="text-xs text-danger">
+                                  질문제한: ~{new Date(u.questionBanUntil).toLocaleString('ko-KR')}
+                                </div>
+                              )}
+                              {aBanned && (
+                                <div className="text-xs text-danger">
+                                  답변제한: ~{new Date(u.answerBanUntil).toLocaleString('ko-KR')}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <div className="admin-action-btns">
+                                {u.isWithdrawn ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-xs"
+                                    onClick={() => handleSanction(u, 'RESTORE')}
+                                  >
+                                    <UserCheck size={13} /> 탈퇴 복구
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-xs"
+                                    onClick={() => handleSanction(u, 'WITHDRAW')}
+                                  >
+                                    <UserX size={13} /> 강제 탈퇴
+                                  </button>
+                                )}
+
+                                {qBanned ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-xs"
+                                    onClick={() => handleSanction(u, 'UNBAN_QUESTION')}
+                                  >
+                                    질문 제한 해제
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline btn-xs"
+                                    onClick={() => handleSanction(u, 'BAN_QUESTION')}
+                                  >
+                                    <Ban size={12} /> 질문 제한 ({banDurationHours}h)
+                                  </button>
+                                )}
+
+                                {aBanned ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-xs"
+                                    onClick={() => handleSanction(u, 'UNBAN_ANSWER')}
+                                  >
+                                    답변 제한 해제
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline btn-xs"
+                                    onClick={() => handleSanction(u, 'BAN_ANSWER')}
+                                  >
+                                    <Ban size={12} /> 답변 제한 ({banDurationHours}h)
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'posts' && (
+            <div>
+              <p className="text-sm text-muted" style={{ marginBottom: 12 }}>
+                관리자는 <strong>익명 질문의 실제 작성자(학번·이름)</strong>를 열람할 수 있으며, 부적절한 질문이나 답변을 <strong>가리기(내용 비표시)</strong> 처리할 수 있습니다.
+              </p>
+              <div className="admin-table-wrap">
+                <table className="admin-data-table">
+                  <thead>
+                    <tr>
+                      <th>과목 / 카테고리</th>
+                      <th>질문 제목</th>
+                      <th>표시 작성자</th>
+                      <th>실제 질문자 (관리자 전용)</th>
+                      <th>표시 상태</th>
+                      <th>가리기 제어</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {questions.map((q) => (
+                      <tr key={q.id} className={q.isHidden ? 'row-withdrawn' : ''}>
+                        <td>
+                          <div className="font-semibold">{q.courseName}</div>
+                          <div className="text-xs text-muted">{String(q.category).toUpperCase()}</div>
+                        </td>
+                        <td>
+                          <div className="font-semibold">{q.title}</div>
+                          <div className="text-xs text-muted">
+                            답변 {(q.answers || []).length}개 · {q.createdAt?.slice(0, 16).replace('T', ' ')}
+                          </div>
+                        </td>
+                        <td>
+                          {q.isAnonymous ? (
+                            <span className="status-pill warning">익명 (수강생)</span>
+                          ) : (
+                            <span>{q.studentTag || q.studentName}</span>
+                          )}
+                        </td>
+                        <td>
+                          <span className="admin-real-author-badge">
+                            {q.realStudentTag || q.realStudentName || q.studentTag || q.studentName}
+                            {q.realStudentIdentifier ? ` (${q.realStudentIdentifier})` : ''}
+                          </span>
+                        </td>
+                        <td>
+                          {q.isHidden ? (
+                            <span className="status-pill danger">가려짐 (비표시)</span>
+                          ) : (
+                            <span className="status-pill success">공개 중</span>
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${q.isHidden ? 'btn-secondary' : 'btn-danger'}`}
+                            onClick={() => handleToggleQuestionHide(q)}
+                          >
+                            {q.isHidden ? (
+                              <>
+                                <Eye size={13} /> 가리기 해제
+                              </>
+                            ) : (
+                              <>
+                                <EyeOff size={13} /> 질문 가리기
+                              </>
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'emails' && (
+            <div className="admin-panel-card">
+              <h3 className="admin-panel-title">
+                <Mail size={18} />
+                교수 질문 알림 이메일 발송 내역 ({emailLogs.length}건)
+              </h3>
+              <p className="text-xs text-muted" style={{ marginBottom: 8 }}>
+                <Terminal size={13} style={{ display: 'inline', marginRight: 4 }} />
+                보안 정책상 관리자 권한 부여/회수는 백엔드 서버 터미널 콘솔(<code>admin &lt;id&gt;</code>)에서만 수행할 수 있습니다.
+              </p>
+              {emailLogs.length === 0 ? (
+                <div className="empty-state-box">
+                  아직 발송된 이메일 알림 내역이 없습니다. 학생 계정으로 질문을 등록하면 연동된 교수님의 이메일로 즉시 발송 및 기록됩니다.
+                </div>
+              ) : (
+                <div className="admin-email-log-list">
+                  {emailLogs.map((log) => (
+                    <div key={log.id} className="admin-email-log-item">
+                      <div className="admin-email-log-top">
+                        <strong>To: {log.recipientEmail}</strong>
+                        <span className="status-pill success">{log.status}</span>
+                      </div>
+                      <div className="admin-email-log-subject">{log.subject}</div>
+                      <div className="text-xs text-muted">
+                        {log.createdAt?.slice(0, 19).replace('T', ' ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AdminModal;

@@ -3,54 +3,89 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useAuth } from './AuthContext';
 
-const ThemeContext = createContext();
+const ThemeContext = createContext(null);
 
-export function ThemeProvider({ children }) {
+const VALID_THEMES = ['light', 'dark', 'green'];
+
+export const ThemeProvider = ({ children }) => {
   const { currentUser } = useAuth();
-  const [theme, setTheme] = useState('light');
-  const [fontSize, setFontSize] = useState('md'); // 'sm' (14px), 'md' (16px), 'lg' (18px), 'xl' (20px)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('prof_qa_theme_mode');
+    return VALID_THEMES.includes(saved) ? saved : 'light';
+  });
+  const [fontSize, setFontSize] = useState(() => {
+    return localStorage.getItem('prof_qa_font_size') || 'md';
+  });
+  const [settings, setSettings] = useState(null);
 
-  // 사용자 변경 및 최초 마운트 시 백엔드에서 설정값 요청
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
     async function loadUserSettings() {
-      setIsLoadingSettings(true);
-      try {
-        const settings = await api.getSettings(currentUser.id);
-        if (isMounted && settings) {
-          if (settings.theme) setTheme(settings.theme);
-          if (settings.fontSize) setFontSize(settings.fontSize);
+      if (!currentUser?.id) return;
+      const userSettings = await api.getSettings(currentUser.id);
+      if (mounted && userSettings) {
+        setSettings(userSettings);
+        if (userSettings.theme && VALID_THEMES.includes(userSettings.theme)) {
+          setTheme(userSettings.theme);
+          localStorage.setItem('prof_qa_theme_mode', userSettings.theme);
         }
-      } catch (err) {
-        console.error('Failed to load theme settings from backend', err);
-      } finally {
-        if (isMounted) setIsLoadingSettings(false);
+        if (userSettings.fontSize) {
+          setFontSize(userSettings.fontSize);
+          localStorage.setItem('prof_qa_font_size', userSettings.fontSize);
+        }
       }
     }
-
     loadUserSettings();
     return () => {
-      isMounted = false;
+      mounted = false;
     };
-  }, [currentUser.id]);
+  }, [currentUser?.id]);
 
-  // DOM에 테마 및 폰트 크기 속성 반영
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme);
     root.setAttribute('data-font-size', fontSize);
   }, [theme, fontSize]);
 
-  const toggleTheme = async () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    await api.updateSettings(currentUser.id, { theme: newTheme });
+  const updateTheme = async (newTheme) => {
+    const normalized = VALID_THEMES.includes(newTheme) ? newTheme : 'light';
+    setTheme(normalized);
+    localStorage.setItem('prof_qa_theme_mode', normalized);
+    if (currentUser?.id) {
+      const updated = await api.updateSettings(currentUser.id, { theme: normalized });
+      setSettings(updated);
+    }
   };
 
-  const changeFontSize = async (newSize) => {
+  const toggleTheme = async () => {
+    const nextMap = { light: 'green', green: 'dark', dark: 'light' };
+    await updateTheme(nextMap[theme] || 'light');
+  };
+
+  const updateFontSize = async (newSize) => {
     setFontSize(newSize);
-    await api.updateSettings(currentUser.id, { fontSize: newSize });
+    localStorage.setItem('prof_qa_font_size', newSize);
+    if (currentUser?.id) {
+      const updated = await api.updateSettings(currentUser.id, { fontSize: newSize });
+      setSettings(updated);
+    }
+  };
+
+  const updateAllSettings = async (partialSettings) => {
+    if (partialSettings.theme && VALID_THEMES.includes(partialSettings.theme)) {
+      setTheme(partialSettings.theme);
+      localStorage.setItem('prof_qa_theme_mode', partialSettings.theme);
+    }
+    if (partialSettings.fontSize) {
+      setFontSize(partialSettings.fontSize);
+      localStorage.setItem('prof_qa_font_size', partialSettings.fontSize);
+    }
+    if (currentUser?.id) {
+      const updated = await api.updateSettings(currentUser.id, partialSettings);
+      setSettings(updated);
+      return updated;
+    }
+    return partialSettings;
   };
 
   return (
@@ -58,20 +93,22 @@ export function ThemeProvider({ children }) {
       value={{
         theme,
         fontSize,
+        settings,
         toggleTheme,
-        changeFontSize,
-        isLoadingSettings
+        updateTheme,
+        updateFontSize,
+        updateAllSettings
       }}
     >
       {children}
     </ThemeContext.Provider>
   );
-}
+};
 
-export function useTheme() {
+export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
     throw new Error('useTheme must be used within a ThemeProvider');
   }
   return context;
-}
+};

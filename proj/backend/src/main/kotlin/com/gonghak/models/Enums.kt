@@ -11,7 +11,8 @@ import kotlinx.serialization.encoding.Encoder
 @Serializable(with = UserRoleSerializer::class)
 enum class UserRole {
     STUDENT,
-    PROFESSOR
+    PROFESSOR,
+    ADMIN
 }
 
 object UserRoleSerializer : KSerializer<UserRole> {
@@ -19,7 +20,7 @@ object UserRoleSerializer : KSerializer<UserRole> {
     override fun serialize(encoder: Encoder, value: UserRole) = encoder.encodeString(value.name)
     override fun deserialize(decoder: Decoder): UserRole {
         val raw = decoder.decodeString().trim().uppercase()
-        return UserRole.valueOf(raw)
+        return runCatching { UserRole.valueOf(raw) }.getOrDefault(UserRole.STUDENT)
     }
 }
 
@@ -35,7 +36,7 @@ object QuestionCategorySerializer : KSerializer<QuestionCategory> {
     override fun serialize(encoder: Encoder, value: QuestionCategory) = encoder.encodeString(value.name)
     override fun deserialize(decoder: Decoder): QuestionCategory {
         val raw = decoder.decodeString().trim().uppercase()
-        return QuestionCategory.valueOf(raw)
+        return runCatching { QuestionCategory.valueOf(raw) }.getOrDefault(QuestionCategory.LECTURE)
     }
 }
 
@@ -51,7 +52,7 @@ object NotificationTypeSerializer : KSerializer<NotificationType> {
     override fun serialize(encoder: Encoder, value: NotificationType) = encoder.encodeString(value.name)
     override fun deserialize(decoder: Decoder): NotificationType {
         val raw = decoder.decodeString().trim().uppercase()
-        return NotificationType.valueOf(raw)
+        return runCatching { NotificationType.valueOf(raw) }.getOrDefault(NotificationType.QUESTION_NEW)
     }
 }
 
@@ -66,6 +67,6 @@ object QuestionStatusSerializer : KSerializer<QuestionStatus> {
     override fun serialize(encoder: Encoder, value: QuestionStatus) = encoder.encodeString(value.name)
     override fun deserialize(decoder: Decoder): QuestionStatus {
         val raw = decoder.decodeString().trim().uppercase()
-        return QuestionStatus.valueOf(raw)
+        return runCatching { QuestionStatus.valueOf(raw) }.getOrDefault(QuestionStatus.OPEN)
     }
 }

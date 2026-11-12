@@ -12,7 +12,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
-class NotificationService {
+class NotificationService(
+    private val emailService: EmailService = EmailService()
+) {
     private val zoneId = ZoneId.of("Asia/Seoul")
 
     suspend fun getProfessorNotificationSetting(professorId: UUID): ProfessorNotificationSettingDto = dbQuery {
@@ -20,16 +22,22 @@ class NotificationService {
     }
 
     private fun getProfessorNotificationSettingInternal(professorId: UUID): ProfessorNotificationSettingDto {
+        val userEmail = UsersTable.select { UsersTable.id eq professorId }
+            .singleOrNull()?.get(UsersTable.email)
+
         val row = ProfessorNotificationSettingsTable.select { ProfessorNotificationSettingsTable.professorId eq professorId }
             .singleOrNull()
 
         return if (row != null) {
+            val settingEmail = row[ProfessorNotificationSettingsTable.notificationEmail] ?: userEmail
             ProfessorNotificationSettingDto(
                 professorId = row[ProfessorNotificationSettingsTable.professorId].toString(),
                 quietHoursEnabled = row[ProfessorNotificationSettingsTable.quietHoursEnabled],
                 quietHoursStart = row[ProfessorNotificationSettingsTable.quietHoursStart],
                 quietHoursEnd = row[ProfessorNotificationSettingsTable.quietHoursEnd],
-                notifyOtherProfessorQuestions = row[ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions]
+                notifyOtherProfessorQuestions = row[ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions],
+                emailEnabled = row[ProfessorNotificationSettingsTable.emailEnabled],
+                notificationEmail = settingEmail
             )
         } else {
             ProfessorNotificationSettingsTable.insert {
@@ -38,13 +46,17 @@ class NotificationService {
                 it[quietHoursStart] = "22:00"
                 it[quietHoursEnd] = "08:00"
                 it[notifyOtherProfessorQuestions] = false
+                it[emailEnabled] = true
+                it[notificationEmail] = userEmail
             }
             ProfessorNotificationSettingDto(
                 professorId = professorId.toString(),
                 quietHoursEnabled = false,
                 quietHoursStart = "22:00",
                 quietHoursEnd = "08:00",
-                notifyOtherProfessorQuestions = false
+                notifyOtherProfessorQuestions = false,
+                emailEnabled = true,
+                notificationEmail = userEmail
             )
         }
     }
@@ -53,6 +65,16 @@ class NotificationService {
         professorId: UUID,
         request: UpdateProfessorNotificationSettingRequest
     ): ProfessorNotificationSettingDto = dbQuery {
+        val cleanEmail = request.notificationEmail?.trim()?.let {
+            if (it.isBlank()) null else PasswordSecurity.validateEmail(it)
+        }
+
+        if (request.notificationEmail != null) {
+            UsersTable.update({ UsersTable.id eq professorId }) {
+                it[email] = cleanEmail
+            }
+        }
+
         val exists = ProfessorNotificationSettingsTable.select { ProfessorNotificationSettingsTable.professorId eq professorId }
             .count() > 0
 
@@ -62,6 +84,10 @@ class NotificationService {
                 request.quietHoursStart?.let { v -> it[quietHoursStart] = v }
                 request.quietHoursEnd?.let { v -> it[quietHoursEnd] = v }
                 request.notifyOtherProfessorQuestions?.let { v -> it[notifyOtherProfessorQuestions] = v }
+                request.emailEnabled?.let { v -> it[emailEnabled] = v }
+                if (request.notificationEmail != null) {
+                    it[notificationEmail] = cleanEmail
+                }
             }
         } else {
             ProfessorNotificationSettingsTable.insert {
@@ -70,6 +96,8 @@ class NotificationService {
                 it[quietHoursStart] = request.quietHoursStart ?: "22:00"
                 it[quietHoursEnd] = request.quietHoursEnd ?: "08:00"
                 it[notifyOtherProfessorQuestions] = request.notifyOtherProfessorQuestions ?: false
+                it[emailEnabled] = request.emailEnabled ?: true
+                it[notificationEmail] = cleanEmail
             }
         }
 
@@ -82,9 +110,13 @@ class NotificationService {
         courseName: String,
         questionId: UUID,
         questionTitle: String,
-        category: QuestionCategory
+        category: QuestionCategory,
+        questionContent: String = "",
+        authorDisplay: String = "수강생"
     ) = dbQuery {
         // 1. Notify Assigned Professor
+        val assignedUser = UsersTable.select { UsersTable.id eq assignedProfessorId }.singleOrNull()
+        val assignedProfName = assignedUser?.get(UsersTable.name) ?: "교수"
         val assignedSetting = ProfessorNotificationSettingsTable.select {
             ProfessorNotificationSettingsTable.professorId eq assignedProfessorId
         }.singleOrNull()
@@ -106,6 +138,27 @@ class NotificationService {
             it[releaseAt] = if (isAssignedQuiet) assignedSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
         }
 
+        // Send email to Assigned Professor if email is registered and enabled
+        val assignedEmailEnabled = assignedSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
+        val assignedEmail = assignedSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
+            ?.takeIf { it.isNotBlank() }
+            ?: assignedUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
+
+        if (assignedEmailEnabled && !assignedEmail.isNullOrBlank()) {
+            emailService.sendQuestionEmailInternal(
+                recipientEmail = assignedEmail,
+                professorId = assignedProfessorId,
+                professorName = assignedProfName,
+                courseName = courseName,
+                questionId = questionId,
+                questionTitle = questionTitle,
+                questionContent = questionContent.ifBlank { questionTitle },
+                category = category,
+                authorDisplay = authorDisplay,
+                isCoProfessor = false
+            )
+        }
+
         // 2. Notify other professors of the same course IF category is LECTURE
         if (category == QuestionCategory.LECTURE) {
             val otherProfessors = CourseProfessorsTable.select {
@@ -113,6 +166,8 @@ class NotificationService {
             }.map { it[CourseProfessorsTable.professorId] }
 
             for (otherProfId in otherProfessors) {
+                val otherUser = UsersTable.select { UsersTable.id eq otherProfId }.singleOrNull()
+                val otherProfName = otherUser?.get(UsersTable.name) ?: "교수"
                 val otherSetting = ProfessorNotificationSettingsTable.select {
                     ProfessorNotificationSettingsTable.professorId eq otherProfId
                 }.singleOrNull()
@@ -134,6 +189,26 @@ class NotificationService {
                         it[isRead] = false
                         it[isHeld] = isOtherQuiet
                         it[releaseAt] = if (isOtherQuiet) otherSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+                    }
+
+                    val otherEmailEnabled = otherSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
+                    val otherEmail = otherSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: otherUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
+
+                    if (otherEmailEnabled && !otherEmail.isNullOrBlank()) {
+                        emailService.sendQuestionEmailInternal(
+                            recipientEmail = otherEmail,
+                            professorId = otherProfId,
+                            professorName = otherProfName,
+                            courseName = courseName,
+                            questionId = questionId,
+                            questionTitle = questionTitle,
+                            questionContent = questionContent.ifBlank { questionTitle },
+                            category = category,
+                            authorDisplay = authorDisplay,
+                            isCoProfessor = true
+                        )
                     }
                 }
             }
@@ -225,10 +300,8 @@ class NotificationService {
             val now = LocalTime.now(zoneId)
 
             if (start.isBefore(end)) {
-                // e.g. 13:00 ~ 15:00
                 now.isAfter(start) && now.isBefore(end)
             } else {
-                // e.g. 22:00 ~ 08:00 (cross midnight)
                 now.isAfter(start) || now.isBefore(end)
             }
         } catch (_: Exception) {

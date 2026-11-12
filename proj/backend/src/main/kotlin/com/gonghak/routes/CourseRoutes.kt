@@ -8,9 +8,15 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import java.util.UUID
 
 fun Route.courseRoutes(userService: UserService) {
+    route("/api/departments") {
+        get {
+            val departments = userService.getDepartments()
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = departments))
+        }
+    }
+
     route("/api/courses") {
         get {
             val isAll = call.request.queryParameters["all"]?.toBoolean() ?: false
@@ -20,7 +26,7 @@ fun Route.courseRoutes(userService: UserService) {
 
             if (isAll || query != null || college != null || dept != null) {
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
-                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
                 val result = userService.searchCourses(query, college, dept, page, limit)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
             } else {
@@ -40,7 +46,7 @@ fun Route.courseRoutes(userService: UserService) {
             val college = call.request.queryParameters["college"]
             val dept = call.request.queryParameters["department"]
             val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
-            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
             val result = userService.searchCourses(query, college, dept, page, limit)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
         }

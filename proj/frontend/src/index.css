@@ -1,7 +1,7 @@
 /* src/index.css */
 :root {
   --font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Noto Sans KR', sans-serif;
-  
+
   /* 기본 폰트 크기 매핑 */
   --font-size-base: 16px;
   --font-size-sm: 0.875rem;
@@ -11,7 +11,7 @@
   --font-size-2xl: 1.5rem;
   --font-size-3xl: 1.875rem;
 
-  /* 라이트 테마 변수 (하양, 검정, 회색 무채색 기조) */
+  /* 라이트 테마 변수 */
   --bg-app: #f4f4f5;
   --bg-card: #ffffff;
   --bg-card-subtle: #fafafa;
@@ -30,12 +30,12 @@
   --primary-light: #f4f4f5;
   --primary-border: #d4d4d8;
 
-  --success-color: #3f3f46;
-  --success-bg: #f4f4f5;
-  --warning-color: #52525b;
-  --warning-bg: #f4f4f5;
-  --danger-color: #71717a;
-  --danger-bg: #f4f4f5;
+  --success-color: #15803d;
+  --success-bg: #dcfce7;
+  --warning-color: #b45309;
+  --warning-bg: #fef3c7;
+  --danger-color: #dc2626;
+  --danger-bg: #fee2e2;
   --ai-purple: #27272a;
   --ai-purple-light: #f4f4f5;
 
@@ -63,7 +63,42 @@ html[data-font-size="xl"] {
   --font-size-base: 20px;
 }
 
-/* 다크 모드 속성 (어두운 회색, 차콜, 흑백 무채색 기조) */
+/* 눈이 편한 초록색조 테마 (R3 Green Eye-Care Theme: 세이지 & 포레스트 그린 톤) */
+html[data-theme="green"] {
+  --bg-app: #eaf2ec;
+  --bg-card: #f6fbf7;
+  --bg-card-subtle: #e2ede5;
+  --bg-input: #f9fdf9;
+  --bg-hover: #dbe8df;
+  --border-color: #bfd3c5;
+  --border-focus: #1f6e43;
+
+  --text-primary: #132a1d;
+  --text-secondary: #2d4d3a;
+  --text-muted: #527360;
+  --text-inverse: #f6fbf7;
+
+  --primary-color: #1f6e43;
+  --primary-hover: #175634;
+  --primary-light: #d6ebe0;
+  --primary-border: #9ec4ad;
+
+  --success-color: #166534;
+  --success-bg: #d1fae5;
+  --warning-color: #92400e;
+  --warning-bg: #fef3c7;
+  --danger-color: #b91c1c;
+  --danger-bg: #fee2e2;
+  --ai-purple: #1f6e43;
+  --ai-purple-light: #d6ebe0;
+
+  --shadow-sm: 0 1px 2px 0 rgba(19, 42, 29, 0.06);
+  --shadow-md: 0 4px 8px -1px rgba(19, 42, 29, 0.08);
+  --shadow-lg: 0 10px 18px -3px rgba(19, 42, 29, 0.12);
+  --shadow-xl: 0 20px 26px -5px rgba(19, 42, 29, 0.16);
+}
+
+/* 다크 모드 속성 */
 html[data-theme="dark"] {
   --bg-app: #09090b;
   --bg-card: #18181b;
@@ -83,12 +118,12 @@ html[data-theme="dark"] {
   --primary-light: #27272a;
   --primary-border: #3f3f46;
 
-  --success-color: #d4d4d8;
-  --success-bg: #27272a;
-  --warning-color: #a1a1aa;
-  --warning-bg: #27272a;
-  --danger-color: #71717a;
-  --danger-bg: #27272a;
+  --success-color: #4ade80;
+  --success-bg: #14532d;
+  --warning-color: #fbbf24;
+  --warning-bg: #451a03;
+  --danger-color: #f87171;
+  --danger-bg: #450a0a;
   --ai-purple: #e4e4e7;
   --ai-purple-light: #27272a;
 
