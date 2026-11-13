@@ -5524,6 +5524,7 @@ input:checked + .slider:before {
   padding: 20px;
   z-index: 1200;
   overflow-y: auto;
+  animation: modalBackdropFadeIn 0.2s ease-out;
 }
 
 .modal-container {
@@ -5537,7 +5538,7 @@ input:checked + .slider:before {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: fadeSlideUp 0.18s ease-out;
+  animation: fadeSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-sm { max-width: 420px; }
@@ -5834,8 +5835,12 @@ html[data-theme="dark"] .form-textarea:focus {
 
 .theme-selector-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.theme-selector-grid-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .theme-option-card {
@@ -5887,6 +5892,11 @@ html[data-theme="dark"] .form-textarea:focus {
   color: #fbbf24;
   border-color: #3f3f46;
 }
+.theme-preview.green-dark-preview {
+  background: #06120b;
+  color: #22c55e;
+  border-color: #1f4d32;
+}
 
 .theme-option-info {
   flex: 1;
@@ -5899,6 +5909,11 @@ html[data-theme="dark"] .form-textarea:focus {
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.theme-option-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 
 .fontsize-option-list {
@@ -6183,7 +6198,7 @@ html[data-theme="dark"] .toggle-slider {
   border-radius: var(--radius-md);
   background: var(--bg-card-subtle);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 
@@ -6191,7 +6206,7 @@ html[data-theme="dark"] .toggle-slider {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -6201,9 +6216,9 @@ html[data-theme="dark"] .toggle-slider {
 }
 
 .course-pill-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  line-height: 1.35;
 }
 
 .course-search-empty {
@@ -6805,4 +6820,190 @@ html[data-theme="dark"] .course-tab.active .tab-count {
   .secondary-filters {
     justify-content: space-between;
   }
+}
+
+/* =========================================================
+   20. R4 UX 개선: 분리된 테마 버튼 · 다크그린 · 모달 애니메이션 · 1열 과목 선택 · 꼬리질문
+   ========================================================= */
+
+/* 1) 헤더 분리형 테마 전환 버튼 (무채색/초록 + 라이트/다크) */
+.theme-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.btn-theme-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--primary-border);
+}
+
+.btn-theme-chip.active {
+  background: var(--primary-light);
+  color: var(--primary-color);
+  border-color: var(--primary-border);
+}
+
+/* 2) 모달 및 인증 오버레이 진입 애니메이션 */
+@keyframes modalBackdropFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-overlay,
+.modal-backdrop,
+.image-viewer-modal-backdrop,
+.auth-gate-overlay {
+  animation: modalBackdropFadeIn 0.2s ease-out;
+}
+
+.modal-container,
+.auth-gate-card {
+  animation: fadeSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-content,
+.image-viewer-modal-box {
+  animation: modalScale 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-backdrop,
+  .image-viewer-modal-backdrop,
+  .auth-gate-overlay,
+  .modal-container,
+  .modal-content,
+  .auth-gate-card,
+  .image-viewer-modal-box {
+    animation: none !important;
+  }
+}
+
+/* 3) 과목 선택 목록 1열 배치 */
+.course-select-grid,
+.course-checkbox-grid {
+  grid-template-columns: 1fr;
+}
+
+/* 4) 학생 꼬리질문(후속 질문) 스레드 카드 & 입력창 */
+.forum-post-card.student-followup-post {
+  border-left: 3px solid var(--primary-color);
+  background: var(--bg-card);
+}
+
+.followup-editor-section {
+  border-top: 2px dashed var(--border-color);
+  margin-top: 8px;
+}
+
+/* 5) 다크 그린 (초록 + 검정) 추가 다크 대비 보정 */
+html[data-theme="green-dark"] .dnd-notice-banner {
+  background: #422006;
+  color: #fde68a;
+  border-bottom-color: #78350f;
+}
+
+html[data-theme="green-dark"] .ai-applied-tag,
+html[data-theme="green-dark"] .ai-improvements-box,
+html[data-theme="green-dark"] .ai-disclaimer {
+  color: var(--text-secondary);
+  background: var(--bg-card-subtle);
+  border-color: var(--border-color);
+}
+
+html[data-theme="green-dark"] .improv-title,
+html[data-theme="green-dark"] .co-prof-action-badge {
+  color: var(--text-primary);
+}
+
+html[data-theme="green-dark"] .co-prof-action-badge {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+html[data-theme="green-dark"] .similar-detect-banner {
+  background: #0f3822;
+  border-color: #22c55e;
+}
+
+html[data-theme="green-dark"] .detect-text {
+  color: #bbf7d0;
+}
+
+html[data-theme="green-dark"] .edited-badge {
+  color: #86efac;
+  background: #0f3822;
+  border-color: #166534;
+}
+
+html[data-theme="green-dark"] .original-diff-box.author-only-box {
+  background: #102619;
+  border-color: #22543a;
+}
+
+html[data-theme="green-dark"] .diff-privacy-tag {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.18);
+}
+
+html[data-theme="green-dark"] .diff-note {
+  color: #4ade80;
+}
+
+html[data-theme="green-dark"] .slider,
+html[data-theme="green-dark"] .toggle-slider {
+  background-color: #244732;
+}
+
+html[data-theme="green-dark"] .form-input:focus,
+html[data-theme="green-dark"] .form-select:focus,
+html[data-theme="green-dark"] .form-textarea:focus {
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+}
+
+html[data-theme="green-dark"] .tab-count {
+  background: rgba(34, 197, 94, 0.16);
+}
+
+html[data-theme="green-dark"] .course-tab.active .tab-count {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-inverse);
+}
+
+html[data-theme="green-dark"] .image-viewer-modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
 }

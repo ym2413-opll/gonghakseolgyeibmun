@@ -133,6 +133,41 @@ html[data-theme="dark"] {
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
 }
 
+/* 초록 + 검정 배색 테마 (Dark Green) */
+html[data-theme="green-dark"] {
+  --bg-app: #050a07;
+  --bg-card: #0c1711;
+  --bg-card-subtle: #13251b;
+  --bg-input: #0a140f;
+  --bg-hover: #183023;
+  --border-color: #1e3a2a;
+  --border-focus: #22c55e;
+
+  --text-primary: #e8f5ec;
+  --text-secondary: #9ec5ad;
+  --text-muted: #6c967d;
+  --text-inverse: #05130b;
+
+  --primary-color: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-light: #132e1e;
+  --primary-border: #22543a;
+
+  --success-color: #4ade80;
+  --success-bg: #0f3822;
+  --warning-color: #fbbf24;
+  --warning-bg: #422006;
+  --danger-color: #f87171;
+  --danger-bg: #450a0a;
+  --ai-purple: #4ade80;
+  --ai-purple-light: #132e1e;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 4px 8px -1px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 10px 18px -3px rgba(0, 0, 0, 0.68);
+  --shadow-xl: 0 20px 28px -5px rgba(0, 0, 0, 0.78);
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;

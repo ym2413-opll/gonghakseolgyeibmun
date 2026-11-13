@@ -745,5 +745,58 @@ class R3OverhaulTest {
             setBody(CreateAnswerRequest(content = "학생 계정으로 답변 작성을 시도합니다."))
         }
         assertEquals(HttpStatusCode.Forbidden, stuAnswerAttempt.status)
+
+        // 8. Follow-up questions (꼬리질문) after professor answer
+        val followUpBeforeAnswer = client.post("/api/questions/${validStuQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateFollowUpRequest(content = "교수님 답변 전 추가 질문"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, followUpBeforeAnswer.status)
+
+        val profFirstAnswerRes = client.post("/api/questions/${validStuQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "1차 답변입니다."))
+        }
+        assertEquals(HttpStatusCode.Created, profFirstAnswerRes.status)
+
+        val profFollowUpAttempt = client.post("/api/questions/${validStuQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateFollowUpRequest(content = "교수가 추가 질문 시도"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, profFollowUpAttempt.status)
+
+        val stuFollowUpRes = client.post("/api/questions/${validStuQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateFollowUpRequest(content = "1차 답변 잘 읽었습니다. 추가 질문이 있습니다."))
+        }
+        assertEquals(HttpStatusCode.Created, stuFollowUpRes.status)
+        val followUpDto = stuFollowUpRes.body<ApiResponse<AnswerDto>>().data!!
+        assertEquals("STUDENT", followUpDto.authorRole)
+        assertEquals("질문자 추가 질문", followUpDto.authorTitle)
+
+        val detailAfterFollowUp = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(com.gonghak.models.QuestionStatus.OPEN, detailAfterFollowUp.status)
+        assertTrue(detailAfterFollowUp.canAnswer)
+        assertEquals(2, detailAfterFollowUp.answers.size)
+
+        val profSecondAnswerRes = client.post("/api/questions/${validStuQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "추가 질문에 대한 2차 답변입니다."))
+        }
+        assertEquals(HttpStatusCode.Created, profSecondAnswerRes.status)
+
+        val detailAfterSecondAnswer = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(com.gonghak.models.QuestionStatus.ANSWERED, detailAfterSecondAnswer.status)
+        assertTrue(detailAfterSecondAnswer.canFollowUp)
+        assertEquals(3, detailAfterSecondAnswer.answers.size)
     }
 }

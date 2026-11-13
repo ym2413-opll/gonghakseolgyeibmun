@@ -84,7 +84,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
           <div className="settings-section">
             <h4 className="settings-section-title">테마</h4>
 
-            <div className="theme-selector-grid theme-selector-grid-3">
+            <div className="theme-selector-grid theme-selector-grid-4">
               <button
                 type="button"
                 className={`theme-option-card ${theme === 'light' ? 'active' : ''}`}
@@ -95,6 +95,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 </div>
                 <div className="theme-option-info">
                   <span className="theme-option-label">라이트</span>
+                  <span className="theme-option-sub">무채색</span>
                 </div>
                 {theme === 'light' && <Check size={16} className="text-primary" />}
               </button>
@@ -109,6 +110,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 </div>
                 <div className="theme-option-info">
                   <span className="theme-option-label">그린</span>
+                  <span className="theme-option-sub">초록·화이트</span>
                 </div>
                 {theme === 'green' && <Check size={16} className="text-primary" />}
               </button>
@@ -123,8 +125,24 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 </div>
                 <div className="theme-option-info">
                   <span className="theme-option-label">다크</span>
+                  <span className="theme-option-sub">무채색</span>
                 </div>
                 {theme === 'dark' && <Check size={16} className="text-primary" />}
+              </button>
+
+              <button
+                type="button"
+                className={`theme-option-card ${theme === 'green-dark' ? 'active' : ''}`}
+                onClick={() => updateTheme('green-dark')}
+              >
+                <div className="theme-preview green-dark-preview">
+                  <Leaf size={18} />
+                </div>
+                <div className="theme-option-info">
+                  <span className="theme-option-label">다크 그린</span>
+                  <span className="theme-option-sub">초록·검정</span>
+                </div>
+                {theme === 'green-dark' && <Check size={16} className="text-primary" />}
               </button>
             </div>
           </div>

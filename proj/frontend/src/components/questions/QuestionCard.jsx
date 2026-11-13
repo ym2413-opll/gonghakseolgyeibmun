@@ -1,7 +1,7 @@
 // src/components/questions/QuestionCard.jsx
 // 서양식 포럼(Western-Style Forum: Discourse / GitHub Discussions 스타일) 토픽 행(Topic Row) 컴포넌트
 import React from 'react';
-import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { useAuth } from '../../context/AuthContext';
 import {
   MessageSquare,
@@ -28,8 +28,10 @@ const QuestionCard = ({
   const category = CATEGORY_DEFINITIONS[categoryKey] || CATEGORY_DEFINITIONS.lecture;
   const answers = Array.isArray(question.answers) ? question.answers : [];
   const answerCount = question.answerCount !== undefined ? question.answerCount : answers.length;
-  const isAnswered =
-    answerCount > 0 || String(question.status || '').toUpperCase() === 'ANSWERED';
+  const isAnswered = isQuestionSolved(question);
+  const hasFollowUp = answers.some(
+    (a) => String(a.authorRole || '').toUpperCase() === 'STUDENT'
+  );
   const hasPrimaryAnswer =
     question.isAnsweredByAssignedProfessor ||
     answers.some((a) => a.isPrimaryProf || a.isAssignedProfessor);
@@ -56,6 +58,7 @@ const QuestionCard = ({
     ];
     const seen = new Set();
     answers.forEach((ans) => {
+      if (String(ans.authorRole || 'PROFESSOR').toUpperCase() === 'STUDENT') return;
       const name = ans.authorName || ans.professorName || '교수';
       if (!seen.has(name)) {
         seen.add(name);
@@ -235,7 +238,9 @@ const QuestionCard = ({
             ? hasPrimaryAnswer
               ? '담당교수 완료'
               : '공동답변 등록'
-            : '답변 대기'}
+            : hasFollowUp
+              ? '추가 질문 대기'
+              : '답변 대기'}
         </span>
         <span className="forum-activity-time">
           <Clock size={12} /> {formattedActivity}

@@ -5,7 +5,7 @@ import { useAuth } from './AuthContext';
 
 const ThemeContext = createContext(null);
 
-const VALID_THEMES = ['light', 'dark', 'green'];
+const VALID_THEMES = ['light', 'dark', 'green', 'green-dark'];
 
 export const ThemeProvider = ({ children }) => {
   const { currentUser } = useAuth();
@@ -17,6 +17,11 @@ export const ThemeProvider = ({ children }) => {
     return localStorage.getItem('prof_qa_font_size') || 'md';
   });
   const [settings, setSettings] = useState(null);
+
+  const isDark = theme === 'dark' || theme === 'green-dark';
+  const isGreen = theme === 'green' || theme === 'green-dark';
+  const brightness = isDark ? 'dark' : 'light';
+  const colorScheme = isGreen ? 'green' : 'mono';
 
   useEffect(() => {
     let mounted = true;
@@ -44,8 +49,10 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme);
+    root.setAttribute('data-brightness', brightness);
+    root.setAttribute('data-color-scheme', colorScheme);
     root.setAttribute('data-font-size', fontSize);
-  }, [theme, fontSize]);
+  }, [theme, brightness, colorScheme, fontSize]);
 
   const updateTheme = async (newTheme) => {
     const normalized = VALID_THEMES.includes(newTheme) ? newTheme : 'light';
@@ -57,9 +64,23 @@ export const ThemeProvider = ({ children }) => {
     }
   };
 
+  const resolveTheme = (nextColorScheme, nextBrightness) => {
+    if (nextColorScheme === 'green') {
+      return nextBrightness === 'dark' ? 'green-dark' : 'green';
+    }
+    return nextBrightness === 'dark' ? 'dark' : 'light';
+  };
+
+  const toggleColorScheme = async () => {
+    await updateTheme(resolveTheme(isGreen ? 'mono' : 'green', brightness));
+  };
+
+  const toggleBrightness = async () => {
+    await updateTheme(resolveTheme(colorScheme, isDark ? 'light' : 'dark'));
+  };
+
   const toggleTheme = async () => {
-    const nextMap = { light: 'green', green: 'dark', dark: 'light' };
-    await updateTheme(nextMap[theme] || 'light');
+    await toggleBrightness();
   };
 
   const updateFontSize = async (newSize) => {
@@ -92,8 +113,14 @@ export const ThemeProvider = ({ children }) => {
     <ThemeContext.Provider
       value={{
         theme,
+        brightness,
+        colorScheme,
+        isDark,
+        isGreen,
         fontSize,
         settings,
+        toggleColorScheme,
+        toggleBrightness,
         toggleTheme,
         updateTheme,
         updateFontSize,

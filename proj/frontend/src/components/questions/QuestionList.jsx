@@ -1,7 +1,7 @@
 // src/components/questions/QuestionList.jsx
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { CATEGORY_LIST } from '../../services/mockData';
+import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
 import QuestionCard from './QuestionCard';
 import {
   Search,
@@ -48,11 +48,11 @@ const QuestionList = ({
       if (selectedCategory !== 'ALL' && q.category?.toLowerCase() !== selectedCategory.toLowerCase()) {
         return false;
       }
-      const ansCount = q.answerCount !== undefined ? q.answerCount : (q.answers?.length || 0);
-      if (statusFilter === 'UNANSWERED' && ansCount > 0) {
+      const solved = isQuestionSolved(q);
+      if (statusFilter === 'UNANSWERED' && solved) {
         return false;
       }
-      if (statusFilter === 'ANSWERED' && ansCount === 0) {
+      if (statusFilter === 'ANSWERED' && !solved) {
         return false;
       }
       if (onlyMine && q.studentId !== currentUser?.id) {

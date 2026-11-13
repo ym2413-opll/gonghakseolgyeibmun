@@ -34,7 +34,7 @@ const Header = ({
     logout,
     setAuthModalMode
   } = useAuth();
-  const { theme, toggleTheme, settings } = useTheme();
+  const { isGreen, isDark, toggleColorScheme, toggleBrightness, settings } = useTheme();
 
   const [notifications, setNotifications] = useState([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -89,18 +89,13 @@ const Header = ({
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
-  const renderThemeIcon = () => {
-    if (theme === 'light') return <Leaf size={18} />;
-    if (theme === 'green') return <Moon size={18} />;
-    return <Sun size={18} />;
-  };
+  const colorSchemeTooltip = isGreen
+    ? '무채색 테마로 전환'
+    : '초록 배색 테마로 전환';
 
-  const themeTooltip =
-    theme === 'light'
-      ? '초록색조(눈 보호) 테마로 전환'
-      : theme === 'green'
-      ? '다크 모드로 전환'
-      : '라이트 모드로 전환';
+  const brightnessTooltip = isDark
+    ? '라이트 모드로 전환'
+    : '다크 모드로 전환';
 
   return (
     <header className="app-header">
@@ -156,16 +151,31 @@ const Header = ({
             </button>
           )}
 
-          {/* 빠른 테마 전환 버튼 (Light -> Green -> Dark) */}
-          <button
-            type="button"
-            className="btn-icon"
-            onClick={toggleTheme}
-            title={themeTooltip}
-            aria-label="테마 전환"
-          >
-            {renderThemeIcon()}
-          </button>
+          {/* 분리된 테마 전환 버튼 (배색: 무채색/초록, 밝기: 라이트/다크) */}
+          <div className="theme-toggle-group" role="group" aria-label="화면 테마 전환">
+            <button
+              type="button"
+              className={`btn-theme-chip ${isGreen ? 'active' : ''}`}
+              onClick={toggleColorScheme}
+              title={colorSchemeTooltip}
+              aria-label={colorSchemeTooltip}
+              aria-pressed={isGreen}
+            >
+              <Leaf size={15} />
+              <span className="hide-mobile">{isGreen ? '초록' : '무채색'}</span>
+            </button>
+            <button
+              type="button"
+              className={`btn-theme-chip ${isDark ? 'active' : ''}`}
+              onClick={toggleBrightness}
+              title={brightnessTooltip}
+              aria-label={brightnessTooltip}
+              aria-pressed={isDark}
+            >
+              {isDark ? <Moon size={15} /> : <Sun size={15} />}
+              <span className="hide-mobile">{isDark ? '다크' : '라이트'}</span>
+            </button>
+          </div>
 
           {/* 글자 크기 및 테마 상세 설정 모달 버튼 */}
           <button

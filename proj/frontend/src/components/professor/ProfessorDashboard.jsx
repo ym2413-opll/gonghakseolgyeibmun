@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { CATEGORY_LIST } from '../../services/mockData';
+import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
 import QuestionCard from '../questions/QuestionCard';
 import {
   Inbox,
@@ -92,10 +92,9 @@ const ProfessorDashboard = ({
       ) {
         return false;
       }
-      const ansCount =
-        q.answerCount !== undefined ? q.answerCount : (q.answers?.length || 0);
-      if (statusFilter === 'UNANSWERED' && ansCount > 0) return false;
-      if (statusFilter === 'ANSWERED' && ansCount === 0) return false;
+      const solved = isQuestionSolved(q);
+      if (statusFilter === 'UNANSWERED' && solved) return false;
+      if (statusFilter === 'ANSWERED' && !solved) return false;
       if (searchQuery.trim()) {
         const kw = searchQuery.toLowerCase();
         return (
@@ -109,7 +108,7 @@ const ProfessorDashboard = ({
   }, [activeTab, categorizedLists, selectedCategory, statusFilter, searchQuery]);
 
   const unansweredAssignedCount = categorizedLists.myAssigned.filter(
-    (q) => (q.answerCount !== undefined ? q.answerCount : (q.answers?.length || 0)) === 0
+    (q) => !isQuestionSolved(q)
   ).length;
   const coProfAvailableCount = categorizedLists.coProfLecture.length;
 

@@ -2,7 +2,7 @@
 // 서양식 포럼(Western-Style Forum) 스레드 포스트 스트림 (#1 OP -> #2, #3 Replies) 상세 컴포넌트
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import {
   Send,
@@ -32,6 +32,7 @@ import {
 const QuestionDetail = ({
   question,
   onAddAnswer,
+  onAddFollowUp,
   onUpdateQuestion,
   onToggleHideQuestion,
   onToggleHideAnswer,
@@ -41,6 +42,7 @@ const QuestionDetail = ({
 }) => {
   const { currentUser, isProfessor, isAdmin, allCourses, refreshCurrentUser } = useAuth();
   const [answerText, setAnswerText] = useState('');
+  const [followUpText, setFollowUpText] = useState('');
   const [showOriginal, setShowOriginal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -119,7 +121,15 @@ const QuestionDetail = ({
 
   const isAuthorStudent =
     currentUser?.role === 'student' && currentUser?.id === question.studentId;
+  const profAnswers = answers.filter(
+    (a) => String(a.authorRole || 'PROFESSOR').toUpperCase() !== 'STUDENT'
+  );
+  const isSolved = isQuestionSolved(question);
   const canEditQuestion = isAuthorStudent && answers.length === 0;
+  const canFollowUp =
+    typeof question.canFollowUp === 'boolean'
+      ? question.canFollowUp && isAuthorStudent
+      : isAuthorStudent && !question.isHidden && profAnswers.length > 0;
 
   const handleStartEdit = () => {
     setEditTitle(question.title);
@@ -189,6 +199,38 @@ const QuestionDetail = ({
     }
   };
 
+  const handleFollowUpSubmit = async (e) => {
+    e.preventDefault();
+    if (!followUpText.trim() || !canFollowUp || !onAddFollowUp || isSubmitting) return;
+    setErrorMsg('');
+    setIsSubmitting(true);
+    try {
+      const latestUser = await refreshCurrentUser();
+      if (
+        !latestUser ||
+        latestUser.role !== 'student' ||
+        latestUser.id !== currentUser?.id ||
+        latestUser.id !== question.studentId
+      ) {
+        setErrorMsg(
+          latestUser?.role === 'professor'
+            ? '교수 계정으로 변경되어 추가 질문을 작성할 수 없습니다.'
+            : '질문을 작성한 학생 계정만 추가 질문을 남길 수 있습니다.'
+        );
+        return;
+      }
+      await onAddFollowUp(question.id, {
+        authorId: currentUser.id,
+        content: followUpText.trim()
+      });
+      setFollowUpText('');
+    } catch (err) {
+      setErrorMsg(err.message || '추가 질문 등록에 실패했습니다.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const mainContent = question.content || question.refinedContent || '';
 
   return (
@@ -252,12 +294,14 @@ const QuestionDetail = ({
           <span className="prof-pill">
             담당: {question.profName || question.assignedProfessorName || '담당교수'}
           </span>
-          {answers.length > 0 ? (
+          {isSolved ? (
             <span className="status-pill success">
-              <CheckCircle2 size={13} /> Solved ({answers.length} Replies)
+              <CheckCircle2 size={13} /> Solved ({profAnswers.length} Replies)
             </span>
           ) : (
-            <span className="status-pill warning">Open Thread (미답변)</span>
+            <span className="status-pill warning">
+              {profAnswers.length > 0 ? 'Open Thread (추가 질문 답변 대기)' : 'Open Thread (미답변)'}
+            </span>
           )}
           {question.isHidden && (
             <span className="status-pill danger">
@@ -462,37 +506,60 @@ const QuestionDetail = ({
 
         {/* 스레드 구분선 */}
         <div className="forum-stream-divider">
-          <span>답변 ({answers.length})</span>
+          <span>답변 및 추가 질문 ({answers.length})</span>
         </div>
 
-        {/* Posts #2, #3...: Professor Replies */}
+        {/* Posts #2, #3...: Professor Replies & Student Follow-ups */}
         {answers.length === 0 ? (
           <div className="no-answer-box">
             <p>등록된 답변이 없습니다.</p>
           </div>
         ) : (
           answers.map((ans, index) => {
-            const profName = ans.authorName || ans.professorName || '교수';
-            const isAssigned = ans.isPrimaryProf || ans.isAssignedProfessor;
+            const isStudentFollowUp =
+              String(ans.authorRole || '').toUpperCase() === 'STUDENT';
+            const postAuthorName =
+              ans.authorName ||
+              ans.professorName ||
+              (isStudentFollowUp ? '수강생' : '교수');
+            const isAssigned = !isStudentFollowUp && (ans.isPrimaryProf || ans.isAssignedProfessor);
             return (
               <article
                 key={ans.id}
                 className={`forum-post-card reply-post ${
-                  isAssigned ? 'primary-prof-post' : 'co-prof-post'
+                  isStudentFollowUp
+                    ? 'student-followup-post'
+                    : isAssigned
+                      ? 'primary-prof-post'
+                      : 'co-prof-post'
                 } ${ans.isHidden ? 'post-hidden-state' : ''}`}
               >
                 <aside className="forum-post-sidebar">
-                  <div className="forum-post-avatar professor">
-                    {profName.charAt(0)}
+                  <div
+                    className={`forum-post-avatar ${
+                      isStudentFollowUp ? 'student' : 'professor'
+                    }`}
+                  >
+                    {isStudentFollowUp && question.isAnonymous && !isAuthorStudent && !isAdmin
+                      ? '익'
+                      : postAuthorName.charAt(0)}
                   </div>
                   <div className="forum-post-author-meta">
-                    <div className="forum-post-author-name">{profName}</div>
+                    <div className="forum-post-author-name">{postAuthorName}</div>
                     <span
                       className={`forum-role-tag ${
-                        isAssigned ? 'solution' : 'coprof'
+                        isStudentFollowUp
+                          ? 'op'
+                          : isAssigned
+                            ? 'solution'
+                            : 'coprof'
                       }`}
                     >
-                      {isAssigned ? (
+                      {isStudentFollowUp ? (
+                        <>
+                          <MessageSquare size={12} /> 추가 질문
+                        </>
+                      ) : isAssigned ? (
                         <>
                           <Award size={12} /> 담당교수
                         </>
@@ -561,6 +628,47 @@ const QuestionDetail = ({
           })
         )}
       </div>
+
+      {/* 질문 작성자 학생 전용 추가 질문(꼬리질문) 작성 컴포저 */}
+      {!isProfessor && canFollowUp && onAddFollowUp && (
+        <div className="answer-editor-section followup-editor-section">
+          {errorMsg && (
+            <div className="auth-gate-alert error" style={{ marginBottom: 12 }}>
+              <AlertCircle size={16} />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleFollowUpSubmit} className="answer-form">
+            <div className="answer-form-header">
+              <span className="editor-role-indicator">
+                <MessageSquare size={15} className="text-primary" /> 교수님 답변에 이어 추가 질문(Post #{answers.length + 2}) 작성
+              </span>
+            </div>
+            <textarea
+              className="answer-textarea"
+              rows={3}
+              placeholder="답변 내용 중 더 궁금한 점이나 후속 질문을 구체적으로 작성해주세요..."
+              value={followUpText}
+              onChange={(e) => setFollowUpText(e.target.value)}
+              required
+            />
+            <div className="answer-form-footer">
+              <span className="answer-hint">
+                추가 질문 등록 시 담당 교수님께 알림이 전송되며 답변 대기 상태로 전환됩니다.
+              </span>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!followUpText.trim() || isSubmitting}
+              >
+                <Send size={16} />
+                {isSubmitting ? '등록 중...' : '추가 질문 등록'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* 교수 전용 하단 스레드 답변 작성 컴포저 */}
       {isProfessor && (

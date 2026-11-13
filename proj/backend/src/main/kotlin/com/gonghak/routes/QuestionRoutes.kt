@@ -174,5 +174,30 @@ fun Route.questionRoutes(
                 call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
             }
         }
+
+        // Post student follow-up question in thread
+        post("/{id}/followups") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            val studentId = UUID.fromString(user.id)
+            val questionId = parseQuestionId(call.parameters["id"])
+            val request = call.receive<CreateFollowUpRequest>()
+
+            if (request.content.isBlank()) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "추가 질문 내용을 입력해 주세요.")
+                )
+                return@post
+            }
+
+            try {
+                val createdFollowUp = questionService.createFollowUp(questionId, studentId, request)
+                call.respond(HttpStatusCode.Created, ApiResponse(success = true, data = createdFollowUp))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
     }
 }

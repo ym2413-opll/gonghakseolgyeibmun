@@ -1409,8 +1409,78 @@ export const api = {
 
     if (!Array.isArray(targetQ.answers)) targetQ.answers = [];
     targetQ.answers.push(newAnswer);
+    targetQ.status = 'ANSWERED';
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
     return newAnswer;
+  },
+
+  async createFollowUp(questionId, followUpData) {
+    const uid = getCurrentUserId(followUpData?.authorId);
+    if (USE_REMOTE_BACKEND && uid) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch(`${API_BASE_URL}/questions/${questionId}/followups`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({ content: followUpData?.content || '' }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) {
+          return body?.data || body;
+        }
+        const httpErr = new Error(body.message || '추가 질문 등록 권한이 제한되어 있습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
+      } catch (e) {
+        if (e?.isHttpError) {
+          throw e;
+        }
+        console.warn('[API] Remote createFollowUp failed, using local storage', e);
+      }
+    }
+
+    const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser || sessionUser.role !== 'student') {
+      throw new Error('학생 계정만 추가 질문을 작성할 수 있습니다.');
+    }
+    if (sessionUser?.questionBanUntil && new Date(sessionUser.questionBanUntil) > new Date()) {
+      throw new Error(`현재 질문 작성 제한 상태입니다. (해제 일시: ${sessionUser.questionBanUntil})`);
+    }
+
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    const targetQ = questions.find((q) => q.id === questionId);
+    if (!targetQ) throw new Error('질문을 찾을 수 없습니다.');
+    if (targetQ.studentId !== sessionUser.id) {
+      throw new Error('질문을 작성한 학생 본인만 추가 질문을 남길 수 있습니다.');
+    }
+
+    const newFollowUp = {
+      id: `followup-${Date.now()}`,
+      questionId,
+      authorId: sessionUser.id,
+      authorName: targetQ.isAnonymous ? `${targetQ.courseName || '강의'} 수강생` : `${sessionUser.displayTag || sessionUser.name} (나)`,
+      authorRole: 'STUDENT',
+      authorTitle: '질문자 추가 질문',
+      isAssignedProfessor: false,
+      isPrimaryProf: false,
+      content: (followUpData?.content || '').trim(),
+      createdAt: new Date().toISOString(),
+      isHidden: false
+    };
+
+    if (!Array.isArray(targetQ.answers)) targetQ.answers = [];
+    targetQ.answers.push(newFollowUp);
+    targetQ.status = 'OPEN';
+    safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
+    return newFollowUp;
   },
 
   async getSimilarQuestions(queryText, category, courseId) {

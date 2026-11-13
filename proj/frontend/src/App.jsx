@@ -143,6 +143,14 @@ function MainApp() {
     showToast('스레드 답변 포스트가 등록되었습니다.');
   };
 
+  const handleAddFollowUp = async (questionId, followUpPayload) => {
+    await api.createFollowUp(questionId, followUpPayload);
+    await fetchQuestions();
+    await fetchSelectedDetail(questionId);
+    setRefreshTrigger((prev) => prev + 1);
+    showToast('추가 질문(꼬리질문)이 등록되었습니다.');
+  };
+
   const handleToggleHideQuestion = async (q) => {
     await api.toggleHideQuestion(q.id, !q.isHidden);
     await fetchQuestions();
@@ -268,6 +276,7 @@ function MainApp() {
                   <QuestionDetail
                     question={activeQuestion}
                     onAddAnswer={handleAddAnswer}
+                    onAddFollowUp={handleAddFollowUp}
                     onUpdateQuestion={handleUpdateQuestion}
                     onToggleHideQuestion={handleToggleHideQuestion}
                     onToggleHideAnswer={handleToggleHideAnswer}
@@ -280,6 +289,7 @@ function MainApp() {
               <QuestionDetail
                 question={activeQuestion}
                 onAddAnswer={handleAddAnswer}
+                onAddFollowUp={handleAddFollowUp}
                 onUpdateQuestion={handleUpdateQuestion}
                 onToggleHideQuestion={handleToggleHideQuestion}
                 onToggleHideAnswer={handleToggleHideAnswer}

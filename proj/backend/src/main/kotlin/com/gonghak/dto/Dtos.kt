@@ -375,7 +375,8 @@ data class AnswerDto(
     val createdAt: String,
     val authorId: String = professorId,
     val authorName: String = professorName,
-    val authorTitle: String = if (isAssignedProfessor) "담당교수" else "같은 과목 교수 (공동 답변)",
+    val authorRole: String = "PROFESSOR",
+    val authorTitle: String = if (authorRole == "STUDENT") "질문자 추가 질문" else if (isAssignedProfessor) "담당교수" else "같은 과목 교수 (공동 답변)",
     val isPrimaryProf: Boolean = isAssignedProfessor,
     val isHidden: Boolean = false
 )
@@ -427,6 +428,8 @@ data class QuestionDetailDto(
     val assignedProfessorName: String,
     val isAnsweredByAssignedProfessor: Boolean,
     val canAnswer: Boolean,
+    val canFollowUp: Boolean = false,
+    val status: QuestionStatus = QuestionStatus.OPEN,
     val answers: List<AnswerDto>,
     val createdAt: String,
     val profId: String = assignedProfessorId,
@@ -451,6 +454,11 @@ data class CreateAnswerRequest(
     val authorName: String? = null,
     val authorTitle: String? = null,
     val isPrimaryProf: Boolean? = null
+)
+
+@Serializable
+data class CreateFollowUpRequest(
+    val content: String
 )
 
 @Serializable

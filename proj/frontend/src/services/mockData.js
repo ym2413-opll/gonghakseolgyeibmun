@@ -309,3 +309,17 @@ export const AI_INQUIRY_TEMPLATES = [
 ];
 
 export const AI_DEMO_TEMPLATES = AI_INQUIRY_TEMPLATES;
+
+/**
+ * 스레드에 등록된 답변 및 후속 질문 상태를 바탕으로 현재 답변 완료 여부를 판별합니다.
+ */
+export function isQuestionSolved(q) {
+  if (!q) return false;
+  const statusUpper = String(q.status || '').toUpperCase();
+  if (statusUpper === 'OPEN') return false;
+  if (statusUpper === 'ANSWERED') return true;
+  const answers = Array.isArray(q.answers) ? q.answers : [];
+  if (answers.length === 0) return false;
+  const lastRole = String(answers[answers.length - 1]?.authorRole || 'PROFESSOR').toUpperCase();
+  return lastRole !== 'STUDENT';
+}
