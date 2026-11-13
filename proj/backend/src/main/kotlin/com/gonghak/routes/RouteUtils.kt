@@ -7,6 +7,7 @@ import com.gonghak.service.PasswordSecurity
 import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import java.util.UUID
@@ -115,7 +116,7 @@ private fun ApplicationCall.isSecureTransport(): Boolean {
     if (!forwardedProto.isNullOrEmpty()) {
         return forwardedProto.equals("https", ignoreCase = true)
     }
-    return request.local.scheme.equals("https", ignoreCase = true)
+    return request.origin.scheme.equals("https", ignoreCase = true)
 }
 
 fun ApplicationCall.setAuthCookie(token: String) {

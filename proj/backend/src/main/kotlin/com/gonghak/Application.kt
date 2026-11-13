@@ -11,6 +11,9 @@ import io.ktor.server.netty.*
 import io.ktor.server.plugins.callloging.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.plugins.forwardedheaders.*
+import io.ktor.server.plugins.mutableOriginConnectionPoint
+import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -68,6 +71,15 @@ fun Application.module() {
     AdminConsoleManager.startConsoleListener(userService)
 
     // 3. Plugins
+    // Security headers must be added before any plugin (such as CORS) can commit a response.
+    intercept(ApplicationCallPipeline.Setup) {
+        if (!call.response.isCommitted) {
+            call.response.header("X-Content-Type-Options", "nosniff")
+            call.response.header("X-Frame-Options", "DENY")
+            call.response.header("Referrer-Policy", "strict-origin-when-cross-origin")
+        }
+    }
+
     install(ContentNegotiation) {
         json(Json {
             prettyPrint = true
@@ -77,8 +89,23 @@ fun Application.module() {
         })
     }
 
+    install(XForwardedHeaders)
+    install(ForwardedHeaders)
+
+    // Align origin for same-origin requests coming through a reverse proxy (e.g. HTTPS Nginx -> HTTP Ktor)
+    // even if X-Forwarded-Proto/Host is omitted, while still rejecting cross-site origins.
+    intercept(ApplicationCallPipeline.Plugins) {
+        normalizeReverseProxyOrigin(call)
+    }
+
     install(CORS) {
-        val rawOrigins = System.getenv("CORS_ALLOWED_ORIGINS")?.trim().orEmpty()
+        val rawOrigins = listOfNotNull(
+            System.getenv("CORS_ALLOWED_ORIGINS"),
+            System.getenv("ALLOWED_ORIGINS"),
+            System.getenv("PUBLIC_ORIGIN"),
+            System.getenv("FRONTEND_ORIGIN"),
+            System.getenv("FRONTEND_URL")
+        ).joinToString(",")
         val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
         val configuredOrigins = rawOrigins.split(",")
             .map { it.trim() }
@@ -130,31 +157,31 @@ fun Application.module() {
         level = Level.INFO
     }
 
-    intercept(ApplicationCallPipeline.Plugins) {
-        call.response.header("X-Content-Type-Options", "nosniff")
-        call.response.header("X-Frame-Options", "DENY")
-        call.response.header("Referrer-Policy", "strict-origin-when-cross-origin")
-    }
-
     install(StatusPages) {
         exception<IllegalArgumentException> { call, cause ->
-            call.respond(
-                HttpStatusCode.BadRequest,
-                com.gonghak.dto.ErrorResponse(success = false, message = cause.message ?: "잘못된 요청입니다.")
-            )
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    com.gonghak.dto.ErrorResponse(success = false, message = cause.message ?: "잘못된 요청입니다.")
+                )
+            }
         }
         exception<IllegalStateException> { call, cause ->
-            call.respond(
-                HttpStatusCode.Forbidden,
-                com.gonghak.dto.ErrorResponse(success = false, message = cause.message ?: "권한이 없습니다.")
-            )
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    com.gonghak.dto.ErrorResponse(success = false, message = cause.message ?: "권한이 없습니다.")
+                )
+            }
         }
         exception<Throwable> { call, cause ->
             call.application.environment.log.error("Unhandled exception: ${cause.message}", cause)
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                com.gonghak.dto.ErrorResponse(success = false, message = "서버 내부 오류가 발생했습니다.")
-            )
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    com.gonghak.dto.ErrorResponse(success = false, message = "서버 내부 오류가 발생했습니다.")
+                )
+            }
         }
     }
 
@@ -197,5 +224,54 @@ fun Application.module() {
         notificationRoutes(notificationService, emailService, userService)
         attachmentRoutes(attachmentService, userService)
         adminRoutes(userService, questionService, emailService)
+    }
+}
+
+private fun defaultPortForScheme(scheme: String): Int =
+    if (scheme.equals("https", ignoreCase = true)) 443 else 80
+
+private fun normalizeReverseProxyOrigin(call: ApplicationCall) {
+    val rawOrigin = call.request.headers[HttpHeaders.Origin]?.trim()?.takeIf { it.isNotEmpty() } ?: return
+    val originUri = runCatching { java.net.URI(rawOrigin) }.getOrNull() ?: return
+    val originScheme = originUri.scheme?.lowercase() ?: return
+    if (originScheme != "http" && originScheme != "https") return
+    val originHost = originUri.host?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+    val originPort = if (originUri.port > 0) originUri.port else defaultPortForScheme(originScheme)
+
+    val current = call.request.origin
+    val currentPort = if (current.serverPort > 0) current.serverPort else defaultPortForScheme(current.scheme)
+    if (current.scheme.equals(originScheme, ignoreCase = true) &&
+        current.serverHost.equals(originHost, ignoreCase = true) &&
+        currentPort == originPort
+    ) {
+        return
+    }
+
+    val secFetchSite = call.request.headers["Sec-Fetch-Site"]?.trim()
+    val isBrowserSameOrigin = secFetchSite.equals("same-origin", ignoreCase = true)
+
+    val rawHostHeader = call.request.headers["X-Forwarded-Host"]
+        ?.split(",")
+        ?.firstOrNull()
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: call.request.headers[HttpHeaders.Host]?.trim()?.takeIf { it.isNotEmpty() }
+
+    val hostMatchedThroughProxy = rawHostHeader?.let { rawHost ->
+        val parsed = runCatching { java.net.URI("http://$rawHost") }.getOrNull()
+        val reqHost = parsed?.host?.lowercase() ?: rawHost.substringBefore(':').lowercase()
+        val reqPort = parsed?.port?.takeIf { it > 0 }
+        val isLoopbackProxyInternal = reqHost == "127.0.0.1" || reqHost == "localhost" || reqHost == "::1"
+        !isLoopbackProxyInternal &&
+            reqHost == originHost &&
+            (reqPort == null || reqPort == originPort)
+    } ?: false
+
+    if (isBrowserSameOrigin || hostMatchedThroughProxy) {
+        call.mutableOriginConnectionPoint.apply {
+            scheme = originScheme
+            serverHost = originHost
+            serverPort = originPort
+        }
     }
 }

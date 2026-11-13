@@ -384,4 +384,66 @@ class SecurityRegressionTest {
             ImageCompressionProcessor.validateImageDimensions(giantPng)
         }
     }
+
+    @Test
+    fun testReverseProxyRegisterCorsAndSecurityHeadersOnRejectedOrigin() = testApplication {
+        val client = createClient { install(ContentNegotiation) { json(json) } }
+
+        // 1. Disallowed cross-site POST must return 403 without crashing on post-commit security headers
+        val blockedRes = client.post("/api/auth/register") {
+            header(HttpHeaders.Origin, "https://evil.example.com")
+            header("Sec-Fetch-Site", "cross-site")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    username = "2026999901",
+                    password = "Password!1",
+                    role = UserRole.STUDENT,
+                    name = "차단테스트",
+                    department = "전자공학과",
+                    identifier = "2026999901"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, blockedRes.status)
+        assertEquals("nosniff", blockedRes.headers["X-Content-Type-Options"])
+
+        // 2. Same-origin POST behind reverse proxy (with X-Forwarded-Proto/Host) must succeed
+        val forwardedRes = client.post("/api/auth/register") {
+            header(HttpHeaders.Origin, "https://cistus.example.edu")
+            header("X-Forwarded-Proto", "https")
+            header("X-Forwarded-Host", "cistus.example.edu")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    username = "2026999902",
+                    password = "Password!1",
+                    role = UserRole.STUDENT,
+                    name = "프록시학생",
+                    department = "전자공학과",
+                    identifier = "2026999902"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, forwardedRes.status)
+        assertEquals("nosniff", forwardedRes.headers["X-Content-Type-Options"])
+
+        // 3. Same-origin POST behind basic proxy_pass (no X-Forwarded-*, browser Sec-Fetch-Site=same-origin) must succeed
+        val sameOriginRes = client.post("/api/auth/register") {
+            header(HttpHeaders.Origin, "https://cistus.example.edu")
+            header("Sec-Fetch-Site", "same-origin")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    username = "2026999903",
+                    password = "Password!1",
+                    role = UserRole.STUDENT,
+                    name = "기본프록시학생",
+                    department = "전자공학과",
+                    identifier = "2026999903"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, sameOriginRes.status)
+    }
 }
