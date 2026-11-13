@@ -4,6 +4,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { CATEGORY_LIST } from '../../services/mockData';
+import CoursePicker from '../common/CoursePicker';
 import {
   X,
   BellOff,
@@ -12,12 +13,13 @@ import {
   Users,
   Save,
   CheckCircle2,
-  Mail
+  Mail,
+  BookOpen
 } from 'lucide-react';
 
-const NotificationSettingsModal = ({ isOpen, onClose }) => {
+const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const { settings, updateAllSettings } = useTheme();
-  const { currentUser, refreshCurrentUser } = useAuth();
+  const { currentUser, allCourses, refreshCurrentUser } = useAuth();
 
   const [dndEnabled, setDndEnabled] = useState(true);
   const [dndStartTime, setDndStartTime] = useState('22:00');
@@ -32,6 +34,17 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
   });
   const [emailLogs, setEmailLogs] = useState([]);
   const [savedToast, setSavedToast] = useState(false);
+  const [selectedCourseIds, setSelectedCourseIds] = useState([]);
+  const [courseError, setCourseError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const ids = Array.isArray(currentUser?.courses)
+      ? currentUser.courses.map((c) => c.id).filter(Boolean)
+      : [];
+    setSelectedCourseIds(ids);
+    setCourseError('');
+  }, [isOpen, currentUser?.courses]);
 
   useEffect(() => {
     if (settings) {
@@ -71,21 +84,32 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
   };
 
   const handleSave = async () => {
-    await updateAllSettings({
-      dndEnabled,
-      dndStartTime,
-      dndEndTime,
-      coProfNotification,
-      emailEnabled,
-      notificationEmail: notificationEmail.trim(),
-      activeCategories
-    });
-    await refreshCurrentUser();
-    setSavedToast(true);
-    setTimeout(() => {
-      setSavedToast(false);
-      onClose();
-    }, 900);
+    setCourseError('');
+    if (selectedCourseIds.length === 0) {
+      setCourseError('담당 교과목은 최소 1개 이상 선택해야 합니다.');
+      return;
+    }
+    try {
+      await api.updateUserCourses(selectedCourseIds);
+      await updateAllSettings({
+        dndEnabled,
+        dndStartTime,
+        dndEndTime,
+        coProfNotification,
+        emailEnabled,
+        notificationEmail: notificationEmail.trim(),
+        activeCategories
+      });
+      await refreshCurrentUser();
+      if (onCoursesUpdated) await onCoursesUpdated();
+      setSavedToast(true);
+      setTimeout(() => {
+        setSavedToast(false);
+        onClose();
+      }, 900);
+    } catch (err) {
+      setCourseError(err.message || '설정 저장 중 오류가 발생했습니다.');
+    }
   };
 
   return (
@@ -102,6 +126,28 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         <div className="modal-body">
+          <div className="settings-section">
+            <div className="settings-title-group" style={{ marginBottom: 10 }}>
+              <BookOpen size={17} className="text-primary" />
+              <div>
+                <h4 className="settings-section-title">담당 교과목 설정</h4>
+                <p className="settings-section-desc">
+                  강의를 담당하며 질문을 수신할 교과목을 선택합니다. (최소 1개 이상)
+                </p>
+              </div>
+            </div>
+
+            <CoursePicker
+              courses={allCourses}
+              selectedIds={selectedCourseIds}
+              onChange={setSelectedCourseIds}
+              label="담당 교과목"
+              helperText="최소 1개 이상"
+            />
+          </div>
+
+          <div className="settings-divider" />
+
           <div className="settings-section">
             <div className="settings-header-row">
               <div className="settings-title-group">
@@ -252,6 +298,12 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
             </div>
           </div>
         </div>
+
+        {courseError && (
+          <div className="settings-inline-status is-error" style={{ margin: '0 22px 12px' }}>
+            {courseError}
+          </div>
+        )}
 
         <div className="modal-footer">
           {savedToast ? (

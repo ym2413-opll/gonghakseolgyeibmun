@@ -110,6 +110,16 @@ object DatabaseFactory {
             }
         }
 
+        // Allow enrollments without an assigned professor yet (admin-created courses before professor assignment)
+        listOf(
+            "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id DROP NOT NULL",
+            "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id SET NULL"
+        ).forEach { alterStmt ->
+            runCatching {
+                transaction { exec(alterStmt) }
+            }
+        }
+
         // 4. Seed reference and demo data in a clean transaction
         transaction {
             seedDefaultDepartments()

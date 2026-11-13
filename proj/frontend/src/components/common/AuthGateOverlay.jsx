@@ -1,6 +1,7 @@
 // src/components/common/AuthGateOverlay.jsx
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import CoursePicker from './CoursePicker';
 import {
   Lock,
   LogIn,
@@ -8,8 +9,7 @@ import {
   GraduationCap,
   BookOpen,
   AlertCircle,
-  ArrowLeft,
-  Search
+  ArrowLeft
 } from 'lucide-react';
 
 const AuthGateOverlay = () => {
@@ -38,7 +38,6 @@ const AuthGateOverlay = () => {
   const [studentId, setStudentId] = useState('');
   const [email, setEmail] = useState('');
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
-  const [courseSearchQuery, setCourseSearchQuery] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -49,34 +48,6 @@ const AuthGateOverlay = () => {
     setErrorMsg('');
     setAuthModalMode(nextMode);
   };
-
-  const handleCourseToggle = (courseId) => {
-    setSelectedCourseIds((prev) =>
-      prev.includes(courseId) ? prev.filter((id) => id !== courseId) : [...prev, courseId]
-    );
-  };
-
-  const uniqueCourses = useMemo(() => {
-    const map = new Map();
-    (allCourses || []).forEach((c) => {
-      if (!map.has(c.id)) {
-        map.set(c.id, c);
-      }
-    });
-    return Array.from(map.values());
-  }, [allCourses]);
-
-  const filteredCourses = useMemo(() => {
-    const kw = courseSearchQuery.trim().toLowerCase();
-    if (!kw) return uniqueCourses;
-    return uniqueCourses.filter((c) => {
-      const n = (c.name || '').toLowerCase();
-      const code = (c.code || '').toLowerCase();
-      const dept = (c.department || '').toLowerCase();
-      const prof = (c.profName || c.assignedProfessorName || '').toLowerCase();
-      return n.includes(kw) || code.includes(kw) || dept.includes(kw) || prof.includes(kw);
-    });
-  }, [uniqueCourses, courseSearchQuery]);
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -100,14 +71,19 @@ const AuthGateOverlay = () => {
       return;
     }
 
-    if (role === 'PROFESSOR' && selectedCourseIds.length === 0) {
-      setErrorMsg('담당 과목을 최소 1개 이상 선택해주세요.');
+    const availableCourses = (allCourses || []).filter((c) => Boolean(c?.id));
+    if (availableCourses.length > 0 && selectedCourseIds.length === 0) {
+      setErrorMsg(
+        role === 'PROFESSOR'
+          ? '담당 과목을 최소 1개 이상 선택해주세요.'
+          : '수강 과목을 최소 1개 이상 선택해주세요.'
+      );
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const selectedCourses = uniqueCourses.filter((c) => selectedCourseIds.includes(c.id));
+      const selectedCourses = availableCourses.filter((c) => selectedCourseIds.includes(c.id));
       const cleanSid = studentId.trim();
       await register({
         username: role === 'STUDENT' ? cleanSid : username.trim(),
@@ -117,8 +93,8 @@ const AuthGateOverlay = () => {
         department: effectiveDepartment,
         identifier: role === 'STUDENT' ? cleanSid : null,
         email: role === 'PROFESSOR' ? email : null,
-        courseIds: role === 'PROFESSOR' ? selectedCourseIds : [],
-        courseNames: role === 'PROFESSOR' ? selectedCourses.map((c) => c.name) : []
+        courseIds: selectedCourseIds,
+        courseNames: selectedCourses.map((c) => c.name)
       });
     } catch (err) {
       setErrorMsg(err.message || '회원가입 중 오류가 발생했습니다.');
@@ -385,50 +361,14 @@ const AuthGateOverlay = () => {
               )}
             </div>
 
-            {role === 'PROFESSOR' && (
-              <div className="form-group">
-                <div className="course-picker-header">
-                  <label className="form-label" style={{ marginBottom: 0 }}>
-                    담당 교과목 * ({selectedCourseIds.length}개 선택)
-                  </label>
-                </div>
-                <div className="course-search-input-wrap">
-                  <Search size={14} className="search-icon" />
-                  <input
-                    type="text"
-                    className="form-input course-search-input"
-                    placeholder="과목명, 학수번호, 학과 검색..."
-                    value={courseSearchQuery}
-                    onChange={(e) => setCourseSearchQuery(e.target.value)}
-                  />
-                </div>
-                <div className="course-checkbox-grid">
-                  {filteredCourses.length === 0 ? (
-                    <div className="course-search-empty">검색 결과가 없습니다.</div>
-                  ) : (
-                    filteredCourses.map((course) => {
-                      const checked = selectedCourseIds.includes(course.id);
-                      return (
-                        <label
-                          key={course.id}
-                          className={`course-checkbox-pill ${checked ? 'checked' : ''}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => handleCourseToggle(course.id)}
-                          />
-                          <span className="course-pill-text">
-                            {course.name}
-                            {course.code ? ` (${course.code})` : ''}
-                          </span>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
+            <CoursePicker
+              courses={allCourses}
+              selectedIds={selectedCourseIds}
+              onChange={setSelectedCourseIds}
+              label={role === 'PROFESSOR' ? '담당 교과목' : '수강 과목'}
+              required={(allCourses || []).some((c) => Boolean(c?.id))}
+              helperText="최소 1개 이상"
+            />
 
             <button
               type="submit"

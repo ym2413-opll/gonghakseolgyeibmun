@@ -302,7 +302,7 @@ export const api = {
     const allCourses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
     let userCourses = allCourses;
 
-    if (roleUpper === 'PROFESSOR' && Array.isArray(payload.courseIds) && payload.courseIds.length > 0) {
+    if (Array.isArray(payload.courseIds) && payload.courseIds.length > 0) {
       userCourses = allCourses.filter(c => payload.courseIds.includes(c.id));
     }
 
@@ -495,8 +495,8 @@ export const api = {
     if (USE_REMOTE_BACKEND) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500);
-        const res = await fetch(`${API_BASE_URL}/courses?all=true`, {
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${API_BASE_URL}/courses?all=true&limit=2000`, {
           headers: getAuthHeaders(),
           signal: controller.signal
         });
@@ -511,13 +511,14 @@ export const api = {
               name: c.name,
               code: c.code,
               semester: c.semester || '2026-1',
-              department: c.professors?.[0]?.department || '공과대학',
+              college: c.college || '',
+              department: c.department || c.professors?.[0]?.department || '',
               group: c.group || 'COMMON',
               section: c.professors?.[0]?.section || '01분반',
               profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              profName: c.assignedProfessorName || c.professors?.[0]?.name || '담당교수',
+              profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
               assignedProfessorId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              assignedProfessorName: c.assignedProfessorName || c.professors?.[0]?.name || '담당교수',
+              assignedProfessorName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
               professors: c.professors || [],
               enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
             }));
@@ -537,7 +538,7 @@ export const api = {
     if (USE_REMOTE_BACKEND && uid) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         const res = await fetch(`${API_BASE_URL}/courses`, {
           credentials: 'include',
           headers: getAuthHeaders(uid),
@@ -552,10 +553,13 @@ export const api = {
               id: c.id,
               name: c.name,
               code: c.code,
+              semester: c.semester || '2026-1',
+              college: c.college || '',
+              department: c.department || c.professors?.[0]?.department || '',
               group: c.group || 'COMMON',
               section: c.professors?.[0]?.section || '01분반',
               profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              profName: c.assignedProfessorName || c.professors?.[0]?.name || '담당교수',
+              profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
               professors: c.professors || [],
               enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
             }));
@@ -694,6 +698,7 @@ export const api = {
       try {
         const res = await fetch(`${API_BASE_URL}/admin/courses`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
@@ -704,33 +709,100 @@ export const api = {
         if (res.ok && body.data) {
           return body.data;
         }
-        if (!res.ok && body.message) {
-          throw new Error(body.message);
+        if (!res.ok) {
+          const err = new Error(body.message || '과목 추가에 실패했습니다.');
+          err.isHttpError = true;
+          throw err;
         }
       } catch (e) {
-        if (e.message && e.message.includes('과목')) throw e;
+        if (e?.isHttpError || (e.message && e.message.includes('과목'))) throw e;
         console.warn('[API] Remote createCourse fallback:', e);
       }
     }
 
     const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+    const scopeType = (coursePayload.scopeType || 'DEPARTMENT').toUpperCase();
+    const resolvedCollege = scopeType === 'ALL'
+      ? '전체'
+      : (coursePayload.college || '');
+    const resolvedDepartment = scopeType === 'ALL'
+      ? '전체'
+      : scopeType === 'COLLEGE'
+        ? (resolvedCollege ? `${resolvedCollege} 전체` : '단과대 전체')
+        : (coursePayload.department || '소프트웨어학과');
     const newCourse = {
       id: `course-${Date.now()}`,
       code: coursePayload.code.trim().toUpperCase(),
       name: coursePayload.name.trim(),
       semester: coursePayload.semester || '2026-1',
-      department: coursePayload.department || '소프트웨어학과',
+      college: resolvedCollege,
+      department: resolvedDepartment,
       group: 'COMMON',
       section: '01분반',
-      profId: coursePayload.professorId || '22222222-2222-2222-2222-222222222201',
-      profName: coursePayload.professorName || '담당교수',
-      assignedProfessorId: coursePayload.professorId || '22222222-2222-2222-2222-222222222201',
-      assignedProfessorName: coursePayload.professorName || '담당교수',
+      profId: coursePayload.professorId || '',
+      profName: coursePayload.professorName || '미배정',
+      assignedProfessorId: coursePayload.professorId || '',
+      assignedProfessorName: coursePayload.professorName || '미배정',
       professors: []
     };
     courses.push(newCourse);
     safeSetStorage(STORAGE_KEY_COURSES, courses);
     return newCourse;
+  },
+
+  async updateUserCourses(courseIds) {
+    const ids = Array.isArray(courseIds) ? [...new Set(courseIds.filter(Boolean))] : [];
+    if (ids.length === 0) {
+      throw new Error('최소 1개 이상의 과목을 선택해야 합니다.');
+    }
+
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/courses/my`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({ courseIds: ids })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body.data) {
+          const allCourses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+          const updatedUser = normalizeUserObject(body.data, allCourses);
+          safeSetStorage(STORAGE_KEY_SESSION, updatedUser);
+          return updatedUser;
+        }
+        if (!res.ok) {
+          const err = new Error(body.message || '과목 설정 저장에 실패했습니다.');
+          err.isHttpError = true;
+          throw err;
+        }
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote updateUserCourses fallback:', e);
+      }
+    }
+
+    const sessionUser = safeGetStorage(STORAGE_KEY_SESSION, null);
+    if (!sessionUser) {
+      throw new Error('로그인이 필요합니다.');
+    }
+    const allCourses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+    const selectedCourses = allCourses.filter(c => ids.includes(c.id));
+    if (selectedCourses.length === 0) {
+      throw new Error('선택한 과목을 찾을 수 없습니다.');
+    }
+    const updatedUser = {
+      ...sessionUser,
+      courses: selectedCourses
+    };
+    safeSetStorage(STORAGE_KEY_SESSION, updatedUser);
+    const users = safeGetStorage(STORAGE_KEY_USERS, []);
+    const nextUsers = users.map(u => (u.id === sessionUser.id ? { ...u, courses: selectedCourses } : u));
+    safeSetStorage(STORAGE_KEY_USERS, nextUsers);
+    return normalizeUserObject(updatedUser, allCourses);
   },
 
   async toggleHideQuestion(questionId, isHidden) {

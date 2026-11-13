@@ -102,7 +102,7 @@ class QuestionService(
                     .firstOrNull()?.get(CourseProfessorsTable.professorId)
                 ?: UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
                     .firstOrNull()?.get(UsersTable.id)?.value
-                ?: UUID.fromString("22222222-2222-2222-2222-222222222201")
+                ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
 
             // 3. Validate if professor has enabled this category
             val categorySetting = ProfessorCategorySettingsTable.select {

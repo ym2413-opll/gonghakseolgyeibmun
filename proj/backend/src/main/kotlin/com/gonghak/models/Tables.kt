@@ -49,7 +49,7 @@ object CourseProfessorsTable : UUIDTable("course_professors") {
 object EnrollmentsTable : UUIDTable("enrollments") {
     val courseId = uuid("course_id").references(CoursesTable.id)
     val studentId = uuid("student_id").references(UsersTable.id)
-    val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id)
+    val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id).nullable()
 }
 
 object ProfessorCategorySettingsTable : UUIDTable("professor_category_settings") {

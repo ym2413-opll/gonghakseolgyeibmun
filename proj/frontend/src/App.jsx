@@ -316,11 +316,13 @@ function MainApp() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onCoursesUpdated={fetchQuestions}
       />
 
       <NotificationSettingsModal
         isOpen={isProfSettingsOpen}
         onClose={() => setIsProfSettingsOpen(false)}
+        onCoursesUpdated={fetchQuestions}
       />
 
       <AdminModal

@@ -2,6 +2,7 @@ package com.gonghak.routes
 
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.UpdateCategorySettingRequest
+import com.gonghak.dto.UpdateUserCoursesRequest
 import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -27,13 +28,28 @@ fun Route.courseRoutes(userService: UserService) {
 
             if (isAll || query != null || college != null || dept != null) {
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
-                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+                val defaultLimit = if (isAll) 2000 else 100
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: defaultLimit
                 val result = userService.searchCourses(query, college, dept, page, limit)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
             } else {
                 val user = call.requireAuthenticatedUser(userService) ?: return@get
                 val courses = userService.getCoursesForUser(UUID.fromString(user.id))
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = courses))
+            }
+        }
+
+        put("/my") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@put
+            val request = call.receive<UpdateUserCoursesRequest>()
+            try {
+                val updated = userService.updateUserCourses(UUID.fromString(user.id), request.courseIds)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(success = true, data = updated, message = "과목 설정이 저장되었습니다.")
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }
         }
 

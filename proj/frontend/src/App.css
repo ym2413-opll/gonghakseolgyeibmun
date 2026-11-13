@@ -6122,6 +6122,39 @@ html[data-theme="dark"] .toggle-slider {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.course-picker-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.course-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.settings-inline-status {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.settings-inline-status.is-error {
+  background: var(--danger-soft, rgba(239, 68, 68, 0.12));
+  color: var(--danger, #dc2626);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.settings-inline-status.is-success {
+  background: var(--success-soft, rgba(16, 185, 129, 0.12));
+  color: var(--success, #059669);
+  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
 .course-search-input-wrap {

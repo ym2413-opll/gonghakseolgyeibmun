@@ -181,6 +181,7 @@ data class CreateCourseRequest(
     val name: String,
     val code: String = "",
     val semester: String = "2026-2",
+    val scopeType: String? = null, // "DEPARTMENT" | "COLLEGE" | "ALL"
     val college: String = "",
     val department: String = "",
     val major: String = "",
@@ -189,6 +190,11 @@ data class CreateCourseRequest(
     val professorId: String? = null,
     val section: String = "01분반",
     val schedule: String = ""
+)
+
+@Serializable
+data class UpdateUserCoursesRequest(
+    val courseIds: List<String> = emptyList()
 )
 
 @Serializable

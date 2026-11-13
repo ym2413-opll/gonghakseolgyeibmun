@@ -6,7 +6,9 @@ import com.gonghak.models.*
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.notInList
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -137,12 +139,10 @@ class UserService {
                     ?: UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
                         .firstOrNull()?.get(UsersTable.id)?.value
 
-                if (assignedProfId != null) {
-                    EnrollmentsTable.insert {
-                        it[courseId] = cId
-                        it[studentId] = newUserId
-                        it[assignedProfessorId] = assignedProfId
-                    }
+                EnrollmentsTable.insert {
+                    it[courseId] = cId
+                    it[studentId] = newUserId
+                    it[assignedProfessorId] = assignedProfId
                 }
             }
         } else {
@@ -490,17 +490,50 @@ class UserService {
         if (cleanName.isBlank()) {
             throw IllegalArgumentException("과목명을 입력해 주세요.")
         }
-        val cleanDept = PasswordSecurity.sanitizeInput(request.department).ifBlank { "공통" }
-        val cleanCollege = PasswordSecurity.sanitizeInput(request.college).ifBlank { "광운대학교" }
+        val rawScope = request.scopeType?.trim()?.uppercase()
+        val rawDept = PasswordSecurity.sanitizeInput(request.department)
+        val rawCollege = PasswordSecurity.sanitizeInput(request.college)
+
+        val effectiveScope = when {
+            rawScope in setOf("ALL", "COLLEGE", "DEPARTMENT") -> rawScope!!
+            rawDept == "전체" || (rawDept == "공통" && (rawCollege.isBlank() || rawCollege == "전체" || rawCollege == "광운대학교")) -> "ALL"
+            rawDept.endsWith(" 전체") -> "COLLEGE"
+            else -> "DEPARTMENT"
+        }
+
+        val (finalCollege, finalDept) = when (effectiveScope) {
+            "ALL" -> "전체" to "전체"
+            "COLLEGE" -> {
+                val targetCollege = rawCollege.takeIf { it.isNotBlank() && it != "전체" }
+                    ?: rawDept.removeSuffix(" 전체").trim().takeIf { it.isNotBlank() }
+                    ?: throw IllegalArgumentException("주관 단과대를 선택해 주세요.")
+                targetCollege to "$targetCollege 전체"
+            }
+            else -> {
+                val targetDept = rawDept.ifBlank { "공통" }
+                val matchedCollege = DepartmentsTable.select { DepartmentsTable.name eq targetDept }
+                    .firstOrNull()?.get(DepartmentsTable.college)
+                val targetCollege = rawCollege.takeIf { it.isNotBlank() && it != "광운대학교" }
+                    ?: matchedCollege?.takeIf { it.isNotBlank() }
+                    ?: "광운대학교"
+                targetCollege to targetDept
+            }
+        }
+
         val cleanCode = PasswordSecurity.sanitizeInput(request.code).ifBlank { "KW-${(1000..9999).random()}" }
         val cleanSemester = PasswordSecurity.sanitizeInput(request.semester).ifBlank { "2026-2" }
 
-        // Ensure department is registered if not "공통"
-        if (cleanDept != "공통" && DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.count() == 0L) {
+        // Only auto-register real department names (never "전체", "공통", or "<단과대> 전체")
+        if (effectiveScope == "DEPARTMENT" &&
+            finalDept != "공통" &&
+            finalDept != "전체" &&
+            !finalDept.endsWith(" 전체") &&
+            DepartmentsTable.select { DepartmentsTable.name eq finalDept }.count() == 0L
+        ) {
             DepartmentsTable.insert {
                 it[id] = UUID.randomUUID()
-                it[name] = cleanDept
-                it[college] = cleanCollege
+                it[name] = finalDept
+                it[college] = finalCollege
             }
         }
 
@@ -510,8 +543,8 @@ class UserService {
             it[name] = cleanName
             it[code] = cleanCode
             it[semester] = cleanSemester
-            it[college] = cleanCollege
-            it[department] = cleanDept
+            it[college] = finalCollege
+            it[department] = finalDept
             it[major] = request.major.trim()
             it[completionType] = request.completionType.trim().ifBlank { "전선" }
             it[credit] = request.credit.coerceIn(1, 6)
@@ -622,7 +655,11 @@ class UserService {
                     )
                 }
 
-                val enabledCategories = getAvailableCategoriesForStudent(assignedProfId, cId)
+                val effectiveProfId = assignedProfId
+                    ?: profRows.firstOrNull()?.get(UsersTable.id)?.value
+                val enabledCategories = effectiveProfId?.let {
+                    getAvailableCategoriesForStudent(it, cId)
+                } ?: QuestionCategory.values().toList()
 
                 CourseDto(
                     id = cId.toString(),
@@ -636,7 +673,7 @@ class UserService {
                     credit = row[CoursesTable.credit],
                     professors = profList,
                     availableCategories = enabledCategories,
-                    assignedProfessorId = assignedProfId.toString()
+                    assignedProfessorId = effectiveProfId?.toString()
                 )
             }
         } else {
@@ -679,6 +716,73 @@ class UserService {
                 )
             }
         }
+    }
+
+    suspend fun updateUserCourses(userId: UUID, rawCourseIds: List<String>): List<CourseDto> = dbQuery {
+        val user = UsersTable.select { UsersTable.id eq userId }.singleOrNull()
+            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+
+        val validCourseUuids = rawCourseIds.mapNotNull { raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) null
+            else runCatching { UUID.fromString(trimmed) }.getOrNull()
+                ?: com.gonghak.routes.DEMO_COURSE_ID_MAP[trimmed.lowercase()]
+        }.distinct().filter { cId ->
+            CoursesTable.select { CoursesTable.id eq cId }.count() > 0
+        }
+
+        if (validCourseUuids.isEmpty()) {
+            throw IllegalArgumentException("최소 1개 이상의 과목을 선택해 주세요.")
+        }
+
+        val role = runCatching { UserRole.valueOf(user[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+        if (role == UserRole.PROFESSOR) {
+            CourseProfessorsTable.deleteWhere {
+                (CourseProfessorsTable.professorId eq userId) and
+                    (CourseProfessorsTable.courseId notInList validCourseUuids)
+            }
+            validCourseUuids.forEach { cId ->
+                val alreadyAssigned = CourseProfessorsTable.select {
+                    (CourseProfessorsTable.courseId eq cId) and (CourseProfessorsTable.professorId eq userId)
+                }.count() > 0
+                if (!alreadyAssigned) {
+                    val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
+                    val nextSection = String.format("%02d분반", existingSections + 1)
+                    CourseProfessorsTable.insert {
+                        it[courseId] = cId
+                        it[professorId] = userId
+                        it[section] = nextSection
+                        it[schedule] = "학사 시간표 참조"
+                    }
+                }
+                // Backfill enrollments for students who registered before a professor claimed this course
+                EnrollmentsTable.update({
+                    (EnrollmentsTable.courseId eq cId) and EnrollmentsTable.assignedProfessorId.isNull()
+                }) {
+                    it[assignedProfessorId] = userId
+                }
+            }
+        } else {
+            EnrollmentsTable.deleteWhere {
+                (EnrollmentsTable.studentId eq userId) and
+                    (EnrollmentsTable.courseId notInList validCourseUuids)
+            }
+            val existingEnrolledIds = EnrollmentsTable.select { EnrollmentsTable.studentId eq userId }
+                .map { it[EnrollmentsTable.courseId] }
+                .toSet()
+
+            validCourseUuids.filterNot { it in existingEnrolledIds }.forEach { cId ->
+                val assignedProfId = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }
+                    .firstOrNull()?.get(CourseProfessorsTable.professorId)
+                EnrollmentsTable.insert {
+                    it[courseId] = cId
+                    it[studentId] = userId
+                    it[assignedProfessorId] = assignedProfId
+                }
+            }
+        }
+
+        getCoursesForUserInternal(userId)
     }
 
     suspend fun getProfessorCategories(professorId: UUID, courseId: UUID): List<CategorySettingDto> = dbQuery {

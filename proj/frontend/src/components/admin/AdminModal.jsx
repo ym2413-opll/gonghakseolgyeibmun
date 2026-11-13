@@ -39,8 +39,21 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
   const [courseSemester, setCourseSemester] = useState('2026-1');
+  const [courseScopeType, setCourseScopeType] = useState('DEPARTMENT');
+  const [courseCollege, setCourseCollege] = useState('');
   const [courseDept, setCourseDept] = useState('');
-  const [courseProfName, setCourseProfName] = useState('');
+
+  const availableColleges = Array.from(
+    new Set(
+      [
+        ...departments.map((d) => (d.college || '').trim()),
+        ...allCourses.map((c) => (c.college || '').trim())
+      ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
+    )
+  );
+  const collegeOptions = availableColleges.length > 0
+    ? availableColleges
+    : ['전자정보공과대학', '인공지능융합대학', '공과대학', '자연과학대학', '인문사회과학대학', '정책법학대학', '경영대학', '참빛인재대학'];
 
   // User sanction duration state
   const [banDurationHours, setBanDurationHours] = useState(24);
@@ -67,8 +80,19 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       if (!courseDept && departments.length > 0) {
         setCourseDept(departments[0].name);
       }
+      if (!courseCollege) {
+        const cols = Array.from(
+          new Set(
+            [
+              ...departments.map((d) => (d.college || '').trim()),
+              ...allCourses.map((c) => (c.college || '').trim())
+            ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
+          )
+        );
+        setCourseCollege(cols[0] || '전자정보공과대학');
+      }
     }
-  }, [isOpen, loadAdminData, departments, courseDept]);
+  }, [isOpen, loadAdminData, departments, allCourses, courseDept, courseCollege]);
 
   if (!isOpen) return null;
 
@@ -105,20 +129,45 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!courseCode.trim() || !courseName.trim()) return;
+    if (courseScopeType === 'DEPARTMENT' && !courseDept) {
+      notifyError('주관 학과를 선택해주세요.');
+      return;
+    }
+    if (courseScopeType === 'COLLEGE' && !courseCollege) {
+      notifyError('주관 단과대를 선택해주세요.');
+      return;
+    }
+
+    const matchedDept = departments.find((d) => d.name === courseDept);
+    const resolvedCollege =
+      courseScopeType === 'ALL'
+        ? '전체'
+        : courseScopeType === 'COLLEGE'
+          ? courseCollege
+          : (matchedDept?.college || courseCollege || '');
+    const resolvedDepartment =
+      courseScopeType === 'ALL'
+        ? '전체'
+        : courseScopeType === 'COLLEGE'
+          ? `${courseCollege} 전체`
+          : courseDept;
+
+    const addedName = courseName.trim();
+    const addedCode = courseCode.trim();
     try {
       await api.createCourse({
-        code: courseCode.trim(),
-        name: courseName.trim(),
+        code: addedCode,
+        name: addedName,
         semester: courseSemester.trim() || '2026-1',
-        department: courseDept || departments[0]?.name || '소프트웨어학과',
-        professorName: courseProfName.trim() || '김교수'
+        scopeType: courseScopeType,
+        college: resolvedCollege,
+        department: resolvedDepartment
       });
       setCourseCode('');
       setCourseName('');
-      setCourseProfName('');
       await refreshCatalog();
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`과목 '${courseName} (${courseCode})'이(가) 동적으로 추가되었습니다.`);
+      notifySuccess(`과목 '${addedName} (${addedCode})'이(가) 동적으로 추가되었습니다.`);
     } catch (err) {
       notifyError(err.message || '과목 추가 중 오류가 발생했습니다.');
     }
@@ -333,28 +382,58 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
                   <div className="auth-form-grid-2">
                     <div className="form-group">
-                      <label className="form-label">주관 학과</label>
+                      <label className="form-label">주관 단위</label>
                       <select
                         className="form-select"
-                        value={courseDept}
-                        onChange={(e) => setCourseDept(e.target.value)}
+                        value={courseScopeType}
+                        onChange={(e) => setCourseScopeType(e.target.value)}
                       >
-                        {departments.map((d) => (
-                          <option key={d.id || d.name} value={d.name}>
-                            {d.name}
-                          </option>
-                        ))}
+                        <option value="DEPARTMENT">학과 단위</option>
+                        <option value="COLLEGE">단과대 단위</option>
+                        <option value="ALL">전체 (전교 공통)</option>
                       </select>
                     </div>
                     <div className="form-group">
-                      <label className="form-label">담당 교수명</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="예: 김교수"
-                        value={courseProfName}
-                        onChange={(e) => setCourseProfName(e.target.value)}
-                      />
+                      <label className="form-label">
+                        {courseScopeType === 'ALL'
+                          ? '적용 대상'
+                          : courseScopeType === 'COLLEGE'
+                            ? '주관 단과대'
+                            : '주관 학과'}
+                      </label>
+                      {courseScopeType === 'ALL' ? (
+                        <input
+                          type="text"
+                          className="form-input"
+                          value="전체 (모든 단과대·학과)"
+                          readOnly
+                          disabled
+                        />
+                      ) : courseScopeType === 'COLLEGE' ? (
+                        <select
+                          className="form-select"
+                          value={courseCollege}
+                          onChange={(e) => setCourseCollege(e.target.value)}
+                        >
+                          {collegeOptions.map((col) => (
+                            <option key={col} value={col}>
+                              {col} 전체
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <select
+                          className="form-select"
+                          value={courseDept}
+                          onChange={(e) => setCourseDept(e.target.value)}
+                        >
+                          {departments.map((d) => (
+                            <option key={d.id || d.name} value={d.name}>
+                              {d.name}{d.college ? ` (${d.college})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
 
@@ -365,11 +444,11 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 </form>
 
                 <div className="admin-chip-list-wrap">
-                  <div className="admin-chip-header">최근 등록 교과목 ({allCourses.length}개)</div>
+                  <div className="admin-chip-header">등록된 교과목 ({allCourses.length}개)</div>
                   <div className="admin-chip-list">
-                    {allCourses.slice(0, 16).map((c) => (
+                    {allCourses.slice(0, 24).map((c) => (
                       <span key={c.id} className="admin-dept-chip">
-                        {c.name} <small>({c.code})</small>
+                        {c.name} <small>({c.code}{c.department ? ` · ${c.department}` : ''})</small>
                       </span>
                     ))}
                   </div>

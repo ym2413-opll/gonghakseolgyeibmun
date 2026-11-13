@@ -97,7 +97,7 @@ const QuestionList = ({
           <BookOpen size={15} />
           <span>전체 강좌 ({questions.length})</span>
         </button>
-        {courses.slice(0, 12).map((course) => {
+        {(Array.isArray(currentUser?.courses) && currentUser.courses.length > 0 ? courses : courses.slice(0, 12)).map((course) => {
           const count = questions.filter(
             (q) => q.courseName === course.name || q.courseId === course.id
           ).length;

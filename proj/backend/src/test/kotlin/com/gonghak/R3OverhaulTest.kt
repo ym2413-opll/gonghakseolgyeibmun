@@ -546,4 +546,138 @@ class R3OverhaulTest {
         assertEquals(HttpStatusCode.OK, loginOverlapUser1ByUsername.status)
         assertEquals(user1.user.id, loginOverlapUser1ByUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
     }
+
+    @Test
+    fun testCourseScopeCreationAndUserCourseSettings() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // 1. Register admin user and grant admin privilege via server service
+        val adminReg = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "scope_admin_user",
+                    password = "adminpass123",
+                    name = "과목관리자",
+                    department = "소프트웨어학과",
+                    email = "scope_admin@kw.ac.kr"
+                )
+            )
+        }.body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername(adminReg.user.id, true)
+
+        // 2. Admin creates courses without professorId: DEPARTMENT, COLLEGE, and ALL scopes
+        val deptCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "학과전공세미나",
+                    code = "DEPT-101",
+                    semester = "2026-2",
+                    scopeType = "DEPARTMENT",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+        assertEquals("소프트웨어학과", deptCourse.department)
+        assertEquals("인공지능융합대학", deptCourse.college)
+        assertTrue(deptCourse.professors.isEmpty())
+
+        val collegeCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "단과대기초설계",
+                    code = "COL-101",
+                    semester = "2026-2",
+                    scopeType = "COLLEGE",
+                    college = "공과대학"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+        assertEquals("공과대학", collegeCourse.college)
+        assertEquals("공과대학 전체", collegeCourse.department)
+        assertTrue(collegeCourse.professors.isEmpty())
+
+        val allCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "전교교양특강",
+                    code = "ALL-101",
+                    semester = "2026-2",
+                    scopeType = "ALL"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+        assertEquals("전체", allCourse.college)
+        assertEquals("전체", allCourse.department)
+        assertTrue(allCourse.professors.isEmpty())
+
+        // Verify COLLEGE and ALL labels were NOT added as fake entries in /api/departments
+        val depts = client.get("/api/departments").body<ApiResponse<List<DepartmentDto>>>().data!!
+        assertFalse(depts.any { it.name == "전체" || it.name == "공과대학 전체" })
+
+        // 3. Student registers with specific courseIds (including an unassigned-professor course)
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "20269911",
+                    password = "stupass123",
+                    name = "수강선택학생",
+                    department = "소프트웨어학과",
+                    identifier = "20269911",
+                    courseIds = listOf(collegeCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        assertEquals(listOf(collegeCourse.id), stuAuth.user.courses.map { it.id })
+
+        // 4. Student cannot clear all courses (requires >= 1), and can update enrolled courses
+        val emptyStuUpdate = client.put("/api/courses/my") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserCoursesRequest(courseIds = emptyList()))
+        }
+        assertEquals(HttpStatusCode.BadRequest, emptyStuUpdate.status)
+
+        val stuUpdateRes = client.put("/api/courses/my") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserCoursesRequest(courseIds = listOf(deptCourse.id, allCourse.id)))
+        }
+        assertEquals(HttpStatusCode.OK, stuUpdateRes.status)
+        val updatedStuCourses = stuUpdateRes.body<ApiResponse<List<CourseDto>>>().data!!.map { it.id }.toSet()
+        assertEquals(setOf(deptCourse.id, allCourse.id), updatedStuCourses)
+
+        // 5. Professor updates assigned courses (>= 1 required)
+        val emptyProfUpdate = client.put("/api/courses/my") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserCoursesRequest(courseIds = emptyList()))
+        }
+        assertEquals(HttpStatusCode.BadRequest, emptyProfUpdate.status)
+
+        val profUpdateRes = client.put("/api/courses/my") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserCoursesRequest(courseIds = listOf(allCourse.id)))
+        }
+        assertEquals(HttpStatusCode.OK, profUpdateRes.status)
+        val profCourses = profUpdateRes.body<ApiResponse<List<CourseDto>>>().data!!
+        assertEquals(listOf(allCourse.id), profCourses.map { it.id })
+        assertTrue(profCourses.first().professors.any { it.id == adminReg.user.id })
+    }
 }

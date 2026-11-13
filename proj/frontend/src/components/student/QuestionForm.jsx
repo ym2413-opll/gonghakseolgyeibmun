@@ -34,7 +34,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const fileInputRef = useRef(null);
 
   // 학생의 수강 과목 목록
-  const studentCourses = (currentUser?.courses?.length ? currentUser.courses : allCourses || []).slice(0, 12);
+  const studentCourses = currentUser?.courses?.length
+    ? currentUser.courses
+    : (allCourses || []).slice(0, 12);
   const [selectedCourseId, setSelectedCourseId] = useState(studentCourses[0]?.id || '');
   const [selectedCategory, setSelectedCategory] = useState('lecture');
   const [content, setContent] = useState('');
