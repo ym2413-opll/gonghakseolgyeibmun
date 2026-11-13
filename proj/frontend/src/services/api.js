@@ -137,8 +137,27 @@ function initializeStorage() {
 
 initializeStorage();
 
+function mapCourseDto(c) {
+  return {
+    id: c.id,
+    name: c.name,
+    code: c.code,
+    semester: c.semester || '2026-1',
+    college: c.college || '',
+    department: c.department || c.professors?.[0]?.department || '',
+    group: c.group || 'COMMON',
+    section: c.professors?.[0]?.section || '01분반',
+    profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
+    profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
+    assignedProfessorId: c.assignedProfessorId || c.professors?.[0]?.id || '',
+    assignedProfessorName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
+    professors: c.professors || [],
+    enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
+  };
+}
+
 function normalizeUserObject(u, allCourses = []) {
-  if (!u) return null;
+  if (!u || typeof u !== 'object' || Array.isArray(u)) return null;
   const roleLower = (u.role || 'student').toLowerCase();
   const isProf = roleLower === 'professor';
   const isAdmin = Boolean(u.isAdmin || roleLower === 'admin');
@@ -158,7 +177,8 @@ export const api = {
   // 1. 인증 / 회원가입 / 로그인 / 세션 관리 (R3 개편)
   // ============================================================================
   getCurrentSessionUser() {
-    return safeGetStorage(STORAGE_KEY_SESSION, null);
+    const user = safeGetStorage(STORAGE_KEY_SESSION, null);
+    return user && typeof user === 'object' && !Array.isArray(user) && user.id ? user : null;
   },
 
   saveSession(user, token) {
@@ -506,22 +526,7 @@ export const api = {
           const payload = body?.data || body;
           const list = Array.isArray(payload) ? payload : payload?.courses;
           if (Array.isArray(list) && list.length > 0) {
-            const mapped = list.map(c => ({
-              id: c.id,
-              name: c.name,
-              code: c.code,
-              semester: c.semester || '2026-1',
-              college: c.college || '',
-              department: c.department || c.professors?.[0]?.department || '',
-              group: c.group || 'COMMON',
-              section: c.professors?.[0]?.section || '01분반',
-              profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
-              assignedProfessorId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              assignedProfessorName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
-              professors: c.professors || [],
-              enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
-            }));
+            const mapped = list.map(mapCourseDto);
             safeSetStorage(STORAGE_KEY_COURSES, mapped);
             return mapped;
           }
@@ -549,20 +554,7 @@ export const api = {
           const body = await res.json();
           const list = Array.isArray(body) ? body : body?.data;
           if (Array.isArray(list) && list.length > 0) {
-            return list.map(c => ({
-              id: c.id,
-              name: c.name,
-              code: c.code,
-              semester: c.semester || '2026-1',
-              college: c.college || '',
-              department: c.department || c.professors?.[0]?.department || '',
-              group: c.group || 'COMMON',
-              section: c.professors?.[0]?.section || '01분반',
-              profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-              profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
-              professors: c.professors || [],
-              enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
-            }));
+            return list.map(mapCourseDto);
           }
         }
       } catch (e) {
@@ -769,14 +761,35 @@ export const api = {
         });
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.data) {
-          const allCourses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
-          const updatedUser = normalizeUserObject(body.data, allCourses);
-          safeSetStorage(STORAGE_KEY_SESSION, updatedUser);
-          return updatedUser;
+          if (Array.isArray(body.data)) {
+            const updatedCourses = body.data.map(mapCourseDto);
+            const currentSession = this.getCurrentSessionUser();
+            if (currentSession?.id) {
+              const updatedUser = normalizeUserObject(
+                { ...currentSession, courses: updatedCourses },
+                updatedCourses
+              );
+              this.saveSession(updatedUser);
+              return updatedUser;
+            }
+            const refreshed = await this.getUser(getCurrentUserId());
+            if (refreshed) return refreshed;
+          } else if (typeof body.data === 'object' && body.data.id) {
+            const updatedCourses = Array.isArray(body.data.courses)
+              ? body.data.courses.map(mapCourseDto)
+              : [];
+            const updatedUser = normalizeUserObject(
+              { ...body.data, courses: updatedCourses },
+              updatedCourses
+            );
+            this.saveSession(updatedUser);
+            return updatedUser;
+          }
         }
         if (!res.ok) {
           const err = new Error(body.message || '과목 설정 저장에 실패했습니다.');
           err.isHttpError = true;
+          err.status = res.status;
           throw err;
         }
       } catch (e) {
