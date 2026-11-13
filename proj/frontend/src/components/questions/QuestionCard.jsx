@@ -23,7 +23,13 @@ const QuestionCard = ({
   onToggleHide,
   onDelete
 }) => {
-  const { isAdmin } = useAuth();
+  const { currentUser, isAdmin, isProfessor } = useAuth();
+  const canAuthorDelete =
+    !question.isDeleted &&
+    !isProfessor &&
+    (question.canDelete ||
+      question.isMyQuestion ||
+      (currentUser?.id && question.studentId === currentUser.id));
   const categoryKey = (question.category || 'lecture').toLowerCase();
   const category = CATEGORY_DEFINITIONS[categoryKey] || CATEGORY_DEFINITIONS.lecture;
   const answers = Array.isArray(question.answers) ? question.answers : [];
@@ -98,14 +104,22 @@ const QuestionCard = ({
     <article
       className={`forum-topic-row ${isSelected ? 'selected' : ''} ${
         isAnswered ? 'solved' : 'open'
-      } ${question.isHidden ? 'is-hidden-topic' : ''}`}
+      } ${question.isHidden ? 'is-hidden-topic' : ''} ${
+        question.isDeleted ? 'is-deleted-topic' : ''
+      }`}
       onClick={onClick}
     >
       {/* 1. 좌측: 토픽 상태 아이콘 + 제목 + 메타 태그 + 본문 요약 */}
       <div className="forum-topic-main">
         <div
           className={`forum-topic-status-icon ${isAnswered ? 'solved' : 'open'}`}
-          title={isAnswered ? '해결됨 (답변 완료)' : '진행 중 (미답변)'}
+          title={
+            question.isDeleted
+              ? '작성자에 의해 삭제된 질문'
+              : isAnswered
+                ? '해결됨 (답변 완료)'
+                : '진행 중 (미답변)'
+          }
         >
           {isAnswered ? <CheckCircle2 size={18} /> : <MessageSquare size={18} />}
         </div>
@@ -114,12 +128,17 @@ const QuestionCard = ({
           <div className="forum-topic-title-line">
             <span className={`badge ${category.badgeClass}`}>{category.name}</span>
             <span className="forum-course-pill">{question.courseName}</span>
+            {question.isDeleted && (
+              <span className="status-pill danger">
+                <Trash2 size={11} /> 질문자 삭제됨
+              </span>
+            )}
             {question.isHidden && (
               <span className="status-pill danger">
                 <EyeOff size={11} /> 가려진 게시물
               </span>
             )}
-            {canCoProfAnswer && (
+            {canCoProfAnswer && !question.isDeleted && (
               <span className="co-prof-available-badge">
                 <Users size={12} /> 공동 답변 가능
               </span>
@@ -188,7 +207,7 @@ const QuestionCard = ({
               </button>
             )}
 
-            {isAdmin && onDelete && (
+            {(isAdmin || canAuthorDelete) && onDelete && (
               <button
                 type="button"
                 className="btn-admin-inline-delete"
@@ -233,14 +252,20 @@ const QuestionCard = ({
 
       {/* 4. 최근 활동 시각 */}
       <div className="forum-topic-activity">
-        <span className={`forum-status-chip ${isAnswered ? 'answered' : 'pending'}`}>
-          {isAnswered
-            ? hasPrimaryAnswer
-              ? '담당교수 완료'
-              : '공동답변 등록'
-            : hasFollowUp
-              ? '추가 질문 대기'
-              : '답변 대기'}
+        <span
+          className={`forum-status-chip ${
+            question.isDeleted ? 'deleted' : isAnswered ? 'answered' : 'pending'
+          }`}
+        >
+          {question.isDeleted
+            ? '작성자 삭제'
+            : isAnswered
+              ? hasPrimaryAnswer
+                ? '담당교수 완료'
+                : '공동답변 등록'
+              : hasFollowUp
+                ? '추가 질문 대기'
+                : '답변 대기'}
         </span>
         <span className="forum-activity-time">
           <Clock size={12} /> {formattedActivity}

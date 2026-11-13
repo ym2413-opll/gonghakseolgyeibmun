@@ -909,11 +909,15 @@ export const api = {
     return true;
   },
 
-  async deleteQuestion(questionId) {
+  async deleteQuestion(questionId, { isAdmin = false } = {}) {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/questions/${questionId}`, {
+        const endpoint = isAdmin
+          ? `${API_BASE_URL}/admin/questions/${questionId}`
+          : `${API_BASE_URL}/questions/${questionId}`;
+        const res = await fetch(endpoint, {
           method: 'DELETE',
+          credentials: 'include',
           headers: getAuthHeaders()
         });
         const body = await res.json().catch(() => ({}));
@@ -927,9 +931,37 @@ export const api = {
       }
     }
 
+    const sessionUser = this.getCurrentSessionUser();
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
-    const filtered = questions.filter(q => q.id !== questionId);
-    safeSetStorage(STORAGE_KEY_QUESTIONS, filtered);
+    if (isAdmin) {
+      const filtered = questions.filter(q => q.id !== questionId);
+      safeSetStorage(STORAGE_KEY_QUESTIONS, filtered);
+      return true;
+    }
+
+    const target = questions.find(q => q.id === questionId);
+    if (!target || target.isDeleted) {
+      throw new Error('질문을 찾을 수 없습니다.');
+    }
+    if (!sessionUser || sessionUser.role !== 'student' || target.studentId !== sessionUser.id) {
+      throw new Error('질문을 작성한 학생 본인만 삭제할 수 있습니다.');
+    }
+    const deletedAt = new Date().toISOString();
+    const updated = questions.map(q =>
+      q.id === questionId
+        ? {
+            ...q,
+            isDeleted: true,
+            deletedAt,
+            title: `[작성자 삭제] ${q.title || ''}`,
+            content: '질문 작성자에 의해 삭제된 게시물입니다.',
+            refinedContent: '질문 작성자에 의해 삭제된 게시물입니다.',
+            originalContent: '',
+            attachments: []
+          }
+        : q
+    );
+    safeSetStorage(STORAGE_KEY_QUESTIONS, updated);
     return true;
   },
 
@@ -1092,15 +1124,19 @@ export const api = {
 
     const sessionUser = this.getCurrentSessionUser();
     const isAdmin = Boolean(sessionUser?.isAdmin);
+    const isProfessor = sessionUser?.role === 'professor';
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
-    return (Array.isArray(questions) ? questions : INITIAL_QUESTIONS).map(q => ({
-      ...q,
-      title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
-      content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
-      realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
-      realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
-      realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null
-    }));
+    return (Array.isArray(questions) ? questions : INITIAL_QUESTIONS)
+      .filter(q => !(q.isDeleted && !isAdmin && !isProfessor))
+      .map(q => ({
+        ...q,
+        title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
+        content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
+        canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
+        realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
+        realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
+        realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null
+      }));
   },
 
   async getQuestion(questionId, userId) {
@@ -1126,13 +1162,15 @@ export const api = {
 
     const sessionUser = this.getCurrentSessionUser();
     const isAdmin = Boolean(sessionUser?.isAdmin);
+    const isProfessor = sessionUser?.role === 'professor';
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
     const q = questions.find(item => item.id === questionId);
-    if (!q) return null;
+    if (!q || (q.isDeleted && !isAdmin && !isProfessor)) return null;
     return {
       ...q,
       title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
       content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
+      canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
       realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
       realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
       realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null,
@@ -1466,6 +1504,8 @@ export const api = {
       throw new Error('질문을 작성한 학생 본인만 추가 질문을 남길 수 있습니다.');
     }
 
+    const trimmedContent = (followUpData?.content || '').trim();
+    const trimmedOriginal = (followUpData?.originalContent || '').trim() || trimmedContent;
     const newFollowUp = {
       id: `followup-${Date.now()}`,
       questionId,
@@ -1475,7 +1515,8 @@ export const api = {
       authorTitle: '질문자 추가 질문',
       isAssignedProfessor: false,
       isPrimaryProf: false,
-      content: (followUpData?.content || '').trim(),
+      content: trimmedContent,
+      originalContent: trimmedOriginal,
       createdAt: new Date().toISOString(),
       isHidden: false
     };

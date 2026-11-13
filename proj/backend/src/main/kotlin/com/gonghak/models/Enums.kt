@@ -44,7 +44,8 @@ object QuestionCategorySerializer : KSerializer<QuestionCategory> {
 enum class NotificationType {
     QUESTION_NEW,
     OTHER_PROFESSOR_QUESTION,
-    ANSWER_NEW
+    ANSWER_NEW,
+    QUESTION_DELETED
 }
 
 object NotificationTypeSerializer : KSerializer<NotificationType> {

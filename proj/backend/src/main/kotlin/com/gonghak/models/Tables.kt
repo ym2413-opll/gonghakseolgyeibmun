@@ -85,6 +85,8 @@ object QuestionsTable : UUIDTable("questions") {
     val refinedContent = text("refined_content")
     val isAnonymous = bool("is_anonymous").default(false)
     val isHidden = bool("is_hidden").default(false)
+    val isDeletedByAuthor = bool("is_deleted_by_author").default(false)
+    val deletedAt = timestamp("deleted_at").nullable()
     val vectorData = text("vector_data").default("[]")
     val status = varchar("status", 20).default(QuestionStatus.OPEN.name)
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
@@ -93,6 +95,7 @@ object QuestionsTable : UUIDTable("questions") {
 object AnswersTable : UUIDTable("answers") {
     val questionId = uuid("question_id").references(QuestionsTable.id)
     val professorId = uuid("professor_id").references(UsersTable.id)
+    val rawContent = text("raw_content").default("")
     val content = text("content")
     val isAssignedProfessor = bool("is_assigned_professor").default(false)
     val isHidden = bool("is_hidden").default(false)

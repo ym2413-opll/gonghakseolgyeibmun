@@ -373,6 +373,7 @@ data class AnswerDto(
     val professorName: String,
     val professorDepartment: String,
     val content: String,
+    val originalContent: String = "",
     val isAssignedProfessor: Boolean,
     val createdAt: String,
     val authorId: String = professorId,
@@ -409,6 +410,9 @@ data class QuestionListItemDto(
     val realStudentTag: String? = null,
     val realStudentIdentifier: String? = null,
     val isHidden: Boolean = false,
+    val isDeleted: Boolean = false,
+    val deletedAt: String? = null,
+    val canDelete: Boolean = false,
     val answers: List<AnswerDto> = emptyList(),
     val attachmentCount: Int = 0,
     val attachments: List<AttachmentDto> = emptyList()
@@ -446,6 +450,9 @@ data class QuestionDetailDto(
     val realStudentTag: String? = null,
     val realStudentIdentifier: String? = null,
     val isHidden: Boolean = false,
+    val isDeleted: Boolean = false,
+    val deletedAt: String? = null,
+    val canDelete: Boolean = false,
     val attachments: List<AttachmentDto> = emptyList()
 )
 

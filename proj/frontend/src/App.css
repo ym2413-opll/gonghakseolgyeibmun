@@ -6731,6 +6731,47 @@ html[data-theme="dark"] .course-tab.active .tab-count {
   margin-bottom: 4px;
 }
 
+.original-content-box p + p {
+  margin-top: 4px;
+}
+
+.deleted-question-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
+  color: var(--danger-color);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.deleted-question-notice strong {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.deleted-question-notice p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.forum-topic-row.is-deleted-topic {
+  opacity: 0.72;
+  background: var(--bg-card-subtle);
+  border-left: 3px solid var(--danger-color);
+}
+
+.forum-status-chip.deleted {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+}
+
 .no-answer-box {
   padding: 28px 16px;
   text-align: center;

@@ -179,16 +179,20 @@ function MainApp() {
 
   const handleDeleteQuestion = async (q) => {
     if (!q?.id) return;
-    if (!window.confirm('이 질문 게시물을 영구 삭제하시겠습니까?')) return;
+    const isAdminUser = Boolean(currentUser?.isAdmin || currentUser?.role === 'admin');
+    const confirmMsg = isAdminUser
+      ? '이 질문 게시물을 영구 삭제하시겠습니까? (DB에서 완전히 제거됩니다)'
+      : '질문을 삭제하시겠습니까?\n삭제 후 내 목록 및 다른 학생에게는 보이지 않으며, 담당 교수님 화면에는 삭제됨 표지가 남습니다.';
+    if (!window.confirm(confirmMsg)) return;
     try {
-      await api.deleteQuestion(q.id);
+      await api.deleteQuestion(q.id, { isAdmin: isAdminUser });
       if (selectedQuestionId === q.id) {
         setSelectedQuestionId(null);
         setSelectedQuestionDetail(null);
         setCurrentView('list');
       }
       await fetchQuestions();
-      showToast('질문이 영구 삭제되었습니다.');
+      showToast(isAdminUser ? '질문이 영구 삭제되었습니다.' : '질문이 삭제되었습니다.');
     } catch (err) {
       showToast(err.message || '질문 삭제에 실패했습니다.');
     }

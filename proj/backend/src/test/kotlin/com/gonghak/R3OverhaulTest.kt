@@ -818,5 +818,110 @@ class R3OverhaulTest {
         assertEquals(HttpStatusCode.OK, followUpRefineRes.status)
         val followUpRefined = followUpRefineRes.body<ApiResponse<RefineQuestionResponse>>().data!!
         assertTrue(followUpRefined.refined.isNotBlank())
+
+        // 10. Second follow-up persists originalContent (pre-AI draft) and returns it to both student and professor
+        val rawDraft2 = "교수님 방금 설명하신 부분 예제 하나만 더 알려주세요"
+        val stuFollowUp2Res = client.post("/api/questions/${validStuQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateFollowUpRequest(
+                    content = followUpRefined.refined,
+                    originalContent = rawDraft2,
+                    hasAiRefined = true
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, stuFollowUp2Res.status)
+        val followUp2Dto = stuFollowUp2Res.body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(rawDraft2, followUp2Dto.originalContent)
+
+        val detailWithAllFollowUps = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(4, detailWithAllFollowUps.answers.size)
+        val loadedFollowUp2 = detailWithAllFollowUps.answers.last()
+        assertEquals(rawDraft2, loadedFollowUp2.originalContent)
+        assertEquals(followUpRefined.refined, loadedFollowUp2.content)
+
+        // 11. Author can delete their own question; students no longer see it while professor sees a redacted tombstone
+        val otherDelStuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "other_del_stu",
+                    password = "stupass123",
+                    name = "김타인",
+                    department = "컴퓨터정보공학부",
+                    identifier = "20265555",
+                    courseIds = listOf(allCourse.id)
+                )
+            )
+        }.body<ApiResponse<AuthResponse>>().data!!
+
+        val otherStuDeleteAttempt = client.delete("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${otherDelStuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.Forbidden, otherStuDeleteAttempt.status)
+
+        val profDeleteAttempt = client.delete("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.Forbidden, profDeleteAttempt.status)
+
+        val authorDeleteRes = client.delete("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.OK, authorDeleteRes.status)
+
+        val stuListAfterDelete = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        assertFalse(stuListAfterDelete.any { it.id == validStuQ.id })
+
+        val stuDetailAfterDelete = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.NotFound, stuDetailAfterDelete.status)
+
+        val profListAfterDelete = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        val deletedListEntry = profListAfterDelete.find { it.id == validStuQ.id }
+        assertNotNull(deletedListEntry)
+        assertTrue(deletedListEntry.isDeleted)
+        assertNotNull(deletedListEntry.deletedAt)
+        assertTrue((deletedListEntry.title ?: "").startsWith("[작성자 삭제]"))
+        assertEquals("질문 작성자에 의해 삭제된 게시물입니다.", deletedListEntry.content)
+
+        val profDetailAfterDelete = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.OK, profDetailAfterDelete.status)
+        val deletedDetail = profDetailAfterDelete.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertTrue(deletedDetail.isDeleted)
+        assertFalse(deletedDetail.canAnswer)
+        assertFalse(deletedDetail.canFollowUp)
+        assertEquals("", deletedDetail.originalContent)
+
+        val answerOnDeletedAttempt = client.post("/api/questions/${validStuQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "삭제 후 답변 시도"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, answerOnDeletedAttempt.status)
+
+        val followUpOnDeletedAttempt = client.post("/api/questions/${validStuQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateFollowUpRequest(content = "삭제 후 추가 질문 시도"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, followUpOnDeletedAttempt.status)
+
+        val profNotifications = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(profNotifications.any { it.type == "QUESTION_DELETED" && it.referenceId == validStuQ.id })
     }
 }

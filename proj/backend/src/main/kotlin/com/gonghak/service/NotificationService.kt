@@ -301,6 +301,30 @@ class NotificationService(
     }
 
     /**
+     * Notifies the assigned professor when the question author deletes their question so
+     * prior email or bell alerts have clear context in the dashboard.
+     */
+    suspend fun notifyQuestionDeletedByAuthor(
+        assignedProfessorId: UUID,
+        courseName: String,
+        questionId: UUID,
+        questionTitle: String
+    ) {
+        dbQuery(workerManager.notificationDispatcher) {
+            NotificationsTable.insert {
+                it[userId] = assignedProfessorId
+                it[type] = NotificationType.QUESTION_DELETED.name
+                it[title] = "[$courseName] 학생이 질문을 삭제했습니다."
+                it[message] = "질문 작성자가 등록했던 질문을 삭제했습니다: \"$questionTitle\""
+                it[referenceId] = questionId
+                it[isRead] = false
+                it[isHeld] = false
+                it[releaseAt] = null
+            }
+        }
+    }
+
+    /**
      * Executed periodically by the background scheduler thread to proactively release
      * DND-held notifications whose recipients are no longer in quiet hours.
      */

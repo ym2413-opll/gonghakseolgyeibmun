@@ -150,6 +150,21 @@ fun Route.questionRoutes(
             }
         }
 
+        delete("/{id}") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@delete
+            val userId = UUID.fromString(user.id)
+            val questionId = parseQuestionId(call.parameters["id"])
+
+            try {
+                questionService.deleteQuestionByAuthor(questionId, userId)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = true, message = "질문이 삭제되었습니다."))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
         // Post answer
         post("/{id}/answers") {
             val user = call.requireAuthenticatedUser(userService) ?: return@post

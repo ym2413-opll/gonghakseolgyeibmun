@@ -49,6 +49,7 @@ const QuestionDetail = ({
   const [hasFollowUpAiRefined, setHasFollowUpAiRefined] = useState(false);
   const [isFollowUpAiModalOpen, setIsFollowUpAiModalOpen] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [expandedFollowUpOriginals, setExpandedFollowUpOriginals] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -100,7 +101,10 @@ const QuestionDetail = ({
   let answerLockReason = '';
 
   if (isProfessor) {
-    if (question.canAnswer !== undefined) {
+    if (question.isDeleted) {
+      canAnswer = false;
+      answerLockReason = '질문 작성자가 질문을 삭제하여 답변을 등록할 수 없습니다.';
+    } else if (question.canAnswer !== undefined) {
       canAnswer = question.canAnswer;
     } else if (isPrimaryProf) {
       canAnswer = true;
@@ -130,11 +134,18 @@ const QuestionDetail = ({
     (a) => String(a.authorRole || 'PROFESSOR').toUpperCase() !== 'STUDENT'
   );
   const isSolved = isQuestionSolved(question);
-  const canEditQuestion = isAuthorStudent && answers.length === 0;
+  const canEditQuestion = isAuthorStudent && !question.isDeleted && answers.length === 0;
+  const canDeleteQuestion =
+    !question.isDeleted &&
+    !isProfessor &&
+    (question.canDelete ||
+      question.isMyQuestion ||
+      (currentUser?.id && question.studentId === currentUser.id));
   const canFollowUp =
-    typeof question.canFollowUp === 'boolean'
+    !question.isDeleted &&
+    (typeof question.canFollowUp === 'boolean'
       ? question.canFollowUp && isAuthorStudent
-      : isAuthorStudent && !question.isHidden && profAnswers.length > 0;
+      : isAuthorStudent && !question.isHidden && profAnswers.length > 0);
 
   const handleStartEdit = () => {
     setEditTitle(question.title);
@@ -271,13 +282,13 @@ const QuestionDetail = ({
             </button>
           )}
 
-          {isAdmin && onDeleteQuestion && (
+          {(isAdmin || canDeleteQuestion) && onDeleteQuestion && (
             <button
               type="button"
               className="btn btn-danger btn-sm"
               onClick={() => onDeleteQuestion(question)}
             >
-              <Trash2 size={14} /> 삭제
+              <Trash2 size={14} /> {isAdmin ? '영구 삭제' : '질문 삭제'}
             </button>
           )}
 
@@ -303,7 +314,11 @@ const QuestionDetail = ({
           <span className="prof-pill">
             담당: {question.profName || question.assignedProfessorName || '담당교수'}
           </span>
-          {isSolved ? (
+          {question.isDeleted ? (
+            <span className="status-pill danger">
+              <Trash2 size={13} /> 질문자 삭제됨
+            </span>
+          ) : isSolved ? (
             <span className="status-pill success">
               <CheckCircle2 size={13} /> Solved ({profAnswers.length} Replies)
             </span>
@@ -321,6 +336,21 @@ const QuestionDetail = ({
 
         {!isEditing && <h2 className="forum-thread-h2">{question.title}</h2>}
       </div>
+
+      {question.isDeleted && (
+        <div className="deleted-question-notice">
+          <AlertCircle size={18} />
+          <div>
+            <strong>작성자에 의해 삭제된 질문입니다.</strong>
+            <p>
+              질문자가 해당 질문을 삭제하여 질문 원문 및 첨부파일이 비공개 처리되었으며, 새로운 답변이나 추가 질문을 등록할 수 없습니다.
+              {question.deletedAt
+                ? ` (삭제 일시: ${new Date(question.deletedAt).toLocaleString('ko-KR')})`
+                : ''}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 서양식 포럼 크로놀로지컬 포스트 스트림 (#1 OP -> #2, #3 Replies) */}
       <div className="forum-post-stream">
@@ -631,6 +661,43 @@ const QuestionDetail = ({
                       <p key={idx}>{line || '\u00A0'}</p>
                     ))}
                   </div>
+
+                  {(() => {
+                    const followUpOrig = (ans.originalContent || ans.rawContent || '').trim();
+                    const followUpCurrent = (ans.content || '').trim();
+                    const hasFollowUpOriginalDraft =
+                      isStudentFollowUp &&
+                      !question.isDeleted &&
+                      Boolean(followUpOrig) &&
+                      followUpOrig !== followUpCurrent;
+                    if (!hasFollowUpOriginalDraft) return null;
+                    const isFollowUpOrigExpanded = Boolean(expandedFollowUpOriginals[ans.id]);
+                    return (
+                      <div className="original-content-toggle">
+                        <button
+                          type="button"
+                          className="btn-text-xs"
+                          onClick={() =>
+                            setExpandedFollowUpOriginals((prev) => ({
+                              ...prev,
+                              [ans.id]: !prev[ans.id]
+                            }))
+                          }
+                        >
+                          <FileText size={13} />
+                          {isFollowUpOrigExpanded ? 'AI 교정 전 초안 접기' : 'AI 교정 전 초안 확인'}
+                        </button>
+                        {isFollowUpOrigExpanded && (
+                          <div className="original-content-box">
+                            <span className="original-label">AI 윤문 전 초안:</span>
+                            {followUpOrig.split('\n').map((line, idx) => (
+                              <p key={idx}>{line || '\u00A0'}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </article>
             );
@@ -709,7 +776,7 @@ const QuestionDetail = ({
             isAnonymous={Boolean(question.isAnonymous)}
             onApplyRefined={(refinedText, origText) => {
               setFollowUpText(refinedText);
-              setFollowUpOriginalText(origText || followUpText);
+              setFollowUpOriginalText((prev) => prev || origText || followUpText);
               setHasFollowUpAiRefined(true);
             }}
           />

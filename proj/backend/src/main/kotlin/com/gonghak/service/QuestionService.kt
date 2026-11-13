@@ -48,6 +48,13 @@ class QuestionService(
         val authorDisplay: String
     )
 
+    private data class AuthorDeleteResult(
+        val attachmentNames: List<String>,
+        val assignedProfId: UUID,
+        val courseName: String,
+        val questionTitle: String
+    )
+
     private data class AuthorSummary(
         val name: String,
         val role: String,
@@ -238,6 +245,10 @@ class QuestionService(
         categoryFilter: QuestionCategory? = null
     ): List<QuestionListItemDto> = dbQuery {
         val currentUserRow = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
+        val currentUserRole = currentUserRow?.let {
+            runCatching { UserRole.valueOf(it[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+        } ?: UserRole.STUDENT
+        val isProfessor = currentUserRole == UserRole.PROFESSOR
         val isAdmin = currentUserRow?.let {
             it[UsersTable.isAdmin] || it[UsersTable.role] == UserRole.ADMIN.name
         } ?: false
@@ -248,6 +259,9 @@ class QuestionService(
 
         val query = join.selectAll()
 
+        if (!isAdmin && !isProfessor) {
+            query.andWhere { QuestionsTable.isDeletedByAuthor eq false }
+        }
         courseIdFilter?.let { query.andWhere { QuestionsTable.courseId eq it } }
         categoryFilter?.let { query.andWhere { QuestionsTable.category eq it.name } }
 
@@ -271,6 +285,8 @@ class QuestionService(
             val isMyQuestion = (authorId == currentUserId)
             val isAnonymous = row[QuestionsTable.isAnonymous]
             val isQuestionHidden = row[QuestionsTable.isHidden]
+            val isQuestionDeleted = row[QuestionsTable.isDeletedByAuthor]
+            val deletedAtStr = row[QuestionsTable.deletedAt]?.toString()
             val courseName = row[CoursesTable.name]
             val authorDisplayTag = row[UsersTable.displayTag]
             val studentName = row[UsersTable.name]
@@ -292,10 +308,22 @@ class QuestionService(
             val actualContent = refinedContent.ifBlank { rawContent }
             val actualTitle = row[QuestionsTable.title]
 
-            val maskedForViewer = isQuestionHidden && !isAdmin
-            val displayTitle = if (maskedForViewer) "관리자에 의해 가려진 질문입니다." else actualTitle
-            val displayContent = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else actualContent
-            val displayOrigContent = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else rawContent
+            val maskedForHidden = isQuestionHidden && !isAdmin
+            val displayTitle = when {
+                isQuestionDeleted -> "[작성자 삭제] $actualTitle"
+                maskedForHidden -> "관리자에 의해 가려진 질문입니다."
+                else -> actualTitle
+            }
+            val displayContent = when {
+                isQuestionDeleted -> "질문 작성자에 의해 삭제된 게시물입니다."
+                maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+                else -> actualContent
+            }
+            val displayOrigContent = when {
+                isQuestionDeleted -> ""
+                maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+                else -> rawContent
+            }
 
             val answerDtos = rawAnswers.map { aRow ->
                 val aAuthorId = aRow[AnswersTable.professorId]
@@ -311,13 +339,15 @@ class QuestionService(
                     authorUuid = aAuthorId,
                     authorSummary = authorSummary,
                     rawContent = aRow[AnswersTable.content],
+                    originalDraftContent = aRow[AnswersTable.rawContent],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
                     isAnsHidden = aRow[AnswersTable.isHidden],
                     createdAt = aRow[AnswersTable.createdAt].toString(),
                     courseName = courseName,
                     isQuestionAnonymous = isAnonymous,
                     isMyQuestion = isMyQuestion,
-                    isAdminViewer = isAdmin
+                    isAdminViewer = isAdmin,
+                    isQuestionDeleted = isQuestionDeleted
                 )
             }
 
@@ -325,7 +355,7 @@ class QuestionService(
             val hasAnswers = profAnswers.isNotEmpty()
             val isAnsweredByAssignedProfessor = profAnswers.any { it.isAssignedProfessor }
 
-            val visibleAttachments = if (maskedForViewer) {
+            val visibleAttachments = if (maskedForHidden || isQuestionDeleted) {
                 emptyList()
             } else {
                 attachmentsByQuestionId[qId]?.map { attRow ->
@@ -369,6 +399,9 @@ class QuestionService(
                 isAnonymous = isAnonymous,
                 isMyQuestion = isMyQuestion,
                 isHidden = isQuestionHidden,
+                isDeleted = isQuestionDeleted,
+                deletedAt = deletedAtStr,
+                canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
                 status = QuestionStatus.valueOf(row[QuestionsTable.status]),
                 hasAnswers = hasAnswers,
                 isAnsweredByAssignedProfessor = isAnsweredByAssignedProfessor,
@@ -394,10 +427,18 @@ class QuestionService(
         val currentUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
 
         val currentUserRole = currentUser?.let { runCatching { UserRole.valueOf(it[UsersTable.role]) }.getOrDefault(UserRole.STUDENT) } ?: UserRole.STUDENT
+        val isProfessor = currentUserRole == UserRole.PROFESSOR
         val isAdmin = currentUser?.let { it[UsersTable.isAdmin] || currentUserRole == UserRole.ADMIN } ?: false
         val isMyQuestion = (qRow[QuestionsTable.studentId] == currentUserId)
         val isAnonymous = qRow[QuestionsTable.isAnonymous]
         val isQuestionHidden = qRow[QuestionsTable.isHidden]
+        val isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor]
+        val deletedAtStr = qRow[QuestionsTable.deletedAt]?.toString()
+
+        if (isQuestionDeleted && !isProfessor && !isAdmin) {
+            throw IllegalArgumentException("작성자에 의해 삭제된 질문입니다.")
+        }
+
         val courseName = course?.get(CoursesTable.name) ?: "강의"
         val authorTag = author?.get(UsersTable.displayTag) ?: "수강생"
         val authorName = author?.get(UsersTable.name) ?: "학생"
@@ -426,13 +467,15 @@ class QuestionService(
                         department = aRow[UsersTable.department]
                     ),
                     rawContent = aRow[AnswersTable.content],
+                    originalDraftContent = aRow[AnswersTable.rawContent],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
                     isAnsHidden = aRow[AnswersTable.isHidden],
                     createdAt = aRow[AnswersTable.createdAt].toString(),
                     courseName = courseName,
                     isQuestionAnonymous = isAnonymous,
                     isMyQuestion = isMyQuestion,
-                    isAdminViewer = isAdmin
+                    isAdminViewer = isAdmin,
+                    isQuestionDeleted = isQuestionDeleted
                 )
             }
 
@@ -441,7 +484,7 @@ class QuestionService(
         val isAnsweredByAssigned = profAnswers.any { it.isAssignedProfessor }
         val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
 
-        val canAnswer = calculateCanAnswer(
+        val canAnswer = !isQuestionDeleted && calculateCanAnswer(
             currentUserRole = currentUserRole,
             currentUserId = currentUserId,
             assignedProfessorId = assignedProfId,
@@ -449,13 +492,14 @@ class QuestionService(
             category = category,
             isAnsweredByAssignedProfessor = isAnsweredByAssigned
         )
-        val canFollowUp = (currentUserRole == UserRole.STUDENT) &&
+        val canFollowUp = !isQuestionDeleted &&
+            (currentUserRole == UserRole.STUDENT) &&
             isMyQuestion &&
             !isQuestionHidden &&
             profAnswers.isNotEmpty()
 
-        val maskedForViewer = isQuestionHidden && !isAdmin
-        val attachmentDtos = if (maskedForViewer) {
+        val maskedForHidden = isQuestionHidden && !isAdmin
+        val attachmentDtos = if (maskedForHidden || isQuestionDeleted) {
             emptyList()
         } else {
             AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
@@ -485,6 +529,27 @@ class QuestionService(
         val actualRefined = qRow[QuestionsTable.refinedContent]
         val actualContent = actualRefined.ifBlank { actualRaw }
 
+        val displayTitle = when {
+            isQuestionDeleted -> "[작성자 삭제] $actualTitle"
+            maskedForHidden -> "관리자에 의해 가려진 질문입니다."
+            else -> actualTitle
+        }
+        val displayContent = when {
+            isQuestionDeleted -> "질문 작성자에 의해 삭제된 게시물입니다."
+            maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+            else -> actualContent
+        }
+        val displayOrigContent = when {
+            isQuestionDeleted -> ""
+            maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+            else -> actualRaw
+        }
+        val displayRefinedContent = when {
+            isQuestionDeleted -> "질문 작성자에 의해 삭제된 게시물입니다."
+            maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+            else -> actualRefined
+        }
+
         return QuestionDetailDto(
             id = questionId.toString(),
             courseId = qRow[QuestionsTable.courseId].toString(),
@@ -492,11 +557,11 @@ class QuestionService(
             profId = assignedProfId.toString(),
             profName = assignedProfName,
             category = category,
-            title = if (maskedForViewer) "관리자에 의해 가려진 질문입니다." else actualTitle,
-            content = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else actualContent,
-            originalContent = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else actualRaw,
-            rawContent = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else actualRaw,
-            refinedContent = if (maskedForViewer) "관리자에 의해 가려진 게시물입니다." else actualRefined,
+            title = displayTitle,
+            content = displayContent,
+            originalContent = displayOrigContent,
+            rawContent = displayOrigContent,
+            refinedContent = displayRefinedContent,
             studentId = if (isAnonymous && !isMyQuestion && !isAdmin) null else qRow[QuestionsTable.studentId].toString(),
             studentTag = if (isAnonymous && !isMyQuestion && !isAdmin) "$courseName 수강생" else authorTag,
             studentName = if (isAnonymous && !isMyQuestion && !isAdmin) "익명 수강생" else authorName,
@@ -508,6 +573,9 @@ class QuestionService(
             isAnonymous = isAnonymous,
             isMyQuestion = isMyQuestion,
             isHidden = isQuestionHidden,
+            isDeleted = isQuestionDeleted,
+            deletedAt = deletedAtStr,
+            canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
             assignedProfessorId = assignedProfId.toString(),
             assignedProfessorName = assignedProfName,
             isAnsweredByAssignedProfessor = isAnsweredByAssigned,
@@ -548,6 +616,7 @@ class QuestionService(
             professorDepartment = aRow[UsersTable.department],
             authorRole = authorRole,
             content = aRow[AnswersTable.content],
+            originalContent = if (authorRole == UserRole.STUDENT.name) aRow[AnswersTable.rawContent] else "",
             isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
             isHidden = isHidden,
             createdAt = aRow[AnswersTable.createdAt].toString()
@@ -575,6 +644,58 @@ class QuestionService(
         }
 
         attachmentService?.deleteStoredFiles(savedAttachmentNames)
+        return true
+    }
+
+    /**
+     * Soft-deletes a question by its student author: hides it from students and similarity
+     * search, purges stored attachments, blocks further replies, and notifies the assigned
+     * professor while leaving a redacted tombstone visible to professors and admins.
+     */
+    suspend fun deleteQuestionByAuthor(questionId: UUID, currentUserId: UUID): Boolean {
+        val result = dbQuery {
+            val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+                ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+
+            val currentUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
+                ?: throw IllegalArgumentException("사용자 계정을 찾을 수 없습니다.")
+
+            val role = runCatching { UserRole.valueOf(currentUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+            if (role != UserRole.STUDENT || qRow[QuestionsTable.studentId] != currentUserId) {
+                throw IllegalStateException("질문을 작성한 학생 본인만 삭제할 수 있습니다.")
+            }
+
+            if (qRow[QuestionsTable.isDeletedByAuthor]) {
+                throw IllegalArgumentException("이미 삭제된 질문입니다.")
+            }
+
+            val attachmentNames = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+                .map { it[AttachmentsTable.savedName] }
+            AttachmentsTable.deleteWhere { AttachmentsTable.questionId eq questionId }
+
+            QuestionsTable.update({ QuestionsTable.id eq questionId }) {
+                it[isDeletedByAuthor] = true
+                it[deletedAt] = Instant.now()
+            }
+
+            val courseName = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }
+                .singleOrNull()?.get(CoursesTable.name) ?: "강의"
+
+            AuthorDeleteResult(
+                attachmentNames = attachmentNames,
+                assignedProfId = qRow[QuestionsTable.assignedProfessorId],
+                courseName = courseName,
+                questionTitle = qRow[QuestionsTable.title]
+            )
+        }
+
+        attachmentService?.deleteStoredFiles(result.attachmentNames)
+        notificationService.notifyQuestionDeletedByAuthor(
+            assignedProfessorId = result.assignedProfId,
+            courseName = result.courseName,
+            questionId = questionId,
+            questionTitle = result.questionTitle
+        )
         return true
     }
 
@@ -607,6 +728,10 @@ class QuestionService(
         val (detail, newVectorText) = dbQuery {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+
+            if (qRow[QuestionsTable.isDeletedByAuthor]) {
+                throw IllegalStateException("삭제된 질문은 수정할 수 없습니다.")
+            }
 
             val authorId = qRow[QuestionsTable.studentId]
             if (authorId != currentUserId) {
@@ -654,6 +779,10 @@ class QuestionService(
         val created = dbQuery {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+
+            if (qRow[QuestionsTable.isDeletedByAuthor]) {
+                throw IllegalStateException("작성자에 의해 삭제된 질문에는 답변을 등록할 수 없습니다.")
+            }
 
             val profUser = UsersTable.select { UsersTable.id eq professorId }.singleOrNull()
                 ?: throw IllegalArgumentException("교수 계정을 찾을 수 없습니다.")
@@ -763,6 +892,9 @@ class QuestionService(
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
+            if (qRow[QuestionsTable.isDeletedByAuthor]) {
+                throw IllegalStateException("작성자에 의해 삭제된 질문에는 추가 질문을 작성할 수 없습니다.")
+            }
             if (qRow[QuestionsTable.isHidden]) {
                 throw IllegalStateException("가려진 질문에는 추가 질문을 작성할 수 없습니다.")
             }
@@ -799,11 +931,13 @@ class QuestionService(
             val courseName = course[CoursesTable.name]
             val followUpId = UUID.randomUUID()
             val now = Instant.now()
+            val originalDraft = request.originalContent?.trim()?.takeIf { it.isNotBlank() } ?: cleanContent
 
             AnswersTable.insert {
                 it[id] = followUpId
                 it[AnswersTable.questionId] = questionId
                 it[professorId] = studentId
+                it[rawContent] = originalDraft
                 it[content] = cleanContent
                 it[isAssignedProfessor] = false
                 it[isHidden] = false
@@ -827,6 +961,7 @@ class QuestionService(
                     department = studentUser[UsersTable.department]
                 ),
                 rawContent = cleanContent,
+                originalDraftContent = originalDraft,
                 isAssignedProfessor = false,
                 isAnsHidden = false,
                 createdAt = now.toString(),
@@ -874,7 +1009,8 @@ class QuestionService(
             val questions = QuestionsTable.select {
                 (QuestionsTable.courseId eq courseId) and
                         (QuestionsTable.category eq category.name) and
-                        (QuestionsTable.isHidden eq false)
+                        (QuestionsTable.isHidden eq false) and
+                        (QuestionsTable.isDeletedByAuthor eq false)
             }.toList()
 
             val profNames = UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
@@ -999,13 +1135,15 @@ class QuestionService(
         authorUuid: UUID,
         authorSummary: AuthorSummary,
         rawContent: String,
+        originalDraftContent: String = "",
         isAssignedProfessor: Boolean,
         isAnsHidden: Boolean,
         createdAt: String,
         courseName: String,
         isQuestionAnonymous: Boolean,
         isMyQuestion: Boolean,
-        isAdminViewer: Boolean
+        isAdminViewer: Boolean,
+        isQuestionDeleted: Boolean = false
     ): AnswerDto {
         val isStudentFollowUp = authorSummary.role == UserRole.STUDENT.name
         val maskedId = if (isStudentFollowUp && isQuestionAnonymous && !isMyQuestion && !isAdminViewer) {
@@ -1024,10 +1162,17 @@ class QuestionService(
             isAssignedProfessor -> "담당교수"
             else -> "같은 과목 교수 (공동 답변)"
         }
-        val safeContent = if (isAnsHidden && !isAdminViewer) {
-            if (isStudentFollowUp) "관리자에 의해 가려진 질문입니다." else "관리자에 의해 가려진 답변입니다."
-        } else {
-            rawContent
+        val maskedByDeletion = isQuestionDeleted && isStudentFollowUp
+        val safeContent = when {
+            maskedByDeletion -> "작성자에 의해 삭제된 내용입니다."
+            isAnsHidden && !isAdminViewer -> if (isStudentFollowUp) "관리자에 의해 가려진 질문입니다." else "관리자에 의해 가려진 답변입니다."
+            else -> rawContent
+        }
+        val safeOriginalContent = when {
+            !isStudentFollowUp -> ""
+            maskedByDeletion -> ""
+            isAnsHidden && !isAdminViewer -> ""
+            else -> originalDraftContent
         }
 
         return AnswerDto(
@@ -1042,6 +1187,7 @@ class QuestionService(
             authorTitle = authorTitle,
             isPrimaryProf = !isStudentFollowUp && isAssignedProfessor,
             content = safeContent,
+            originalContent = safeOriginalContent,
             isAssignedProfessor = !isStudentFollowUp && isAssignedProfessor,
             isHidden = isAnsHidden,
             createdAt = createdAt

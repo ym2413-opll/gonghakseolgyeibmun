@@ -62,7 +62,7 @@ const ProfessorDashboard = ({
       const hasPrimaryAnswer =
         q.isAnsweredByAssignedProfessor ||
         (q.answers || []).some((a) => a.isPrimaryProf || a.isAssignedProfessor);
-      return isMyCourseGroup && isOtherProf && isLectureCat && !hasPrimaryAnswer;
+      return isMyCourseGroup && isOtherProf && isLectureCat && !hasPrimaryAnswer && !q.isDeleted;
     });
 
     const allMyCourseQuestions = questions.filter(
@@ -93,8 +93,8 @@ const ProfessorDashboard = ({
         return false;
       }
       const solved = isQuestionSolved(q);
-      if (statusFilter === 'UNANSWERED' && solved) return false;
-      if (statusFilter === 'ANSWERED' && !solved) return false;
+      if (statusFilter === 'UNANSWERED' && (solved || q.isDeleted)) return false;
+      if (statusFilter === 'ANSWERED' && (!solved || q.isDeleted)) return false;
       if (searchQuery.trim()) {
         const kw = searchQuery.toLowerCase();
         return (
@@ -108,7 +108,7 @@ const ProfessorDashboard = ({
   }, [activeTab, categorizedLists, selectedCategory, statusFilter, searchQuery]);
 
   const unansweredAssignedCount = categorizedLists.myAssigned.filter(
-    (q) => !isQuestionSolved(q)
+    (q) => !isQuestionSolved(q) && !q.isDeleted
   ).length;
   const coProfAvailableCount = categorizedLists.coProfLecture.length;
 
