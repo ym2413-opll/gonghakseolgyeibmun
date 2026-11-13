@@ -147,4 +147,27 @@ class WorkerSeparationTest {
         assertTrue(decoded.width <= 1280)
         assertTrue(decoded.height <= 1280)
     }
+
+    @Test
+    fun testLegacyNullCreatedAtMigrationDoesNotCrashInit() {
+        DatabaseFactory.init()
+        val legacyUserId = UUID.randomUUID()
+        transaction {
+            exec("ALTER TABLE users ALTER COLUMN created_at DROP NOT NULL")
+            exec(
+                """
+                INSERT INTO users (id, name, role, identifier, department, display_tag, is_demo, is_admin, is_withdrawn, created_at)
+                VALUES ('$legacyUserId', '레거시사용자', 'STUDENT', '2020999999', '컴퓨터공학과', '컴공20', false, false, false, NULL)
+                """.trimIndent()
+            )
+        }
+
+        // Must backfill NULL created_at and apply DDL without aborting subsequent seeding
+        DatabaseFactory.init()
+
+        val migratedCreatedAt = transaction {
+            UsersTable.select { UsersTable.id eq legacyUserId }.singleOrNull()?.get(UsersTable.createdAt)
+        }
+        assertNotNull(migratedCreatedAt, "Legacy user created_at NULL should be backfilled on DatabaseFactory.init()")
+    }
 }

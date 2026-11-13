@@ -27,28 +27,58 @@ object DatabaseFactory {
         val pool = createDataSource(config)
         Database.connect(pool)
 
+        val tables = arrayOf(
+            UsersTable,
+            DepartmentsTable,
+            CoursesTable,
+            CourseProfessorsTable,
+            EnrollmentsTable,
+            ProfessorCategorySettingsTable,
+            ProfessorNotificationSettingsTable,
+            UserSettingsTable,
+            QuestionsTable,
+            AnswersTable,
+            NotificationsTable,
+            AttachmentsTable,
+            EmailLogsTable
+        )
+
+        // 1. Create missing tables first in an isolated transaction
         transaction {
-            val tables = arrayOf(
-                UsersTable,
-                DepartmentsTable,
-                CoursesTable,
-                CourseProfessorsTable,
-                EnrollmentsTable,
-                ProfessorCategorySettingsTable,
-                ProfessorNotificationSettingsTable,
-                UserSettingsTable,
-                QuestionsTable,
-                AnswersTable,
-                NotificationsTable,
-                AttachmentsTable,
-                EmailLogsTable
-            )
             SchemaUtils.create(*tables)
+        }
+
+        // 2. Backfill legacy nullable timestamps so PostgreSQL NOT NULL alterations never fail
+        val timestampTables = listOf(
+            "users", "departments", "questions", "answers",
+            "notifications", "attachments", "email_logs"
+        )
+        for (tableName in timestampTables) {
             runCatching {
-                SchemaUtils.createMissingTablesAndColumns(*tables)
-            }.onFailure {
-                logger.warn("createMissingTablesAndColumns warning: ${it.message}")
+                transaction {
+                    exec("UPDATE $tableName SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+                }
             }
+        }
+
+        // 3. Apply each missing-column / DDL statement in its own transaction so one failure
+        // never poisons a PostgreSQL transaction block for subsequent statements or seeding
+        val ddlStatements = runCatching {
+            transaction {
+                SchemaUtils.addMissingColumnsStatements(*tables)
+            }
+        }.getOrElse { emptyList() }
+
+        for (stmt in ddlStatements) {
+            runCatching {
+                transaction { exec(stmt) }
+            }.onFailure {
+                logger.warn("DDL statement skipped ($stmt): ${it.message}")
+            }
+        }
+
+        // 4. Seed reference and demo data in a clean transaction
+        transaction {
             seedDefaultDepartments()
             seedConvertedCoursesData()
             seedDemoData()
