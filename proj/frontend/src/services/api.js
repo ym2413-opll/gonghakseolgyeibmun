@@ -397,7 +397,9 @@ export const api = {
 
     const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
     const target = localUsers.find(
-      u => u.username === cleanUsername || (u.role === 'student' && (u.identifier || '').toLowerCase() === cleanUsername)
+      u =>
+        (u.username || '').trim().toLowerCase() === cleanUsername ||
+        (u.role === 'student' && (u.identifier || '').trim().toLowerCase() === cleanUsername)
     );
     if (!target) {
       throw new Error('아이디(학번) 또는 비밀번호가 일치하지 않습니다.');
@@ -537,6 +539,7 @@ export const api = {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
         const res = await fetch(`${API_BASE_URL}/courses`, {
+          credentials: 'include',
           headers: getAuthHeaders(uid),
           signal: controller.signal
         });

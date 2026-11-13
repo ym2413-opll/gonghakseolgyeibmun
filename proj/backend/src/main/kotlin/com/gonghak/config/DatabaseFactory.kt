@@ -48,7 +48,7 @@ object DatabaseFactory {
             SchemaUtils.create(*tables)
         }
 
-        // 2. Backfill legacy nullable timestamps only when the column already exists
+        // 2. Backfill legacy nullable timestamps and token_version only when the column already exists
         val timestampTables = listOf(
             "users", "departments", "questions", "answers",
             "notifications", "attachments", "email_logs"
@@ -68,6 +68,19 @@ object DatabaseFactory {
                 }
             }
         }
+        runCatching {
+            transaction {
+                var hasTokenVersion = false
+                exec(
+                    "SELECT 1 FROM information_schema.columns WHERE LOWER(table_name) = 'users' AND LOWER(column_name) = 'token_version'"
+                ) { rs ->
+                    if (rs.next()) hasTokenVersion = true
+                }
+                if (hasTokenVersion) {
+                    exec("UPDATE users SET token_version = 0 WHERE token_version IS NULL")
+                }
+            }
+        }
 
         // 3. Apply each missing-column / DDL statement in its own transaction so one failure
         // never poisons a PostgreSQL transaction block for subsequent statements or seeding
@@ -78,14 +91,17 @@ object DatabaseFactory {
         }.getOrElse { emptyList() }
 
         for (rawStmt in ddlStatements) {
-            val stmt = if (
+            val stmt = when {
                 rawStmt.contains(" ADD ", ignoreCase = true) &&
-                rawStmt.contains("TIMESTAMP NOT NULL", ignoreCase = true) &&
-                !rawStmt.contains(" DEFAULT ", ignoreCase = true)
-            ) {
-                "$rawStmt DEFAULT CURRENT_TIMESTAMP"
-            } else {
-                rawStmt
+                    rawStmt.contains("TIMESTAMP NOT NULL", ignoreCase = true) &&
+                    !rawStmt.contains(" DEFAULT ", ignoreCase = true) ->
+                    "$rawStmt DEFAULT CURRENT_TIMESTAMP"
+                rawStmt.contains(" ADD ", ignoreCase = true) &&
+                    rawStmt.contains("token_version", ignoreCase = true) &&
+                    rawStmt.contains("NOT NULL", ignoreCase = true) &&
+                    !rawStmt.contains(" DEFAULT ", ignoreCase = true) ->
+                    "$rawStmt DEFAULT 0"
+                else -> rawStmt
             }
             runCatching {
                 transaction { exec(stmt) }

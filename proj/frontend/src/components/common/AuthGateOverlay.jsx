@@ -83,7 +83,7 @@ const AuthGateOverlay = () => {
     setErrorMsg('');
     setIsSubmitting(true);
     try {
-      await login(loginId, password);
+      await login(loginId, loginPassword);
     } catch (err) {
       setErrorMsg(err.message || '로그인에 실패했습니다.');
     } finally {
@@ -199,7 +199,7 @@ const AuthGateOverlay = () => {
                 id="login-username"
                 type="text"
                 className="form-input"
-                placeholder="학번 또는 교수 아이디"
+                placeholder="학번 또는 아이디"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
                 required

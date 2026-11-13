@@ -424,5 +424,126 @@ class R3OverhaulTest {
             setBody(LoginRequest(username = "20265545", password = "password1234"))
         }
         assertEquals(HttpStatusCode.OK, loginByLegacyIdentifierRes.status)
+
+        // 4. Legacy account can ALSO log in via its original username (case-insensitive)
+        val loginByLegacyUsernameRes = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "LEGACY_STU_LOGIN", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, loginByLegacyUsernameRes.status)
+    }
+
+    @Test
+    fun testLegacyIdAndStudentNumberLoginEdgeCases() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // 1. Legacy ID + 학번 student sharing identifier with a seeded demo student ("20261101")
+        val regDemoCollideRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "LegacyDemoCollide",
+                    password = "password1234",
+                    name = "김데모충돌",
+                    department = "소프트웨어학과",
+                    identifier = "20261101"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, regDemoCollideRes.status)
+        val regDemoCollide = regDemoCollideRes.body<ApiResponse<AuthResponse>>().data!!
+
+        // Login via legacy username (case-insensitive)
+        val byUsername = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "legacydemocollide", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, byUsername.status)
+        assertEquals(regDemoCollide.user.id, byUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
+
+        // Login via 학번 (must ignore demo user 11111111-...-1101 and authenticate the real account)
+        val byStudentId = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "20261101", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, byStudentId.status)
+        assertEquals(regDemoCollide.user.id, byStudentId.body<ApiResponse<AuthResponse>>().data?.user?.id)
+
+        // 2. Legacy student whose alphanumeric identifier contains uppercase letters (frontend lowercases input)
+        val regAlphaIdRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "legacy_alpha_stu",
+                    password = "password1234",
+                    name = "박영문학번",
+                    department = "컴퓨터공학과",
+                    identifier = "KW2026A01"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, regAlphaIdRes.status)
+        val regAlpha = regAlphaIdRes.body<ApiResponse<AuthResponse>>().data!!
+
+        val byLowercaseAlphaSid = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "kw2026a01", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, byLowercaseAlphaSid.status)
+        assertEquals(regAlpha.user.id, byLowercaseAlphaSid.body<ApiResponse<AuthResponse>>().data?.user?.id)
+
+        // 3. Cross-user overlap: User1 has legacy username + 학번 "20266188", while User2 has username "20266188"
+        val user1 = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "overlap_legacy_id",
+                    password = "pass_user1",
+                    name = "구계정학생",
+                    department = "소프트웨어학과",
+                    identifier = "20266188"
+                )
+            )
+        }.body<ApiResponse<AuthResponse>>().data!!
+
+        val user2 = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "20266188",
+                    password = "pass_user2",
+                    name = "동명아이디",
+                    department = "소프트웨어학과",
+                    identifier = "20266199"
+                )
+            )
+        }.body<ApiResponse<AuthResponse>>().data!!
+
+        val loginOverlapUser1BySid = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "20266188", password = "pass_user1"))
+        }
+        assertEquals(HttpStatusCode.OK, loginOverlapUser1BySid.status)
+        assertEquals(user1.user.id, loginOverlapUser1BySid.body<ApiResponse<AuthResponse>>().data?.user?.id)
+
+        val loginOverlapUser2ByUsername = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "20266188", password = "pass_user2"))
+        }
+        assertEquals(HttpStatusCode.OK, loginOverlapUser2ByUsername.status)
+        assertEquals(user2.user.id, loginOverlapUser2ByUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
+
+        val loginOverlapUser1ByUsername = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "overlap_legacy_id", password = "pass_user1"))
+        }
+        assertEquals(HttpStatusCode.OK, loginOverlapUser1ByUsername.status)
+        assertEquals(user1.user.id, loginOverlapUser1ByUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
     }
 }

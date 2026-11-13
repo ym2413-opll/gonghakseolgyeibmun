@@ -286,22 +286,46 @@ class UserService {
         if (cleanLoginId.isBlank() || request.password.isBlank()) {
             throw IllegalArgumentException("아이디(학번)와 비밀번호를 모두 입력해 주세요.")
         }
+        val cleanLoginLower = cleanLoginId.lowercase()
 
-        val row = UsersTable.select {
-            UsersTable.username.lowerCase() eq cleanLoginId.lowercase()
-        }.singleOrNull()
-            ?: UsersTable.select {
-                (UsersTable.role eq UserRole.STUDENT.name) and (UsersTable.identifier eq cleanLoginId)
-            }.firstOrNull()
-            ?: throw IllegalArgumentException("존재하지 않는 아이디(학번)이거나 비밀번호가 올바르지 않습니다.")
+        // Match real registered accounts by username OR non-professor identifier (학번 등).
+        // Collect all candidates instead of .singleOrNull() / .firstOrNull() so demo rows (isDemo=true),
+        // withdrawn duplicates, case differences, or username/identifier overlaps never block active login.
+        val candidates = UsersTable.select {
+            (UsersTable.isDemo eq false) and
+                UsersTable.passwordHash.isNotNull() and
+                (
+                    (UsersTable.username.lowerCase() eq cleanLoginLower) or
+                        (
+                            (UsersTable.role.lowerCase() neq UserRole.PROFESSOR.name.lowercase()) and
+                                (UsersTable.identifier.lowerCase() eq cleanLoginLower)
+                        )
+                )
+        }.toList()
 
-        if (row[UsersTable.isWithdrawn]) {
-            throw IllegalStateException("관리자에 의해 탈퇴 처리된 계정입니다. 로그인이 제한됩니다.")
+        if (candidates.isEmpty()) {
+            throw IllegalArgumentException("존재하지 않는 아이디(학번)이거나 비밀번호가 올바르지 않습니다.")
         }
 
-        val isValid = PasswordSecurity.verifyPassword(request.password, row[UsersTable.passwordHash])
-        if (!isValid) {
-            throw IllegalArgumentException("존재하지 않는 아이디이거나 비밀번호가 올바르지 않습니다.")
+        val orderedCandidates = candidates.sortedBy { row ->
+            if (row[UsersTable.username]?.trim()?.lowercase() == cleanLoginLower) 0 else 1
+        }
+        val activeCandidates = orderedCandidates.filter { !it[UsersTable.isWithdrawn] }
+        val matchedActiveRow = activeCandidates.firstOrNull { row ->
+            PasswordSecurity.verifyPassword(request.password, row[UsersTable.passwordHash])
+        }
+
+        val row = if (matchedActiveRow != null) {
+            matchedActiveRow
+        } else {
+            val withdrawnCandidates = orderedCandidates.filter { it[UsersTable.isWithdrawn] }
+            if (withdrawnCandidates.any { candidate ->
+                    PasswordSecurity.verifyPassword(request.password, candidate[UsersTable.passwordHash])
+                }
+            ) {
+                throw IllegalStateException("관리자에 의해 탈퇴 처리된 계정입니다. 로그인이 제한됩니다.")
+            }
+            throw IllegalArgumentException("존재하지 않는 아이디(학번)이거나 비밀번호가 올바르지 않습니다.")
         }
 
         val uId = row[UsersTable.id].value
