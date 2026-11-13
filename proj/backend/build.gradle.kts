@@ -58,6 +58,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    systemProperty("gonghak.uploadDir", layout.buildDirectory.dir("test-uploads/attachments").get().asFile.absolutePath)
 }
 
 tasks.register<Exec>("convertCourses") {

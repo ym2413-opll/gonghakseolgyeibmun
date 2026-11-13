@@ -173,6 +173,24 @@ ensure_writable_for_deploy() {
   fi
 }
 
+UPLOADS_CHOWNED_FOR_PULL=0
+
+restore_uploads_owner() {
+  if [[ -d "$BE_DIR/uploads" ]] && id "$SERVICE_USER" >/dev/null 2>&1; then
+    local service_group
+    service_group="$(id -gn "$SERVICE_USER" 2>/dev/null || echo "$SERVICE_USER")"
+    run_priv chown -R "$SERVICE_USER:$service_group" "$BE_DIR/uploads"
+  fi
+  UPLOADS_CHOWNED_FOR_PULL=0
+}
+
+cleanup_on_exit() {
+  if [[ "${UPLOADS_CHOWNED_FOR_PULL:-0}" -eq 1 ]]; then
+    restore_uploads_owner || true
+  fi
+}
+trap cleanup_on_exit EXIT
+
 detect_backend_service() {
   if [[ -n "$BACKEND_SERVICE" ]]; then
     echo "$BACKEND_SERVICE"
@@ -234,8 +252,25 @@ if [[ "$DO_PULL" -eq 1 ]]; then
   OLD_COMMIT="$(run_deploy git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
   run_deploy git fetch --all --prune
   run_deploy git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1 || die "원격 브랜치 'origin/$BRANCH'를 찾을 수 없습니다."
+
+  # uploads 디렉터리가 www-data 등 서비스 계정 소유일 때 Git 추적 파일 갱신이 Permission denied로 실패하지 않도록
+  # 동기화 동안만 임시로 배포 계정 쓰기 권한을 부여하고, 완료/종료 시 즉시 서비스 계정으로 원복한다.
+  if [[ -d "$BE_DIR/uploads" ]]; then
+    if [[ "$DO_BE" -eq 1 ]] \
+       || ! run_deploy git diff --quiet HEAD "origin/$BRANCH" -- "$BE_DIR/uploads" 2>/dev/null \
+       || [[ -n "$(run_deploy git status --porcelain -- "$BE_DIR/uploads" 2>/dev/null)" ]]; then
+      ensure_writable_for_deploy "$BE_DIR/uploads"
+      UPLOADS_CHOWNED_FOR_PULL=1
+    fi
+  fi
+
   run_deploy git checkout -f "$BRANCH" >/dev/null 2>&1 || run_deploy git checkout -B "$BRANCH" "origin/$BRANCH"
   run_deploy git reset --hard "origin/$BRANCH"
+
+  if [[ "$UPLOADS_CHOWNED_FOR_PULL" -eq 1 ]]; then
+    restore_uploads_owner
+  fi
+
   NEW_COMMIT="$(run_deploy git rev-parse --short HEAD)"
   COMMIT_MSG="$(run_deploy git log -n 1 --pretty=format:'%s')"
   NEW_LOCK_HASH="$(sha256_or_empty "$LOCK_FILE")"

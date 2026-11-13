@@ -38,7 +38,14 @@ fun Application.module() {
     val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
     val aiRefineService = AiRefineService(geminiApiKey, workerManager)
     val userService = UserService()
-    val attachmentService = AttachmentService(workerManager = workerManager)
+    val uploadDirPath = System.getProperty("gonghak.uploadDir")
+        ?: environment.config.propertyOrNull("storage.uploadDir")?.getString()
+        ?: System.getenv("UPLOAD_DIR")?.takeIf { it.isNotBlank() }
+        ?: "uploads/attachments"
+    val attachmentService = AttachmentService(
+        uploadDirPath = uploadDirPath,
+        workerManager = workerManager
+    )
     val questionService = QuestionService(
         similarityService = similarityService,
         notificationService = notificationService,
