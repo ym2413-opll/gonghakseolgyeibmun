@@ -39,7 +39,7 @@ data class UserDto(
 @Serializable
 data class RegisterRequest(
     val role: UserRole = UserRole.STUDENT,
-    val username: String,
+    val username: String = "",
     val password: String,
     val name: String? = null,
     val department: String,
@@ -270,6 +270,10 @@ data class RefineQuestionRequest(
     val title: String? = null,
     val rawTitle: String? = null,
     val courseName: String? = null,
+    val professorName: String? = null,
+    val studentName: String? = null,
+    val studentDepartment: String? = null,
+    val studentIdentifier: String? = null,
     val category: QuestionCategory? = null,
     val studentInfo: Map<String, String>? = null
 ) {
@@ -278,6 +282,22 @@ data class RefineQuestionRequest(
 
     val effectiveTitle: String?
         get() = title?.takeIf { it.isNotBlank() } ?: rawTitle?.takeIf { it.isNotBlank() }
+
+    val effectiveProfessorName: String?
+        get() = professorName?.takeIf { it.isNotBlank() }
+
+    val effectiveStudentName: String?
+        get() = studentName?.takeIf { it.isNotBlank() }
+            ?: studentInfo?.get("name")?.takeIf { it.isNotBlank() }
+
+    val effectiveStudentDepartment: String?
+        get() = studentDepartment?.takeIf { it.isNotBlank() }
+            ?: studentInfo?.get("department")?.takeIf { it.isNotBlank() }
+
+    val effectiveStudentIdentifier: String?
+        get() = studentIdentifier?.takeIf { it.isNotBlank() }
+            ?: studentInfo?.get("studentId")?.takeIf { it.isNotBlank() }
+            ?: studentInfo?.get("identifier")?.takeIf { it.isNotBlank() }
 }
 
 @Serializable

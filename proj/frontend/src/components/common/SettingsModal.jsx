@@ -1,13 +1,13 @@
 // src/components/common/SettingsModal.jsx
 import React from 'react';
 import { useTheme } from '../../context/ThemeContext';
-import { X, Sun, Moon, Leaf, Type, Check } from 'lucide-react';
+import { Sun, Moon, Leaf, Type, X, Check } from 'lucide-react';
 
 const FONT_SIZE_OPTIONS = [
-  { id: 'sm', label: '작게 (Small)', sample: '14px 표준 텍스트' },
-  { id: 'md', label: '보통 (Medium - 기본)', sample: '16px 기본 가독성 텍스트' },
-  { id: 'lg', label: '크게 (Large)', sample: '18px 확대 가독성 텍스트' },
-  { id: 'xl', label: '매우 크게 (Extra Large)', sample: '20px 고대비 큰 글씨' }
+  { id: 'sm', label: '작게', sample: '가나다' },
+  { id: 'md', label: '보통', sample: '가나다' },
+  { id: 'lg', label: '크게', sample: '가나다' },
+  { id: 'xl', label: '아주 크게', sample: '가나다' }
 ];
 
 const SettingsModal = ({ isOpen, onClose }) => {
@@ -20,20 +20,17 @@ const SettingsModal = ({ isOpen, onClose }) => {
       <div className="modal-container modal-md" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
-            <Type size={20} className="text-primary" />
-            <span>화면 표시 설정 (테마 및 글자 크기)</span>
+            <Type size={19} className="text-primary" />
+            <span>화면 설정</span>
           </div>
-          <button className="btn-icon" onClick={onClose} aria-label="닫기">
-            <X size={20} />
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="닫기">
+            <X size={18} />
           </button>
         </div>
 
         <div className="modal-body">
           <div className="settings-section">
-            <h4 className="settings-section-title">화면 색상 테마</h4>
-            <p className="settings-section-desc">
-              학습 환경과 시력 보호에 맞춰 라이트, 다크, 또는 눈이 편한 초록색조(세이지 그린) 테마를 선택할 수 있습니다.
-            </p>
+            <h4 className="settings-section-title">테마</h4>
 
             <div className="theme-selector-grid theme-selector-grid-3">
               <button
@@ -42,13 +39,12 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 onClick={() => updateTheme('light')}
               >
                 <div className="theme-preview light-preview">
-                  <Sun size={24} />
+                  <Sun size={20} />
                 </div>
                 <div className="theme-option-info">
-                  <span className="theme-option-label">라이트 모드</span>
-                  <span className="theme-option-sub">밝고 선명한 캠퍼스 화이트</span>
+                  <span className="theme-option-label">라이트</span>
                 </div>
-                {theme === 'light' && <Check size={18} className="text-primary" />}
+                {theme === 'light' && <Check size={16} className="text-primary" />}
               </button>
 
               <button
@@ -57,13 +53,12 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 onClick={() => updateTheme('green')}
               >
                 <div className="theme-preview green-preview">
-                  <Leaf size={24} />
+                  <Leaf size={20} />
                 </div>
                 <div className="theme-option-info">
-                  <span className="theme-option-label">초록색조 테마</span>
-                  <span className="theme-option-sub">눈이 편한 세이지·포레스트 그린</span>
+                  <span className="theme-option-label">그린</span>
                 </div>
-                {theme === 'green' && <Check size={18} className="text-primary" />}
+                {theme === 'green' && <Check size={16} className="text-primary" />}
               </button>
 
               <button
@@ -72,24 +67,20 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 onClick={() => updateTheme('dark')}
               >
                 <div className="theme-preview dark-preview">
-                  <Moon size={24} />
+                  <Moon size={20} />
                 </div>
                 <div className="theme-option-info">
-                  <span className="theme-option-label">다크 모드</span>
-                  <span className="theme-option-sub">야간 눈부심 방지 다크 슬레이트</span>
+                  <span className="theme-option-label">다크</span>
                 </div>
-                {theme === 'dark' && <Check size={18} className="text-primary" />}
+                {theme === 'dark' && <Check size={16} className="text-primary" />}
               </button>
             </div>
           </div>
 
           <div className="settings-divider" />
 
-          <div className="settings-section">
-            <h4 className="settings-section-title">글자 크기 조절</h4>
-            <p className="settings-section-desc">
-              포럼 토픽 목록과 스레드 본문 전체의 글자 크기를 즉시 조정합니다.
-            </p>
+          <div className="settings-section" style={{ marginBottom: 0 }}>
+            <h4 className="settings-section-title">글자 크기</h4>
 
             <div className="fontsize-option-list">
               {FONT_SIZE_OPTIONS.map((option) => (
@@ -103,7 +94,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
                     <div className="fontsize-label">{option.label}</div>
                     <div className={`fontsize-sample sample-${option.id}`}>{option.sample}</div>
                   </div>
-                  {fontSize === option.id && <Check size={18} className="text-primary" />}
+                  {fontSize === option.id && <Check size={16} className="text-primary" />}
                 </button>
               ))}
             </div>
@@ -111,8 +102,8 @@ const SettingsModal = ({ isOpen, onClose }) => {
         </div>
 
         <div className="modal-footer">
-          <button className="btn btn-primary" onClick={onClose}>
-            확인
+          <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>
+            닫기
           </button>
         </div>
       </div>

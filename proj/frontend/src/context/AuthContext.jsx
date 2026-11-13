@@ -9,7 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [departments, setDepartments] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [authModalMode, setAuthModalMode] = useState('login'); // 'login' | 'register'
+  const [authModalMode, setAuthModalMode] = useState('prompt'); // 'prompt' | 'login' | 'register'
 
   const refreshCatalog = useCallback(async () => {
     try {
@@ -34,7 +34,7 @@ export const AuthProvider = ({ children }) => {
       const updated = await api.getUser(sessionUser.id);
       if (updated) {
         if (updated.isWithdrawn) {
-          api.logout();
+          api.logout({ skipRemote: true });
           setCurrentUser(null);
           return null;
         }
@@ -42,6 +42,11 @@ export const AuthProvider = ({ children }) => {
         return updated;
       }
     } catch (err) {
+      if (err?.status === 401 || err?.status === 403 || err?.message === 'UNAUTHORIZED') {
+        api.logout({ skipRemote: true });
+        setCurrentUser(null);
+        return null;
+      }
       console.warn('Session refresh warning:', err);
     }
     return sessionUser;
@@ -77,8 +82,9 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    api.logout();
+    void api.logout();
     setCurrentUser(null);
+    setAuthModalMode('prompt');
   };
 
   const isAuthenticated = Boolean(currentUser && currentUser.id && !currentUser.isWithdrawn);

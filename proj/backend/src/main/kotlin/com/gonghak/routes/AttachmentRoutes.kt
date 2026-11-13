@@ -2,7 +2,9 @@ package com.gonghak.routes
 
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.FileUploadResponse
+import com.gonghak.models.UserRole
 import com.gonghak.service.AttachmentService
+import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.application.*
@@ -14,15 +16,15 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
-fun Route.attachmentRoutes(attachmentService: AttachmentService) {
+fun Route.attachmentRoutes(
+    attachmentService: AttachmentService,
+    userService: UserService = UserService()
+) {
     route("/api/attachments") {
-        // 1. 파일 업로드 (보안 검사 및 이미지 압축)
+        // 1. 파일 업로드 (인증 필수, 보안 검사 및 이미지 압축)
         post("/upload") {
-            val uploaderId = try {
-                call.getCurrentUserId()
-            } catch (_: Exception) {
-                null
-            }
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            val uploaderId = UUID.fromString(user.id)
 
             var uploadedDto: com.gonghak.dto.AttachmentDto? = null
             var errorMsg: String? = null
@@ -92,13 +94,14 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
                 call.application.environment.log.error("Attachment upload failed: ${e.message}", e)
                 call.respond(
                     HttpStatusCode.InternalServerError,
-                    ApiResponse<String>(success = false, message = "파일 업로드 중 서버 오류가 발생했습니다: ${e.message}")
+                    ApiResponse<String>(success = false, message = "파일 업로드 중 서버 오류가 발생했습니다.")
                 )
             }
         }
 
         // 2. 파일 미리보기 / 보기
         get("/{id}") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
             val idParam = call.parameters["id"]
             val attachmentId = try {
                 UUID.fromString(idParam)
@@ -107,7 +110,13 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
                 return@get
             }
 
-            val pair = attachmentService.getAttachmentFile(attachmentId)
+            val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
+            val pair = try {
+                attachmentService.getAccessibleAttachmentFile(attachmentId, UUID.fromString(user.id), isAdmin)
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+                return@get
+            }
             if (pair == null || !pair.second.exists()) {
                 call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = "첨부파일을 찾을 수 없습니다."))
                 return@get
@@ -125,6 +134,7 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
 
         // 3. 파일 안전 다운로드 강제
         get("/{id}/download") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
             val idParam = call.parameters["id"]
             val attachmentId = try {
                 UUID.fromString(idParam)
@@ -133,7 +143,13 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
                 return@get
             }
 
-            val pair = attachmentService.getAttachmentFile(attachmentId)
+            val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
+            val pair = try {
+                attachmentService.getAccessibleAttachmentFile(attachmentId, UUID.fromString(user.id), isAdmin)
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+                return@get
+            }
             if (pair == null || !pair.second.exists()) {
                 call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = "첨부파일을 찾을 수 없습니다."))
                 return@get
@@ -144,11 +160,13 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
 
             call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"$encodedName\"; filename*=UTF-8''$encodedName")
             call.response.header("X-Content-Type-Options", "nosniff")
+            call.response.header("Content-Security-Policy", "sandbox")
             call.respondFile(file)
         }
 
         // 4. 첨부파일 삭제
         delete("/{id}") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@delete
             val idParam = call.parameters["id"]
             val attachmentId = try {
                 UUID.fromString(idParam)
@@ -157,14 +175,9 @@ fun Route.attachmentRoutes(attachmentService: AttachmentService) {
                 return@delete
             }
 
-            val currentUserId = try {
-                call.getCurrentUserId()
-            } catch (_: Exception) {
-                null
-            }
-
+            val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
             try {
-                val deleted = attachmentService.deleteAttachment(attachmentId, currentUserId)
+                val deleted = attachmentService.deleteAttachment(attachmentId, UUID.fromString(user.id), isAdmin = isAdmin)
                 if (deleted) {
                     call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = "파일이 성공적으로 삭제되었습니다."))
                 } else {

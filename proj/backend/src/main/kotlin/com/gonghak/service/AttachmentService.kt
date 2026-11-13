@@ -3,6 +3,7 @@ package com.gonghak.service
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.AttachmentDto
 import com.gonghak.models.AttachmentsTable
+import com.gonghak.models.QuestionsTable
 import com.gonghak.worker.ImageCompressionProcessor
 import com.gonghak.worker.SubprocessRunner
 import kotlinx.coroutines.withContext
@@ -87,6 +88,9 @@ class AttachmentService(
         validateMagicBytes(originalBytes, extension)
 
         val isImage = IMAGE_EXTENSIONS.contains(extension)
+        if (isImage) {
+            ImageCompressionProcessor.validateImageDimensions(originalBytes)
+        }
         val attachmentId = UUID.randomUUID()
         val safeSavedName = "${attachmentId}.$extension"
 
@@ -99,7 +103,7 @@ class AttachmentService(
             if (isImage) {
                 try {
                     val useSubprocess = System.getenv("IMAGE_SUBPROCESS_ENABLED")
-                        ?.trim()?.equals("true", ignoreCase = true) == true
+                        ?.trim()?.equals("false", ignoreCase = true) != true
                     val compressed = if (useSubprocess) {
                         SubprocessRunner.runImageCompressSubprocess(
                             originalBytes = originalBytes,
@@ -317,7 +321,11 @@ class AttachmentService(
     /**
      * 질문 ID와 첨부파일들 매핑
      */
-    suspend fun linkAttachmentsToQuestion(questionId: UUID, attachmentIds: List<String>) = dbQuery {
+    suspend fun linkAttachmentsToQuestion(
+        questionId: UUID,
+        attachmentIds: List<String>,
+        uploaderId: UUID? = null
+    ) = dbQuery {
         if (attachmentIds.isEmpty()) return@dbQuery
         val validUuids = attachmentIds.mapNotNull {
             try {
@@ -327,7 +335,10 @@ class AttachmentService(
             }
         }
         if (validUuids.isNotEmpty()) {
-            AttachmentsTable.update({ AttachmentsTable.id inList validUuids }) {
+            AttachmentsTable.update({
+                val baseCond = (AttachmentsTable.id inList validUuids) and AttachmentsTable.questionId.isNull()
+                if (uploaderId != null) baseCond and (AttachmentsTable.uploaderId eq uploaderId) else baseCond
+            }) {
                 it[AttachmentsTable.questionId] = questionId
             }
         }
@@ -360,12 +371,43 @@ class AttachmentService(
     }
 
     /**
+     * 첨부파일 메타데이터 및 물리 파일 조회 (작성자/숨김 질문 권한 검증 포함)
+     */
+    suspend fun getAccessibleAttachmentFile(
+        attachmentId: UUID,
+        requesterId: UUID,
+        isAdmin: Boolean = false
+    ): Pair<AttachmentDto, File>? = dbQuery {
+        val row = AttachmentsTable.select { AttachmentsTable.id eq attachmentId }.singleOrNull()
+            ?: return@dbQuery null
+
+        val linkedQuestionId = row[AttachmentsTable.questionId]
+        val uploaderId = row[AttachmentsTable.uploaderId]
+
+        if (linkedQuestionId == null) {
+            if (!isAdmin && uploaderId != requesterId) {
+                throw IllegalStateException("접근 권한이 없는 첨부파일입니다.")
+            }
+        } else if (!isAdmin) {
+            val qRow = QuestionsTable.select { QuestionsTable.id eq linkedQuestionId }.singleOrNull()
+            if (qRow != null && qRow[QuestionsTable.isHidden]) {
+                throw IllegalStateException("관리자에 의해 가려진 게시물의 첨부파일에 접근할 수 없습니다.")
+            }
+        }
+
+        rowToAttachmentFilePair(row)
+    }
+
+    /**
      * 첨부파일 메타데이터 및 물리 파일 조회
      */
     suspend fun getAttachmentFile(attachmentId: UUID): Pair<AttachmentDto, File>? = dbQuery {
         val row = AttachmentsTable.select { AttachmentsTable.id eq attachmentId }.singleOrNull()
             ?: return@dbQuery null
+        rowToAttachmentFilePair(row)
+    }
 
+    private fun rowToAttachmentFilePair(row: ResultRow): Pair<AttachmentDto, File> {
         val idStr = row[AttachmentsTable.id].value.toString()
         val savedName = row[AttachmentsTable.savedName]
         val file = File(uploadDirPath, savedName)
@@ -386,20 +428,19 @@ class AttachmentService(
             createdAt = row[AttachmentsTable.createdAt].toString()
         )
 
-        Pair(dto, file)
+        return Pair(dto, file)
     }
 
     /**
-     * 첨부파일 삭제
+     * 첨부파일 삭제 (본인 또는 관리자만 가능)
      */
-    suspend fun deleteAttachment(attachmentId: UUID, userId: UUID?): Boolean {
+    suspend fun deleteAttachment(attachmentId: UUID, userId: UUID?, isAdmin: Boolean = false): Boolean {
         val savedName = dbQuery(workerManager.attachmentDispatcher) {
             val row = AttachmentsTable.select { AttachmentsTable.id eq attachmentId }.singleOrNull()
                 ?: return@dbQuery null
 
-            // 질문에 이미 묶여있지 않거나 본인이 업로드한 경우만 삭제 가능
             val uploader = row[AttachmentsTable.uploaderId]
-            if (uploader != null && userId != null && uploader != userId) {
+            if (!isAdmin && (userId == null || uploader == null || uploader != userId)) {
                 throw IllegalStateException("본인이 업로드한 첨부파일만 삭제할 수 있습니다.")
             }
 
@@ -408,10 +449,17 @@ class AttachmentService(
             name
         } ?: return false
 
-        withContext(workerManager.attachmentDispatcher) {
-            Files.deleteIfExists(Paths.get(uploadDirPath, savedName))
-        }
+        deleteStoredFiles(listOf(savedName))
         return true
+    }
+
+    suspend fun deleteStoredFiles(savedNames: List<String>) {
+        if (savedNames.isEmpty()) return
+        withContext(workerManager.attachmentDispatcher) {
+            savedNames.forEach { savedName ->
+                runCatching { Files.deleteIfExists(Paths.get(uploadDirPath, savedName)) }
+            }
+        }
     }
 
     /**
@@ -433,13 +481,7 @@ class AttachmentService(
             names
         }
 
-        if (orphaned.isNotEmpty()) {
-            withContext(workerManager.attachmentDispatcher) {
-                orphaned.forEach { savedName ->
-                    runCatching { Files.deleteIfExists(Paths.get(uploadDirPath, savedName)) }
-                }
-            }
-        }
+        deleteStoredFiles(orphaned)
         return orphaned.size
     }
 

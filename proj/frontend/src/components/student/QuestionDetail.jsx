@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
+import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import AnswerForm from '../professor/AnswerForm';
 import AiRefineModal from './AiRefineModal';
 import {
@@ -376,12 +377,14 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
                   <div className="detail-attachments-grid">
                     {question.attachments.map((att, idx) => {
-                      const downloadHref = att.downloadUrl || att.url || `/api/attachments/${att.id}/download`;
-                      const previewSrc = att.previewUrl || att.url || `/api/attachments/${att.id}`;
+                      const rawDownloadHref = att.downloadUrl || att.url || `/api/attachments/${att.id}/download`;
+                      const rawPreviewSrc = att.previewUrl || att.url || `/api/attachments/${att.id}`;
+                      const downloadHref = isSafeAttachmentUrl(rawDownloadHref) ? rawDownloadHref : '';
+                      const previewSrc = isSafeAttachmentUrl(rawPreviewSrc) ? rawPreviewSrc : '';
 
                       return (
                         <div key={att.id || idx} className="detail-attachment-card">
-                          {att.isImage ? (
+                          {att.isImage && previewSrc ? (
                             <div
                               className="detail-att-thumb-wrap"
                               onClick={() => setActivePreviewImage({ url: previewSrc, name: att.originalName })}
@@ -413,18 +416,20 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                             </div>
                           </div>
 
-                          <a
-                            href={downloadHref}
-                            download={att.originalName}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="btn-download-att"
-                            title="안전 다운로드"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Download size={14} />
-                            <span>다운로드</span>
-                          </a>
+                          {downloadHref && (
+                            <a
+                              href={downloadHref}
+                              download={att.originalName}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="btn-download-att"
+                              title="안전 다운로드"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Download size={14} />
+                              <span>다운로드</span>
+                            </a>
+                          )}
                         </div>
                       );
                     })}
@@ -493,7 +498,9 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                 </button>
               </div>
               <div className="image-viewer-body">
-                <img src={activePreviewImage.url} alt={activePreviewImage.name} />
+                {isSafeAttachmentUrl(activePreviewImage.url) && (
+                  <img src={activePreviewImage.url} alt={activePreviewImage.name} />
+                )}
               </div>
             </div>
           </div>

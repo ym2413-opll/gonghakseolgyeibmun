@@ -35,7 +35,14 @@ class UserService {
     }
 
     suspend fun registerUser(request: RegisterRequest): AuthResponse = dbQuery {
-        val cleanUsername = PasswordSecurity.validateUsername(request.username)
+        val rawLoginInput = if (request.role == UserRole.STUDENT && request.username.isBlank()) {
+            request.identifier?.trim().orEmpty().also {
+                if (it.isBlank()) throw IllegalArgumentException("학번을 입력해 주세요.")
+            }
+        } else {
+            request.username
+        }
+        val cleanUsername = PasswordSecurity.validateUsername(rawLoginInput)
         PasswordSecurity.validatePassword(request.password)
         val cleanDept = PasswordSecurity.sanitizeInput(request.department)
         if (cleanDept.isBlank()) {
@@ -275,14 +282,18 @@ class UserService {
     }
 
     suspend fun loginUser(request: LoginRequest): AuthResponse = dbQuery {
-        val cleanUsername = PasswordSecurity.sanitizeInput(request.username)
-        if (cleanUsername.isBlank() || request.password.isBlank()) {
-            throw IllegalArgumentException("아이디와 비밀번호를 모두 입력해 주세요.")
+        val cleanLoginId = PasswordSecurity.sanitizeInput(request.username)
+        if (cleanLoginId.isBlank() || request.password.isBlank()) {
+            throw IllegalArgumentException("아이디(학번)와 비밀번호를 모두 입력해 주세요.")
         }
 
         val row = UsersTable.select {
-            UsersTable.username.lowerCase() eq cleanUsername.lowercase()
-        }.singleOrNull() ?: throw IllegalArgumentException("존재하지 않는 아이디이거나 비밀번호가 올바르지 않습니다.")
+            UsersTable.username.lowerCase() eq cleanLoginId.lowercase()
+        }.singleOrNull()
+            ?: UsersTable.select {
+                (UsersTable.role eq UserRole.STUDENT.name) and (UsersTable.identifier eq cleanLoginId)
+            }.firstOrNull()
+            ?: throw IllegalArgumentException("존재하지 않는 아이디(학번)이거나 비밀번호가 올바르지 않습니다.")
 
         if (row[UsersTable.isWithdrawn]) {
             throw IllegalStateException("관리자에 의해 탈퇴 처리된 계정입니다. 로그인이 제한됩니다.")
@@ -294,7 +305,7 @@ class UserService {
         }
 
         val uId = row[UsersTable.id].value
-        val token = PasswordSecurity.generateAuthToken(uId)
+        val token = PasswordSecurity.generateAuthToken(uId, row[UsersTable.tokenVersion])
         val userDto = rowToUserDto(row, includeCourses = true)
         AuthResponse(token = token, user = userDto)
     }
@@ -316,10 +327,27 @@ class UserService {
         val targetId = row[UsersTable.id].value
         UsersTable.update({ UsersTable.id eq targetId }) {
             it[isAdmin] = grant
+            if (!grant) {
+                it[tokenVersion] = row[UsersTable.tokenVersion] + 1
+            }
         }
 
         val updated = UsersTable.select { UsersTable.id eq targetId }.single()
         rowToUserDto(updated, includeCourses = true)
+    }
+
+    suspend fun getActiveAuthenticatedUser(userId: UUID, tokenVersion: Int): UserDto? = dbQuery {
+        val row = UsersTable.select { UsersTable.id eq userId }.singleOrNull() ?: return@dbQuery null
+        if (row[UsersTable.isWithdrawn]) return@dbQuery null
+        if (row[UsersTable.tokenVersion] != tokenVersion) return@dbQuery null
+        rowToUserDto(row, includeCourses = true)
+    }
+
+    suspend fun revokeUserTokens(userId: UUID) = dbQuery {
+        val row = UsersTable.select { UsersTable.id eq userId }.singleOrNull() ?: return@dbQuery
+        UsersTable.update({ UsersTable.id eq userId }) {
+            it[tokenVersion] = row[UsersTable.tokenVersion] + 1
+        }
     }
 
     suspend fun isUserAdmin(userId: UUID): Boolean = dbQuery {
@@ -356,7 +384,10 @@ class UserService {
 
         UsersTable.update({ UsersTable.id eq targetUserId }) {
             when (action) {
-                "WITHDRAW" -> it[isWithdrawn] = true
+                "WITHDRAW" -> {
+                    it[isWithdrawn] = true
+                    it[tokenVersion] = row[UsersTable.tokenVersion] + 1
+                }
                 "RESTORE" -> it[isWithdrawn] = false
                 "BAN_QUESTION" -> it[questionBanUntil] = calculateBanExpiry()
                 "UNBAN_QUESTION" -> it[questionBanUntil] = null

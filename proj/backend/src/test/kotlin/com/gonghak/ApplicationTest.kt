@@ -2,6 +2,7 @@ package com.gonghak
 
 import com.gonghak.dto.*
 import com.gonghak.models.QuestionCategory
+import com.gonghak.service.PasswordSecurity
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -28,6 +29,9 @@ class ApplicationTest {
     private val otherProfId = "22222222-2222-2222-2222-222222222202" // 이교수 (같은 과목 다른 교수)
     private val courseId = "33333333-3333-3333-3333-333333333301" // 공학설계입문
 
+    private fun tokenFor(userId: String): String =
+        "Bearer ${PasswordSecurity.generateAuthToken(UUID.fromString(userId))}"
+
     @Test
     fun testAuthAndDemoUsers() = testApplication {
 
@@ -35,17 +39,21 @@ class ApplicationTest {
             install(ContentNegotiation) { json(json) }
         }
 
+        // Demo user listing MUST be disabled by default
         val res = client.get("/api/auth/users")
-        assertEquals(HttpStatusCode.OK, res.status)
-        val body = res.body<ApiResponse<List<UserDto>>>()
-        assertTrue(body.success)
-        assertNotNull(body.data)
-        assertTrue(body.data!!.size >= 6)
+        assertEquals(HttpStatusCode.Forbidden, res.status)
 
-        // Check current me
-        val meRes = client.get("/api/auth/me") {
+        // Spoofing X-User-Id header without Bearer token MUST be rejected by default
+        val spoofRes = client.get("/api/auth/me") {
             header("X-User-Id", studentId)
         }
+        assertEquals(HttpStatusCode.Unauthorized, spoofRes.status)
+
+        // Check current me with signed Bearer token
+        val meRes = client.get("/api/auth/me") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
+        assertEquals(HttpStatusCode.OK, meRes.status)
         val meBody = meRes.body<ApiResponse<UserDto>>()
         assertEquals("서영민", meBody.data?.name)
     }
@@ -64,6 +72,7 @@ class ApplicationTest {
             category = QuestionCategory.GRADE
         )
         val res = client.post("/api/ai/refine") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(refineReq)
         }
@@ -96,7 +105,7 @@ class ApplicationTest {
             isAnonymous = true // Invalid!
         )
         val failRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(failReq)
         }
@@ -105,7 +114,7 @@ class ApplicationTest {
         // Grade question with isAnonymous = false should SUCCEED
         val successReq = failReq.copy(isAnonymous = false)
         val successRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(successReq)
         }
@@ -132,7 +141,7 @@ class ApplicationTest {
             isAnonymous = true
         )
         val createRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(anonReq)
         }
@@ -141,7 +150,7 @@ class ApplicationTest {
 
         // Viewed by author: should indicate it's mine
         val authorViewRes = client.get("/api/questions/$qId") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
         val authorView = authorViewRes.body<ApiResponse<QuestionDetailDto>>().data!!
         assertTrue(authorView.isMyQuestion)
@@ -149,7 +158,7 @@ class ApplicationTest {
 
         // Viewed by professor: should be masked as "[Course] 수강생"
         val profViewRes = client.get("/api/questions/$qId") {
-            header("X-User-Id", assignedProfId)
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
         }
         val profView = profViewRes.body<ApiResponse<QuestionDetailDto>>().data!!
         assertFalse(profView.isMyQuestion)
@@ -173,7 +182,7 @@ class ApplicationTest {
             isAnonymous = false
         )
         val createAssignRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(assignReq)
         }
@@ -182,7 +191,7 @@ class ApplicationTest {
 
         // Other professor attempts to answer assignment -> Forbidden
         val otherAnsRes = client.post("/api/questions/$assignQId/answers") {
-            header("X-User-Id", otherProfId)
+            header(HttpHeaders.Authorization, tokenFor(otherProfId))
             contentType(ContentType.Application.Json)
             setBody(CreateAnswerRequest(content = "제가 대신 답변드립니다."))
         }
@@ -198,7 +207,7 @@ class ApplicationTest {
             isAnonymous = false
         )
         val createLectureRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(lectureReq)
         }
@@ -207,7 +216,7 @@ class ApplicationTest {
 
         // Other professor answers first -> Allowed
         val otherAnsLecRes = client.post("/api/questions/$lectureQId/answers") {
-            header("X-User-Id", otherProfId)
+            header(HttpHeaders.Authorization, tokenFor(otherProfId))
             contentType(ContentType.Application.Json)
             setBody(CreateAnswerRequest(content = "다른 분반 담당 이교수입니다. 질문에 대한 답변입니다."))
         }
@@ -215,7 +224,7 @@ class ApplicationTest {
 
         // Assigned professor now answers
         val assignedAnsRes = client.post("/api/questions/$lectureQId/answers") {
-            header("X-User-Id", assignedProfId)
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
             contentType(ContentType.Application.Json)
             setBody(CreateAnswerRequest(content = "담당 김교수입니다. 추가 보충 설명드립니다."))
         }
@@ -223,7 +232,7 @@ class ApplicationTest {
 
         // After assigned professor answered, other professor can NO LONGER answer
         val detailAfterRes = client.get("/api/questions/$lectureQId") {
-            header("X-User-Id", otherProfId)
+            header(HttpHeaders.Authorization, tokenFor(otherProfId))
         }
         val detailAfter = detailAfterRes.body<ApiResponse<QuestionDetailDto>>().data!!
         assertTrue(detailAfter.isAnsweredByAssignedProfessor)
@@ -238,13 +247,17 @@ class ApplicationTest {
         }
 
         // GRADE category -> must return empty list (feature disabled)
-        val gradeSimRes = client.get("/api/questions/similar?courseId=$courseId&category=GRADE&query=성적")
+        val gradeSimRes = client.get("/api/questions/similar?courseId=$courseId&category=GRADE&query=성적") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.OK, gradeSimRes.status)
         val gradeSimBody = gradeSimRes.body<ApiResponse<List<SimilarQuestionDto>>>()
         assertTrue(gradeSimBody.data!!.isEmpty())
 
         // LECTURE category -> should find similar question seeded in DB
-        val lecSimRes = client.get("/api/questions/similar?courseId=$courseId&category=LECTURE&query=Ktor 라우팅")
+        val lecSimRes = client.get("/api/questions/similar?courseId=$courseId&category=LECTURE&query=Ktor 라우팅") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.OK, lecSimRes.status)
         val lecSimBody = lecSimRes.body<ApiResponse<List<SimilarQuestionDto>>>()
         assertTrue(lecSimBody.data!!.isNotEmpty())
@@ -259,7 +272,7 @@ class ApplicationTest {
 
         // Check notifications for student
         val notifRes = client.get("/api/notifications") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
         assertEquals(HttpStatusCode.OK, notifRes.status)
         val notifs = notifRes.body<ApiResponse<List<NotificationDto>>>().data!!
@@ -267,7 +280,7 @@ class ApplicationTest {
 
         // Update professor notification settings
         val updateRes = client.put("/api/professor/settings") {
-            header("X-User-Id", assignedProfId)
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
             contentType(ContentType.Application.Json)
             setBody(
                 UpdateProfessorNotificationSettingRequest(
@@ -292,7 +305,7 @@ class ApplicationTest {
 
         // Professor disables GRADE category
         val disableRes = client.put("/api/courses/$courseId/categories") {
-            header("X-User-Id", assignedProfId)
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
             contentType(ContentType.Application.Json)
             setBody(
                 UpdateCategorySettingRequest(
@@ -313,7 +326,7 @@ class ApplicationTest {
             isAnonymous = false
         )
         val tryGradeRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(tryGradeReq)
         }
@@ -321,7 +334,7 @@ class ApplicationTest {
 
         // Restore category to enabled
         client.put("/api/courses/$courseId/categories") {
-            header("X-User-Id", assignedProfId)
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
             contentType(ContentType.Application.Json)
             setBody(
                 UpdateCategorySettingRequest(
@@ -338,15 +351,19 @@ class ApplicationTest {
             install(ContentNegotiation) { json(json) }
         }
 
-        // 1. GET /api/notifications?userId=user-stu-001 (Previously failed with 400 Bad Request & SerializationException)
-        val notifRes = client.get("/api/notifications?userId=user-stu-001")
+        // 1. GET /api/notifications with authenticated Bearer token
+        val notifRes = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.OK, notifRes.status)
         val notifBody = notifRes.body<ApiResponse<List<NotificationDto>>>()
         assertTrue(notifBody.success)
         assertNotNull(notifBody.data)
 
-        // 2. GET /api/settings?userId=user-stu-001 (Previously failed with 404 Not Found)
-        val settingsRes = client.get("/api/settings?userId=user-stu-001")
+        // 2. GET /api/settings
+        val settingsRes = client.get("/api/settings") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.OK, settingsRes.status)
         val settingsBody = settingsRes.body<UnifiedSettingDto>()
         assertNotNull(settingsBody.theme)
@@ -354,10 +371,10 @@ class ApplicationTest {
 
         // 3. POST /api/settings
         val updateSettingsRes = client.post("/api/settings") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(
                 UpdateUnifiedSettingRequest(
-                    userId = "user-stu-001",
                     theme = "dark",
                     fontSize = "lg"
                 )
@@ -370,6 +387,7 @@ class ApplicationTest {
 
         // 4. POST /api/questions/similar (Frontend JSON format)
         val simPostRes = client.post("/api/questions/similar") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(
                 SimilarQuestionRequest(
@@ -384,12 +402,16 @@ class ApplicationTest {
         assertNotNull(simPostBody.data)
 
         // 5. Verify error response does not crash with SerializationException
-        val badFormatRes = client.get("/api/questions/nonexistent-id")
+        val badFormatRes = client.get("/api/questions/nonexistent-id") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.BadRequest, badFormatRes.status)
         val errBody = badFormatRes.body<ErrorResponse>()
         assertFalse(errBody.success)
 
-        val notFoundRes = client.get("/api/questions/00000000-0000-0000-0000-000000000000")
+        val notFoundRes = client.get("/api/questions/00000000-0000-0000-0000-000000000000") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.NotFound, notFoundRes.status)
     }
 

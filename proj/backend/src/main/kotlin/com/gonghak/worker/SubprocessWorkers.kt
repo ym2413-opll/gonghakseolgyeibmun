@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 @Serializable
@@ -45,51 +46,118 @@ data class SmtpJobResult(
  * and the isolated SMTP OS subprocess worker.
  */
 object SmtpTransport {
-    fun dispatchSmtpMail(payload: SmtpJobPayload) {
-        val socket = if (payload.port == 465) {
-            SSLSocketFactory.getDefault().createSocket(payload.host, payload.port)
-        } else {
-            Socket(payload.host, payload.port)
-        }
-        socket.soTimeout = 4000
-        socket.use { sock ->
-            val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
-            val writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), true)
+    private fun sanitizeHeaderAddress(raw: String): String =
+        raw.replace(Regex("[\\r\\n\\u0000<>]"), "").trim()
 
-            reader.readLine()
-            writer.println("EHLO kwangwoon.ac.kr")
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.length < 4 || line[3] != '-') break
+    private fun readSmtpResponse(reader: BufferedReader): Pair<Int, List<String>> {
+        val lines = mutableListOf<String>()
+        var code = -1
+        while (true) {
+            val line = reader.readLine() ?: break
+            lines.add(line)
+            if (line.length >= 3) {
+                code = line.substring(0, 3).toIntOrNull() ?: code
+            }
+            if (line.length < 4 || line[3] != '-') {
+                break
+            }
+        }
+        return code to lines
+    }
+
+    private fun writeCrlf(writer: PrintWriter, line: String) {
+        writer.print(line)
+        writer.print("\r\n")
+        writer.flush()
+    }
+
+    internal fun dotStuffBody(body: String): String {
+        val normalized = body.replace("\r\n", "\n").replace('\r', '\n')
+        return normalized.split('\n').joinToString("\r\n") { line ->
+            if (line.startsWith(".")) ".$line" else line
+        }
+    }
+
+    fun dispatchSmtpMail(payload: SmtpJobPayload) {
+        val cleanFrom = sanitizeHeaderAddress(payload.from)
+        val cleanTo = sanitizeHeaderAddress(payload.to)
+        require(cleanFrom.isNotEmpty() && cleanTo.isNotEmpty()) {
+            "유효한 발신자/수신자 이메일 주소가 필요합니다."
+        }
+
+        val implicitTls = payload.port == 465
+        var sock: Socket = if (implicitTls) {
+            (SSLSocketFactory.getDefault().createSocket(payload.host, payload.port) as SSLSocket).apply {
+                soTimeout = 4000
+                startHandshake()
+            }
+        } else {
+            Socket(payload.host, payload.port).apply {
+                soTimeout = 4000
+            }
+        }
+
+        var isTlsActive = implicitTls
+        try {
+            var reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+            var writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), false)
+
+            readSmtpResponse(reader)
+            writeCrlf(writer, "EHLO kwangwoon.ac.kr")
+            val (_, ehloCaps) = readSmtpResponse(reader)
+
+            val supportsStartTls = ehloCaps.any { it.contains("STARTTLS", ignoreCase = true) }
+            if (!isTlsActive && supportsStartTls) {
+                writeCrlf(writer, "STARTTLS")
+                val (startTlsCode, _) = readSmtpResponse(reader)
+                if (startTlsCode in 200..299) {
+                    val sslSock = (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                        .createSocket(sock, payload.host, payload.port, true) as SSLSocket
+                    sslSock.soTimeout = 4000
+                    sslSock.startHandshake()
+                    sock = sslSock
+                    isTlsActive = true
+                    reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+                    writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), false)
+                    writeCrlf(writer, "EHLO kwangwoon.ac.kr")
+                    readSmtpResponse(reader)
+                }
             }
 
             if (!payload.user.isNullOrBlank() && !payload.pass.isNullOrBlank()) {
-                writer.println("AUTH LOGIN")
-                reader.readLine()
-                writer.println(Base64.getEncoder().encodeToString(payload.user.toByteArray(Charsets.UTF_8)))
-                reader.readLine()
-                writer.println(Base64.getEncoder().encodeToString(payload.pass.toByteArray(Charsets.UTF_8)))
-                reader.readLine()
+                val allowPlaintext = System.getenv("SMTP_ALLOW_INSECURE_PLAINTEXT")
+                    ?.trim()?.equals("true", ignoreCase = true) == true
+                if (!isTlsActive && !allowPlaintext) {
+                    throw SecurityException("TLS/STARTTLS 없이 SMTP AUTH 인증을 전송할 수 없습니다.")
+                }
+                writeCrlf(writer, "AUTH LOGIN")
+                readSmtpResponse(reader)
+                writeCrlf(writer, Base64.getEncoder().encodeToString(payload.user.toByteArray(Charsets.UTF_8)))
+                readSmtpResponse(reader)
+                writeCrlf(writer, Base64.getEncoder().encodeToString(payload.pass.toByteArray(Charsets.UTF_8)))
+                readSmtpResponse(reader)
             }
 
-            writer.println("MAIL FROM:<${payload.from}>")
-            reader.readLine()
-            writer.println("RCPT TO:<${payload.to}>")
-            reader.readLine()
-            writer.println("DATA")
-            reader.readLine()
+            writeCrlf(writer, "MAIL FROM:<$cleanFrom>")
+            readSmtpResponse(reader)
+            writeCrlf(writer, "RCPT TO:<$cleanTo>")
+            readSmtpResponse(reader)
+            writeCrlf(writer, "DATA")
+            readSmtpResponse(reader)
 
             val encodedSubject = "=?UTF-8?B?${Base64.getEncoder().encodeToString(payload.subject.toByteArray(Charsets.UTF_8))}?="
-            writer.println("From: <${payload.from}>")
-            writer.println("To: <${payload.to}>")
-            writer.println("Subject: $encodedSubject")
-            writer.println("MIME-Version: 1.0")
-            writer.println("Content-Type: text/plain; charset=UTF-8")
-            writer.println()
-            writer.println(payload.body)
-            writer.println(".")
-            reader.readLine()
-            writer.println("QUIT")
+            writeCrlf(writer, "From: <$cleanFrom>")
+            writeCrlf(writer, "To: <$cleanTo>")
+            writeCrlf(writer, "Subject: $encodedSubject")
+            writeCrlf(writer, "MIME-Version: 1.0")
+            writeCrlf(writer, "Content-Type: text/plain; charset=UTF-8")
+            writeCrlf(writer, "")
+            writeCrlf(writer, dotStuffBody(payload.body))
+            writeCrlf(writer, ".")
+            readSmtpResponse(reader)
+            writeCrlf(writer, "QUIT")
+        } finally {
+            runCatching { sock.close() }
         }
     }
 }
@@ -99,6 +167,35 @@ object SmtpTransport {
  * the attachment worker thread pool and the isolated image subprocess worker.
  */
 object ImageCompressionProcessor {
+    const val MAX_SOURCE_DIMENSION = 8000
+    const val MAX_SOURCE_PIXELS = 25_000_000L
+
+    /**
+     * Reads image container headers BEFORE full pixel decoding to prevent image-bomb OOMs.
+     */
+    fun validateImageDimensions(originalBytes: ByteArray) {
+        val iis = ImageIO.createImageInputStream(ByteArrayInputStream(originalBytes)) ?: return
+        iis.use { stream ->
+            val readers = ImageIO.getImageReaders(stream)
+            if (!readers.hasNext()) return
+            val reader = readers.next()
+            try {
+                reader.input = stream
+                val width = reader.getWidth(0)
+                val height = reader.getHeight(0)
+                if (width <= 0 || height <= 0 ||
+                    width > MAX_SOURCE_DIMENSION ||
+                    height > MAX_SOURCE_DIMENSION ||
+                    width.toLong() * height.toLong() > MAX_SOURCE_PIXELS
+                ) {
+                    throw SecurityException("이미지 해상도(${width}x${height})가 보안 허용 범위를 초과했습니다.")
+                }
+            } finally {
+                reader.dispose()
+            }
+        }
+    }
+
     fun compressImageBytes(
         originalBytes: ByteArray,
         extension: String,
@@ -108,6 +205,8 @@ object ImageCompressionProcessor {
         if (extension == "gif" || extension == "webp") {
             return null
         }
+
+        validateImageDimensions(originalBytes)
 
         val inputStream = ByteArrayInputStream(originalBytes)
         val originalImage: BufferedImage = ImageIO.read(inputStream) ?: return null

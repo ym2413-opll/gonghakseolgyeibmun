@@ -19,3 +19,4 @@ logs/
 ### Environment files ###
 .env
 .env.local
+.admin-ctl.secret

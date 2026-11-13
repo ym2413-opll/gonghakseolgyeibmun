@@ -11,12 +11,25 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
 fun Route.authRoutes(userService: UserService) {
+    val loginIpLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000L)
+    val loginAccountLimiter = SlidingWindowRateLimiter(maxRequests = 12, windowMillis = 60_000L)
+    val registerIpLimiter = SlidingWindowRateLimiter(maxRequests = 15, windowMillis = 60_000L)
+
     route("/api/auth") {
         // Register new student or professor account
         post("/register") {
+            val ipKey = call.clientRateLimitKey()
+            if (!registerIpLimiter.allow(ipKey)) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "회원가입 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+                )
+                return@post
+            }
             val request = call.receive<RegisterRequest>()
             try {
                 val authRes = userService.registerUser(request)
+                call.setAuthCookie(authRes.token)
                 call.respond(HttpStatusCode.Created, ApiResponse(success = true, data = authRes, message = "회원가입이 완료되었습니다."))
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
@@ -27,9 +40,26 @@ fun Route.authRoutes(userService: UserService) {
 
         // Login with username and password
         post("/login") {
+            val ipKey = call.clientRateLimitKey()
+            if (!loginIpLimiter.allow(ipKey)) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+                )
+                return@post
+            }
             val request = call.receive<LoginRequest>()
+            val accountKey = request.username.trim().lowercase()
+            if (accountKey.isNotEmpty() && !loginAccountLimiter.allow(accountKey)) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "해당 계정의 로그인 시도가 너무 많습니다. 1분 후 다시 시도해 주세요.")
+                )
+                return@post
+            }
             try {
                 val authRes = userService.loginUser(request)
+                call.setAuthCookie(authRes.token)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = authRes, message = "로그인되었습니다."))
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.Unauthorized, ApiResponse<String>(success = false, message = e.message))
@@ -38,10 +68,19 @@ fun Route.authRoutes(userService: UserService) {
             }
         }
 
-        // List demo accounts (for legacy test compatibility)
+        // Logout and revoke current session tokens + clear HttpOnly cookie
+        post("/logout") {
+            val claims = call.getVerifiedTokenClaims()
+            if (claims != null) {
+                userService.revokeUserTokens(claims.userId)
+            }
+            call.clearAuthCookie()
+            call.respond(HttpStatusCode.OK, ApiResponse<String>(success = true, message = "로그아웃되었습니다."))
+        }
+
+        // List demo accounts (only when explicitly enabled via ENABLE_DEMO_USERS=true)
         get("/users") {
-            val enableDemoUsers = System.getenv("ENABLE_DEMO_USERS")?.lowercase() != "false"
-            if (!enableDemoUsers) {
+            if (!isDemoModeEnabled()) {
                 call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = "프로덕션 환경에서는 계정 목록 조회가 비활성화되어 있습니다."))
                 return@get
             }
@@ -49,15 +88,10 @@ fun Route.authRoutes(userService: UserService) {
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = users))
         }
 
-        // Current user info
+        // Current authenticated user info
         get("/me") {
-            val currentUserId = call.getCurrentUserId()
-            val user = userService.getUserById(currentUserId)
-            if (user != null) {
-                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = user))
-            } else {
-                call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = "사용자를 찾을 수 없습니다."))
-            }
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = user))
         }
     }
 }

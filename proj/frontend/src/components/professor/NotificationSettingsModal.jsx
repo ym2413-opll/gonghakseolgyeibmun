@@ -93,27 +93,22 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
       <div className="modal-container modal-lg" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
-            <Sliders size={20} className="text-primary" />
-            <span>교수용 질문 알림 · 이메일 연동 및 카테고리 설정</span>
+            <Sliders size={19} className="text-primary" />
+            <span>알림 및 카테고리 설정</span>
           </div>
-          <button className="btn-icon" onClick={onClose} aria-label="닫기">
-            <X size={20} />
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="닫기">
+            <X size={18} />
           </button>
         </div>
 
         <div className="modal-body">
-          {/* 1. 이메일 질문 알림 발송 설정 (R3 신규 요구사항) */}
           <div className="settings-section">
             <div className="settings-header-row">
               <div className="settings-title-group">
-                <Mail size={18} className="text-primary" />
+                <Mail size={17} className="text-primary" />
                 <div>
-                  <h4 className="settings-section-title">
-                    새 질문 등록 시 이메일 알림 발송 연동
-                  </h4>
-                  <p className="settings-section-desc">
-                    담당 과목에 새로운 질문이 등록되면 아래에 연동된 교수님의 이메일 주소로 질문 제목과 본문을 즉시 발송합니다.
-                  </p>
+                  <h4 className="settings-section-title">이메일 알림</h4>
+                  <p className="settings-section-desc">새 질문 등록 시 이메일로 전달합니다.</p>
                 </div>
               </div>
               <label className="toggle-switch">
@@ -160,14 +155,10 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
           <div className="settings-section">
             <div className="settings-header-row">
               <div className="settings-title-group">
-                <BellOff size={18} className="text-primary" />
+                <BellOff size={17} className="text-primary" />
                 <div>
-                  <h4 className="settings-section-title">
-                    질문 알림 비활성화 시간대 (방해금지 모드)
-                  </h4>
-                  <p className="settings-section-desc">
-                    지정된 야간/휴식 시간 동안 도착한 질문 알림을 보류하고, 종료 시각에 일괄 전달합니다.
-                  </p>
+                  <h4 className="settings-section-title">방해금지 시간대</h4>
+                  <p className="settings-section-desc">지정 시간대 알림을 보류한 뒤 종료 시각에 일괄 전달합니다.</p>
                 </div>
               </div>
               <label className="toggle-switch">
@@ -215,14 +206,10 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
           <div className="settings-section">
             <div className="settings-header-row">
               <div className="settings-title-group">
-                <Users size={18} className="text-primary" />
+                <Users size={17} className="text-primary" />
                 <div>
-                  <h4 className="settings-section-title">
-                    같은 과목 다른 교수에게 온 질문 알림 수신
-                  </h4>
-                  <p className="settings-section-desc">
-                    동일 교과목(타 분반)의 &apos;강의&apos; 카테고리 미답변 질문 알림을 함께 받아 공동 답변에 참여합니다.
-                  </p>
+                  <h4 className="settings-section-title">동일 과목 타 분반 강의 질문 알림</h4>
+                  <p className="settings-section-desc">타 분반 강의 카테고리의 미답변 질문 알림도 함께 받습니다.</p>
                 </div>
               </div>
               <label className="toggle-switch">
@@ -238,12 +225,9 @@ const NotificationSettingsModal = ({ isOpen, onClose }) => {
 
           <div className="settings-divider" />
 
-          {/* 4. 질문 카테고리 활성화/비활성화 */}
           <div className="settings-section">
-            <h4 className="settings-section-title">질문 카테고리 활성화 관리</h4>
-            <p className="settings-section-desc">
-              강의 운영 시기에 맞춰 학생이 등록할 수 있는 질문 카테고리를 활성화하거나 비활성화합니다.
-            </p>
+            <h4 className="settings-section-title">질문 카테고리 활성화</h4>
+            <p className="settings-section-desc">허용할 질문 카테고리를 선택합니다.</p>
 
             <div className="category-toggle-list">
               {CATEGORY_LIST.map((cat) => (

@@ -2,6 +2,7 @@ package com.gonghak.routes
 
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.UpdateProfessorNotificationSettingRequest
+import com.gonghak.models.UserRole
 import com.gonghak.service.EmailService
 import com.gonghak.service.NotificationService
 import com.gonghak.service.UserService
@@ -19,25 +20,23 @@ fun Route.notificationRoutes(
 ) {
     route("/api/notifications") {
         get {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            val userId = UUID.fromString(user.id)
             val notifications = notificationService.getNotifications(userId)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = notifications))
         }
 
         get("/emails") {
-            val userId = call.getCurrentUserId()
-            val user = userService.getUserById(userId)
-            val isAdmin = userService.isUserAdmin(userId)
-            if (!isAdmin && user?.role != com.gonghak.models.UserRole.PROFESSOR) {
-                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = "교수 또는 관리자만 이메일 알림 로그를 조회할 수 있습니다."))
-                return@get
-            }
+            val user = call.requireProfessorOrAdmin(userService) ?: return@get
+            val userId = UUID.fromString(user.id)
+            val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
             val logs = emailService.getEmailLogs(professorId = userId, isAdmin = isAdmin)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = logs))
         }
 
         post("/{id}/read") {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            val userId = UUID.fromString(user.id)
             val idParam = call.parameters["id"]
             val notifId = try {
                 UUID.fromString(idParam)
@@ -59,13 +58,15 @@ fun Route.notificationRoutes(
 
     route("/api/professor/settings") {
         get {
-            val userId = call.getCurrentUserId()
+            val user = call.requireProfessorOrAdmin(userService) ?: return@get
+            val userId = UUID.fromString(user.id)
             val setting = notificationService.getProfessorNotificationSetting(userId)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = setting))
         }
 
         put {
-            val userId = call.getCurrentUserId()
+            val user = call.requireProfessorOrAdmin(userService) ?: return@put
+            val userId = UUID.fromString(user.id)
             val request = call.receive<UpdateProfessorNotificationSettingRequest>()
             val updated = notificationService.updateProfessorNotificationSetting(userId, request)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))

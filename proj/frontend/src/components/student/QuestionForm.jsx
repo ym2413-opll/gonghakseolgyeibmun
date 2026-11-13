@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
-import { validateSecurity, formatFileSize, MAX_ATTACHMENTS_COUNT } from '../../utils/fileSecurity';
+import { validateSecurity, formatFileSize, isSafeAttachmentUrl, MAX_ATTACHMENTS_COUNT } from '../../utils/fileSecurity';
 import { compressImageClient } from '../../utils/imageCompression';
 import { generateSummaryTitle } from '../../utils/textSummary';
 import AiRefineModal from './AiRefineModal';
@@ -507,7 +507,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               <div className="attached-files-list">
                 {attachments.map((att, idx) => (
                   <div key={att.id || idx} className="attached-file-card">
-                    {att.isImage && (att.previewUrl || att.url) ? (
+                    {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
                       <div className="attached-file-thumb">
                         <img src={att.previewUrl || att.url} alt={att.originalName} />
                       </div>
@@ -597,6 +597,8 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         onClose={() => setIsAiModalOpen(false)}
         initialText={content}
         category={selectedCategory}
+        courseName={currentCourse?.name || ''}
+        professorName={currentCourse?.profName || currentCourse?.assignedProfessorName || ''}
         onApplyRefined={handleApplyAiRefined}
       />
 

@@ -159,6 +159,38 @@ function MainApp() {
     );
   };
 
+  const handleDeleteQuestion = async (q) => {
+    if (!q?.id) return;
+    if (!window.confirm('이 질문 게시물을 영구 삭제하시겠습니까?')) return;
+    try {
+      await api.deleteQuestion(q.id);
+      if (selectedQuestionId === q.id) {
+        setSelectedQuestionId(null);
+        setSelectedQuestionDetail(null);
+        setCurrentView('list');
+      }
+      await fetchQuestions();
+      showToast('질문이 영구 삭제되었습니다.');
+    } catch (err) {
+      showToast(err.message || '질문 삭제에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteAnswer = async (ans, questionId) => {
+    if (!ans?.id) return;
+    if (!window.confirm('이 답변을 영구 삭제하시겠습니까?')) return;
+    try {
+      await api.deleteAnswer(ans.id, questionId);
+      await fetchQuestions();
+      if (questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast('답변이 영구 삭제되었습니다.');
+    } catch (err) {
+      showToast(err.message || '답변 삭제에 실패했습니다.');
+    }
+  };
+
   const safeQuestions = Array.isArray(questions) ? questions : [];
   const activeQuestion =
     selectedQuestionDetail || safeQuestions.find((q) => q.id === selectedQuestionId) || null;
@@ -209,6 +241,7 @@ function MainApp() {
                       onSelectQuestion={handleSelectQuestion}
                       onOpenProfSettings={() => setIsProfSettingsOpen(true)}
                       onToggleHideQuestion={handleToggleHideQuestion}
+                      onDeleteQuestion={handleDeleteQuestion}
                     />
                   ) : (
                     <QuestionList
@@ -217,6 +250,7 @@ function MainApp() {
                       onSelectQuestion={handleSelectQuestion}
                       onOpenNewQuestion={() => setCurrentView('new')}
                       onToggleHideQuestion={handleToggleHideQuestion}
+                      onDeleteQuestion={handleDeleteQuestion}
                     />
                   )}
                 </div>
@@ -227,6 +261,8 @@ function MainApp() {
                     onUpdateQuestion={handleUpdateQuestion}
                     onToggleHideQuestion={handleToggleHideQuestion}
                     onToggleHideAnswer={handleToggleHideAnswer}
+                    onDeleteQuestion={handleDeleteQuestion}
+                    onDeleteAnswer={handleDeleteAnswer}
                   />
                 </div>
               </div>
@@ -237,6 +273,8 @@ function MainApp() {
                 onUpdateQuestion={handleUpdateQuestion}
                 onToggleHideQuestion={handleToggleHideQuestion}
                 onToggleHideAnswer={handleToggleHideAnswer}
+                onDeleteQuestion={handleDeleteQuestion}
+                onDeleteAnswer={handleDeleteAnswer}
                 onBack={() => setCurrentView('list')}
               />
             ) : isProfessor ? (
@@ -246,6 +284,7 @@ function MainApp() {
                 onSelectQuestion={handleSelectQuestion}
                 onOpenProfSettings={() => setIsProfSettingsOpen(true)}
                 onToggleHideQuestion={handleToggleHideQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
               />
             ) : (
               <QuestionList
@@ -254,6 +293,7 @@ function MainApp() {
                 onSelectQuestion={handleSelectQuestion}
                 onOpenNewQuestion={() => setCurrentView('new')}
                 onToggleHideQuestion={handleToggleHideQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
               />
             )}
           </main>
@@ -288,6 +328,7 @@ function MainApp() {
         onClose={() => setIsAdminModalOpen(false)}
         questions={safeQuestions}
         onDataChanged={fetchQuestions}
+        onDeleteQuestion={handleDeleteQuestion}
       />
     </div>
   );

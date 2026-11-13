@@ -12,6 +12,12 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 object PasswordSecurity {
+    data class VerifiedAuthToken(
+        val userId: UUID,
+        val issuedAtEpochSecond: Long,
+        val tokenVersion: Int = 0
+    )
+
     private val logger = LoggerFactory.getLogger(PasswordSecurity::class.java)
     private const val ALGORITHM = "PBKDF2WithHmacSHA256"
     private const val ITERATIONS = 65536
@@ -21,11 +27,16 @@ object PasswordSecurity {
 
     private val secureRandom = SecureRandom()
     private val hmacSecret: ByteArray by lazy {
-        val envSecret = System.getenv("AUTH_TOKEN_SECRET")?.takeIf { it.length >= 16 }
+        val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
+        val rawSecret = System.getenv("AUTH_TOKEN_SECRET")?.trim()
+        if (isProd && (rawSecret.isNullOrEmpty() || rawSecret.length < 32)) {
+            throw IllegalStateException("AUTH_TOKEN_SECRET (at least 32 characters) must be configured in PRODUCTION_MODE.")
+        }
+        val envSecret = rawSecret?.takeIf { it.length >= 16 }
         if (envSecret != null) {
             envSecret.toByteArray(Charsets.UTF_8)
         } else {
-            logger.warn("[Security] AUTH_TOKEN_SECRET is not set; generating ephemeral per-process HMAC key.")
+            logger.warn("[Security] AUTH_TOKEN_SECRET is not set or too short; generating ephemeral per-process HMAC key.")
             ByteArray(32).also { secureRandom.nextBytes(it) }
         }
     }
@@ -70,20 +81,20 @@ object PasswordSecurity {
     }
 
     /**
-     * Issue an HMAC-SHA256 signed authentication token for a user UUID.
+     * Issue an HMAC-SHA256 signed authentication token for a user UUID and token version.
      */
-    fun generateAuthToken(userId: UUID): String {
+    fun generateAuthToken(userId: UUID, tokenVersion: Int = 0): String {
         val issuedAt = Instant.now().epochSecond
-        val payload = "${userId}|$issuedAt"
+        val payload = "${userId}|$issuedAt|$tokenVersion"
         val payloadB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toByteArray(Charsets.UTF_8))
         val sigB64 = signPayload(payloadB64)
         return "$payloadB64.$sigB64"
     }
 
     /**
-     * Verify an HMAC-SHA256 signed authentication token, check expiration, and extract the user UUID.
+     * Verify an HMAC-SHA256 signed authentication token, check expiration, and extract claims.
      */
-    fun verifyAuthToken(token: String?): UUID? {
+    fun verifyAuthTokenClaims(token: String?): VerifiedAuthToken? {
         if (token.isNullOrBlank()) return null
         val trimmed = token.trim()
         if (!trimmed.contains(".")) return null
@@ -105,23 +116,41 @@ object PasswordSecurity {
         }.getOrNull() ?: return null
 
         val segments = decoded.split("|")
-        if (segments.size != 2) return null
+        if (segments.size != 2 && segments.size != 3) return null
         val userId = runCatching { UUID.fromString(segments[0]) }.getOrNull() ?: return null
         val issuedAt = segments[1].toLongOrNull() ?: return null
+        val version = if (segments.size == 3) (segments[2].toIntOrNull() ?: return null) else 0
 
         val now = Instant.now().epochSecond
         // Reject tokens issued in the future (> 60s clock skew) or expired (> 7 days)
         if (issuedAt > now + 60L || (now - issuedAt) > TOKEN_TTL_SECONDS) {
             return null
         }
-        return userId
+        return VerifiedAuthToken(
+            userId = userId,
+            issuedAtEpochSecond = issuedAt,
+            tokenVersion = version
+        )
     }
+
+    /**
+     * Verify an HMAC-SHA256 signed authentication token, check expiration, and extract the user UUID.
+     */
+    fun verifyAuthToken(token: String?): UUID? = verifyAuthTokenClaims(token)?.userId
 
     private fun signPayload(payloadB64: String): String {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(hmacSecret, "HmacSHA256"))
         val sigBytes = mac.doFinal(payloadB64.toByteArray(Charsets.UTF_8))
         return Base64.getUrlEncoder().withoutPadding().encodeToString(sigBytes)
+    }
+
+    /**
+     * Strip CR, LF, and NUL characters to prevent SMTP/HTTP header injection.
+     */
+    fun sanitizeHeaderValue(input: String?): String {
+        if (input == null) return ""
+        return input.replace(Regex("[\\r\\n\\u0000]"), "").trim()
     }
 
     /**

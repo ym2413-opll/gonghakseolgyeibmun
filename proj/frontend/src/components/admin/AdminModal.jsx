@@ -18,10 +18,11 @@ import {
   PlusCircle,
   CheckCircle2,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 
-const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
+const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQuestion }) => {
   const { departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'users' | 'posts' | 'emails'
   const [users, setUsers] = useState([]);
@@ -142,9 +143,25 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
     try {
       await api.toggleHideQuestion(q.id, !q.isHidden);
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`질문 #${q.id.slice(0, 6)} ${!q.isHidden ? '가리기(비표시)' : '표시 복구'} 처리 완료`);
+      notifySuccess(`질문 ${!q.isHidden ? '가리기' : '가리기 해제'} 처리 완료`);
     } catch (err) {
       notifyError(err.message || '게시물 상태 변경 실패');
+    }
+  };
+
+  const handleDeletePost = async (q) => {
+    if (!q?.id) return;
+    if (onDeleteQuestion) {
+      await onDeleteQuestion(q);
+      return;
+    }
+    if (!window.confirm('이 질문 게시물을 영구 삭제하시겠습니까?')) return;
+    try {
+      await api.deleteQuestion(q.id);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess('질문이 영구 삭제되었습니다.');
+    } catch (err) {
+      notifyError(err.message || '게시물 삭제 실패');
     }
   };
 
@@ -156,14 +173,11 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
       >
         <div className="modal-header admin-modal-header">
           <div className="modal-title">
-            <ShieldAlert size={22} className="text-danger" />
-            <div>
-              <span>시스템 관리자 모드 (Admin Control Center)</span>
-              <span className="admin-sub-badge">R3 Security & Forum Governance</span>
-            </div>
+            <ShieldAlert size={20} className="text-danger" />
+            <span>관리자 모드</span>
           </div>
-          <button className="btn-icon" onClick={onClose} aria-label="닫기">
-            <X size={20} />
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="닫기">
+            <X size={18} />
           </button>
         </div>
 
@@ -174,7 +188,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
             onClick={() => setActiveTab('catalog')}
           >
             <Building2 size={16} />
-            학과 · 과목 동적 관리
+            <span>학과 · 과목</span>
           </button>
           <button
             type="button"
@@ -182,7 +196,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
             onClick={() => setActiveTab('users')}
           >
             <Users size={16} />
-            계정 관리 · 제재 ({users.length})
+            <span>계정 ({users.length})</span>
           </button>
           <button
             type="button"
@@ -190,7 +204,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
             onClick={() => setActiveTab('posts')}
           >
             <EyeOff size={16} />
-            익명 실명 확인 · 게시물 가리기 ({questions.length})
+            <span>게시물 ({questions.length})</span>
           </button>
           <button
             type="button"
@@ -198,7 +212,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
             onClick={() => setActiveTab('emails')}
           >
             <Mail size={16} />
-            이메일 알림 로그 ({emailLogs.length})
+            <span>이메일 ({emailLogs.length})</span>
           </button>
         </div>
 
@@ -523,9 +537,6 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
 
           {activeTab === 'posts' && (
             <div>
-              <p className="text-sm text-muted" style={{ marginBottom: 12 }}>
-                관리자는 <strong>익명 질문의 실제 작성자(학번·이름)</strong>를 열람할 수 있으며, 부적절한 질문이나 답변을 <strong>가리기(내용 비표시)</strong> 처리할 수 있습니다.
-              </p>
               <div className="admin-table-wrap">
                 <table className="admin-data-table">
                   <thead>
@@ -533,9 +544,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
                       <th>과목 / 카테고리</th>
                       <th>질문 제목</th>
                       <th>표시 작성자</th>
-                      <th>실제 질문자 (관리자 전용)</th>
-                      <th>표시 상태</th>
-                      <th>가리기 제어</th>
+                      <th>실제 질문자</th>
+                      <th>상태</th>
+                      <th>관리</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -553,7 +564,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
                         </td>
                         <td>
                           {q.isAnonymous ? (
-                            <span className="status-pill warning">익명 (수강생)</span>
+                            <span className="status-pill warning">익명</span>
                           ) : (
                             <span>{q.studentTag || q.studentName}</span>
                           )}
@@ -566,27 +577,36 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged }) => {
                         </td>
                         <td>
                           {q.isHidden ? (
-                            <span className="status-pill danger">가려짐 (비표시)</span>
+                            <span className="status-pill danger">숨김</span>
                           ) : (
-                            <span className="status-pill success">공개 중</span>
+                            <span className="status-pill success">공개</span>
                           )}
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className={`btn btn-xs ${q.isHidden ? 'btn-secondary' : 'btn-danger'}`}
-                            onClick={() => handleToggleQuestionHide(q)}
-                          >
-                            {q.isHidden ? (
-                              <>
-                                <Eye size={13} /> 가리기 해제
-                              </>
-                            ) : (
-                              <>
-                                <EyeOff size={13} /> 질문 가리기
-                              </>
-                            )}
-                          </button>
+                          <div className="admin-action-btns">
+                            <button
+                              type="button"
+                              className={`btn btn-xs ${q.isHidden ? 'btn-secondary' : 'btn-outline'}`}
+                              onClick={() => handleToggleQuestionHide(q)}
+                            >
+                              {q.isHidden ? (
+                                <>
+                                  <Eye size={13} /> 해제
+                                </>
+                              ) : (
+                                <>
+                                  <EyeOff size={13} /> 가리기
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-xs"
+                              onClick={() => handleDeletePost(q)}
+                            >
+                              <Trash2 size={13} /> 삭제
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

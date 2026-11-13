@@ -11,7 +11,8 @@ import {
   Users,
   EyeOff,
   Eye,
-  Paperclip
+  Paperclip,
+  Trash2
 } from 'lucide-react';
 
 const QuestionCard = ({
@@ -19,7 +20,8 @@ const QuestionCard = ({
   isSelected,
   onClick,
   canCoProfAnswer,
-  onToggleHide
+  onToggleHide,
+  onDelete
 }) => {
   const { isAdmin } = useAuth();
   const categoryKey = (question.category || 'lecture').toLowerCase();
@@ -180,6 +182,19 @@ const QuestionCard = ({
                     <EyeOff size={12} /> 가리기
                   </>
                 )}
+              </button>
+            )}
+
+            {isAdmin && onDelete && (
+              <button
+                type="button"
+                className="btn-admin-inline-delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(question);
+                }}
+              >
+                <Trash2 size={12} /> 삭제
               </button>
             )}
           </div>

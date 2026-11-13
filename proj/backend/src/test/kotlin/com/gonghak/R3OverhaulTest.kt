@@ -318,5 +318,111 @@ class R3OverhaulTest {
             setBody(LoginRequest(username = "anon_stu", password = "stupass123"))
         }
         assertEquals(HttpStatusCode.Forbidden, withdrawnLoginRes.status)
+
+        // 9. Test Admin Answer & Question Permanent Deletion
+        val ansRes = client.post("/api/questions/${createdQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "삭제 테스트용 답변입니다."))
+        }
+        assertEquals(HttpStatusCode.Created, ansRes.status)
+        val createdAns = ansRes.body<ApiResponse<AnswerDto>>().data!!
+
+        // Non-admin must be rejected (403)
+        val nonAdminDelAns = client.delete("/api/admin/answers/${createdAns.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${otherStuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.Forbidden, nonAdminDelAns.status)
+
+        val nonAdminDelQ = client.delete("/api/admin/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${otherStuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.Forbidden, nonAdminDelQ.status)
+
+        // Admin deletes answer -> question returns to OPEN with 0 answers
+        val adminDelAns = client.delete("/api/admin/answers/${createdAns.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.OK, adminDelAns.status)
+
+        val afterAnsDelDetail = client.get("/api/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(0, afterAnsDelDetail.answers.size)
+        assertFalse(afterAnsDelDetail.isAnsweredByAssignedProfessor)
+
+        val listAfterAnsDel = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        assertEquals(
+            com.gonghak.models.QuestionStatus.OPEN,
+            listAfterAnsDel.first { it.id == createdQ.id }.status
+        )
+
+        // Admin permanently deletes question
+        val adminDelQ = client.delete("/api/admin/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.OK, adminDelQ.status)
+
+        val afterDelDetail = client.get("/api/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.NotFound, afterDelDetail.status)
+    }
+
+    @Test
+    fun testStudentRegistrationWithStudentIdOnlyAndIdentifierLogin() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // 1. Register student without separate username (uses 학번 identifier)
+        val regRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "password1234",
+                    name = "최학번",
+                    department = "소프트웨어학과",
+                    identifier = "20265544"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, regRes.status)
+        val auth = regRes.body<ApiResponse<AuthResponse>>().data!!
+        assertEquals("20265544", auth.user.username)
+        assertEquals("20265544", auth.user.identifier)
+
+        // 2. Login using Student ID
+        val loginByIdRes = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "20265544", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, loginByIdRes.status)
+
+        // 3. Student registered with separate legacy username can ALSO log in via 학번 identifier
+        val legacyRegRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "legacy_stu_login",
+                    password = "password1234",
+                    name = "김레거시",
+                    department = "소프트웨어학과",
+                    identifier = "20265545"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, legacyRegRes.status)
+
+        val loginByLegacyIdentifierRes = client.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "20265545", password = "password1234"))
+        }
+        assertEquals(HttpStatusCode.OK, loginByLegacyIdentifierRes.status)
     }
 }

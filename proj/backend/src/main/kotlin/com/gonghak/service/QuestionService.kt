@@ -6,6 +6,7 @@ import com.gonghak.models.*
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -15,7 +16,8 @@ class QuestionService(
     private val similarityService: SimilarityService,
     private val notificationService: NotificationService,
     private val aiRefineService: AiRefineService,
-    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
+    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager(),
+    private val attachmentService: AttachmentService? = null
 ) {
     private data class CreatedQuestionSideEffects(
         val detail: QuestionDetailDto,
@@ -52,26 +54,28 @@ class QuestionService(
         request: CreateQuestionRequest
     ): QuestionDetailDto {
         val created = dbQuery {
-            // 0. Check User Withdrawal & Question Restriction (Ban)
+            // 0. Check User Existence, Withdrawal & Question Restriction (Ban)
             val studentUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
-            if (studentUser != null) {
-                if (studentUser[UsersTable.isWithdrawn]) {
-                    throw IllegalStateException("탈퇴 처리된 계정입니다. 질문을 작성할 수 없습니다.")
-                }
-                val banUntil = studentUser[UsersTable.questionBanUntil]
-                if (banUntil != null && banUntil.isAfter(Instant.now())) {
-                    val formattedUntil = banDateFormatter.format(banUntil)
-                    throw IllegalStateException("관리자에 의해 ${formattedUntil}까지 질문 작성이 제한된 계정입니다.")
-                }
+                ?: throw IllegalStateException("유효한 사용자 계정을 찾을 수 없습니다.")
+            if (studentUser[UsersTable.isWithdrawn]) {
+                throw IllegalStateException("탈퇴 처리된 계정입니다. 질문을 작성할 수 없습니다.")
+            }
+            val banUntil = studentUser[UsersTable.questionBanUntil]
+            if (banUntil != null && banUntil.isAfter(Instant.now())) {
+                val formattedUntil = banDateFormatter.format(banUntil)
+                throw IllegalStateException("관리자에 의해 ${formattedUntil}까지 질문 작성이 제한된 계정입니다.")
             }
 
-            val parsedCourseUUID = com.gonghak.routes.parseCourseId(request.courseId)
-            val courseRow = CoursesTable.select { CoursesTable.id eq parsedCourseUUID }.singleOrNull()
-                ?: request.courseName?.takeIf { it.isNotBlank() }?.let { cName ->
+            val parsedCourseUUID = request.courseId?.takeIf { it.isNotBlank() }?.let {
+                com.gonghak.routes.parseCourseIdStrict(it)
+            }
+            val courseRow = if (parsedCourseUUID != null) {
+                CoursesTable.select { CoursesTable.id eq parsedCourseUUID }.singleOrNull()
+            } else {
+                request.courseName?.takeIf { it.isNotBlank() }?.let { cName ->
                     CoursesTable.select { CoursesTable.name eq cName }.firstOrNull()
                 }
-                ?: CoursesTable.selectAll().firstOrNull()
-                ?: throw IllegalArgumentException("등록된 강의 정보를 찾을 수 없습니다.")
+            } ?: throw IllegalArgumentException("요청하신 강의 정보를 찾을 수 없습니다.")
 
             val courseUUID = courseRow[CoursesTable.id].value
             val courseName = courseRow[CoursesTable.name]
@@ -87,7 +91,7 @@ class QuestionService(
             }.singleOrNull()
 
             val requestedProfUUID = request.profId?.takeIf { it.isNotBlank() }?.let {
-                com.gonghak.routes.parseUserId(it)
+                com.gonghak.routes.parseUserIdOrNull(it)
             }?.takeIf { pId ->
                 UsersTable.select { (UsersTable.id eq pId) and (UsersTable.role eq UserRole.PROFESSOR.name) }.count() > 0
             }
@@ -146,13 +150,17 @@ class QuestionService(
                 it[createdAt] = now
             }
 
-            // Link attachments if provided
+            // Link attachments if provided (must belong to currentUserId and not already linked)
             if (request.attachmentIds.isNotEmpty()) {
                 val validUuids = request.attachmentIds.mapNotNull {
                     try { UUID.fromString(it) } catch (_: Exception) { null }
                 }
                 if (validUuids.isNotEmpty()) {
-                    AttachmentsTable.update({ AttachmentsTable.id inList validUuids }) {
+                    AttachmentsTable.update({
+                        (AttachmentsTable.id inList validUuids) and
+                            (AttachmentsTable.uploaderId eq currentUserId) and
+                            AttachmentsTable.questionId.isNull()
+                    }) {
                         it[AttachmentsTable.questionId] = qId
                     }
                 }
@@ -161,7 +169,7 @@ class QuestionService(
             val authorDisplayForMail = if (request.isAnonymous) {
                 "$courseName 수강생 (익명)"
             } else {
-                studentUser?.get(UsersTable.displayTag) ?: request.studentTag ?: "수강생"
+                studentUser[UsersTable.displayTag].ifBlank { request.studentTag ?: "수강생" }
             }
 
             CreatedQuestionSideEffects(
@@ -507,6 +515,47 @@ class QuestionService(
             isHidden = isHidden,
             createdAt = aRow[AnswersTable.createdAt].toString()
         )
+    }
+
+    suspend fun deleteQuestion(questionId: UUID): Boolean {
+        val savedAttachmentNames = dbQuery {
+            val exists = QuestionsTable.select { QuestionsTable.id eq questionId }.count() > 0
+            if (!exists) throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+
+            val answerIds = AnswersTable.select { AnswersTable.questionId eq questionId }
+                .map { it[AnswersTable.id].value }
+            val attachmentNames = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+                .map { it[AttachmentsTable.savedName] }
+
+            NotificationsTable.deleteWhere { NotificationsTable.referenceId eq questionId }
+            if (answerIds.isNotEmpty()) {
+                NotificationsTable.deleteWhere { NotificationsTable.referenceId inList answerIds }
+            }
+            AttachmentsTable.deleteWhere { AttachmentsTable.questionId eq questionId }
+            AnswersTable.deleteWhere { AnswersTable.questionId eq questionId }
+            QuestionsTable.deleteWhere { QuestionsTable.id eq questionId }
+            attachmentNames
+        }
+
+        attachmentService?.deleteStoredFiles(savedAttachmentNames)
+        return true
+    }
+
+    suspend fun deleteAnswer(answerId: UUID): UUID = dbQuery {
+        val aRow = AnswersTable.select { AnswersTable.id eq answerId }.singleOrNull()
+            ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
+        val questionId = aRow[AnswersTable.questionId]
+
+        NotificationsTable.deleteWhere { NotificationsTable.referenceId eq answerId }
+        AnswersTable.deleteWhere { AnswersTable.id eq answerId }
+
+        val remainingCount = AnswersTable.select { AnswersTable.questionId eq questionId }.count()
+        if (remainingCount == 0L) {
+            QuestionsTable.update({ QuestionsTable.id eq questionId }) {
+                it[QuestionsTable.status] = QuestionStatus.OPEN.name
+            }
+        }
+        questionId
     }
 
     suspend fun updateQuestion(

@@ -44,12 +44,9 @@ function safeSetStorage(key, value) {
   }
 }
 
-function getAuthHeaders(overrideUserId) {
-  const sessionUser = safeGetStorage(STORAGE_KEY_SESSION, null);
-  const uid = overrideUserId || sessionUser?.id || localStorage.getItem('prof_qa_current_user_id') || '';
+function getAuthHeaders() {
   const token = localStorage.getItem(STORAGE_KEY_TOKEN) || '';
   const headers = {};
-  if (uid) headers['X-User-Id'] = uid;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
@@ -94,14 +91,7 @@ async function hashPasswordBrowser(password, saltHex = null) {
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return `PBKDF2$65536$${actualSaltHex}$${hashHex}`;
   }
-  // subtle 미지원 환경용 폴백
-  let h = 2166136261;
-  const combined = `${actualSaltHex}:${password}`;
-  for (let i = 0; i < combined.length; i++) {
-    h ^= combined.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return `PBKDF2$65536$${actualSaltHex}$${(h >>> 0).toString(16)}`;
+  throw new Error('안전한 암호화 Web Crypto API를 사용할 수 없는 브라우저 환경입니다.');
 }
 
 async function verifyPasswordBrowser(password, storedHash) {
@@ -181,19 +171,40 @@ export const api = {
     }
   },
 
-  logout() {
+  async logout(options = {}) {
+    const headers = getAuthHeaders();
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem('prof_qa_current_user_id');
+    if (USE_REMOTE_BACKEND && !options.skipRemote) {
+      try {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          credentials: 'include',
+          headers
+        });
+      } catch {
+        // Ignore network errors during local logout cleanup
+      }
+    }
   },
 
   async register(payload) {
-    const cleanUsername = (payload.username || '').trim().toLowerCase();
+    const roleUpper = (payload.role || 'STUDENT').toUpperCase();
+    const rawUsername =
+      roleUpper === 'STUDENT' && (!payload.username || !payload.username.trim())
+        ? payload.identifier || ''
+        : payload.username || '';
+    const cleanUsername = rawUsername.trim().toLowerCase();
     const cleanName = (payload.name || '').trim();
     const cleanDept = (payload.department || '').trim();
-    const roleUpper = (payload.role || 'STUDENT').toUpperCase();
 
-    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUsername)) {
+    if (roleUpper === 'STUDENT') {
+      const cleanSid = (payload.identifier || cleanUsername).trim();
+      if (!/^\d{6,12}$/.test(cleanSid)) {
+        throw new Error('학번은 6~12자리 숫자로 입력해주세요.');
+      }
+    } else if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUsername)) {
       throw new Error('아이디(ID)는 영문, 숫자, 밑줄(_) 조합 3~30자로 입력해주세요.');
     }
     if (!payload.password || payload.password.length < 6) {
@@ -207,11 +218,12 @@ export const api = {
     }
 
     if (USE_REMOTE_BACKEND) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
         const res = await fetch(`${API_BASE_URL}/auth/register`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username: cleanUsername,
@@ -234,31 +246,24 @@ export const api = {
         }
 
         const authData = body.data || body;
+        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []), authData.token);
         const courses = await this.getCourses(authData.user.id);
         const normalized = normalizeUserObject(authData.user, courses);
         this.saveSession(normalized, authData.token);
         return { user: normalized, token: authData.token };
       } catch (e) {
-        if (
-          e.message &&
-          (e.message.includes('이미') ||
-            e.message.includes('학번') ||
-            e.message.includes('이메일') ||
-            e.message.includes('비밀번호') ||
-            e.message.includes('아이디') ||
-            e.message.includes('학과') ||
-            e.message.includes('과목'))
-        ) {
-          throw e;
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          throw new Error('서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
         }
-        console.warn('[API] Remote register unreachable, falling back to local crypto store:', e);
+        throw e;
       }
     }
 
     // 로컬 암호화 스토리지 폴백
     const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    if (localUsers.some(u => u.username === cleanUsername)) {
-      throw new Error('이미 사용 중인 아이디(ID)입니다.');
+    if (localUsers.some(u => u.username === cleanUsername || (u.role === 'student' && u.identifier === cleanUsername))) {
+      throw new Error(roleUpper === 'STUDENT' ? '이미 가입된 학번입니다.' : '이미 사용 중인 아이디(ID)입니다.');
     }
 
     const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
@@ -354,15 +359,16 @@ export const api = {
   async login(username, password) {
     const cleanUsername = (username || '').trim().toLowerCase();
     if (!cleanUsername || !password) {
-      throw new Error('아이디와 비밀번호를 모두 입력해주세요.');
+      throw new Error('아이디(학번)와 비밀번호를 모두 입력해주세요.');
     }
 
     if (USE_REMOTE_BACKEND) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
         const res = await fetch(`${API_BASE_URL}/auth/login`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: cleanUsername, password }),
           signal: controller.signal
@@ -371,29 +377,30 @@ export const api = {
 
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.success === false) {
-          throw new Error(body.message || '아이디 또는 비밀번호가 일치하지 않습니다.');
+          throw new Error(body.message || '아이디(학번) 또는 비밀번호가 일치하지 않습니다.');
         }
 
         const authData = body.data || body;
+        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []), authData.token);
         const courses = await this.getCourses(authData.user.id);
         const normalized = normalizeUserObject(authData.user, courses);
         this.saveSession(normalized, authData.token);
         return { user: normalized, token: authData.token };
       } catch (e) {
-        if (
-          e.message &&
-          (e.message.includes('일치하지') || e.message.includes('탈퇴') || e.message.includes('아이디'))
-        ) {
-          throw e;
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          throw new Error('서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
         }
-        console.warn('[API] Remote login unreachable, checking local crypto store:', e);
+        throw e;
       }
     }
 
     const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    const target = localUsers.find(u => u.username === cleanUsername);
+    const target = localUsers.find(
+      u => u.username === cleanUsername || (u.role === 'student' && (u.identifier || '').toLowerCase() === cleanUsername)
+    );
     if (!target) {
-      throw new Error('아이디 또는 비밀번호가 일치하지 않습니다.');
+      throw new Error('아이디(학번) 또는 비밀번호가 일치하지 않습니다.');
     }
     if (target.isWithdrawn) {
       throw new Error('관리자에 의해 탈퇴(비활성화) 처리된 계정입니다.');
@@ -416,12 +423,18 @@ export const api = {
     if (USE_REMOTE_BACKEND) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const res = await fetch(`${API_BASE_URL}/auth/me`, {
-          headers: getAuthHeaders(uid),
+          credentials: 'include',
+          headers: getAuthHeaders(),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
+        if (res.status === 401 || res.status === 403) {
+          const authErr = new Error('UNAUTHORIZED');
+          authErr.status = res.status;
+          throw authErr;
+        }
         if (res.ok) {
           const body = await res.json();
           const data = body?.data || body;
@@ -433,6 +446,9 @@ export const api = {
           }
         }
       } catch (e) {
+        if (e?.message === 'UNAUTHORIZED' || e?.status === 401 || e?.status === 403) {
+          throw e;
+        }
         console.warn('[API] Remote getUser failed, using session fallback', e);
       }
     }
@@ -456,7 +472,7 @@ export const api = {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
-        const res = await fetch(`${API_BASE_URL}/courses/departments`, { signal: controller.signal });
+        const res = await fetch(`${API_BASE_URL}/departments`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.ok) {
           const body = await res.json();
@@ -774,6 +790,63 @@ export const api = {
     return true;
   },
 
+  async deleteQuestion(questionId) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/questions/${questionId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.success === false) {
+          throw new Error(body.message || '게시물 삭제에 실패했습니다.');
+        }
+        return true;
+      } catch (e) {
+        if (e.name !== 'TypeError') throw e;
+        console.warn('[API] Remote deleteQuestion fallback:', e);
+      }
+    }
+
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    const filtered = questions.filter(q => q.id !== questionId);
+    safeSetStorage(STORAGE_KEY_QUESTIONS, filtered);
+    return true;
+  },
+
+  async deleteAnswer(answerId, questionId = null) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/answers/${answerId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.success === false) {
+          throw new Error(body.message || '답변 삭제에 실패했습니다.');
+        }
+        return true;
+      } catch (e) {
+        if (e.name !== 'TypeError') throw e;
+        console.warn('[API] Remote deleteAnswer fallback:', e);
+      }
+    }
+
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    questions.forEach(q => {
+      if (!questionId || q.id === questionId) {
+        if (Array.isArray(q.answers)) {
+          q.answers = q.answers.filter(a => a.id !== answerId);
+          if (q.answers.length === 0) {
+            q.status = 'open';
+          }
+        }
+      }
+    });
+    safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
+    return true;
+  },
+
   // ============================================================================
   // 4. 환경 설정 및 이메일 로그
   // ============================================================================
@@ -957,6 +1030,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         const res = await fetch(`${API_BASE_URL}/attachments/upload`, {
           method: 'POST',
+          credentials: 'include',
           headers: getAuthHeaders(uid),
           body: formData,
           signal: controller.signal
@@ -1238,7 +1312,13 @@ export const api = {
     return calculateSimilarQuestions(queryText, questions, 3);
   },
 
-  async refineQuestionAI(rawText, category = 'lecture', studentInfo = {}, rawTitle = '') {
+  async refineQuestionAI(
+    rawText,
+    category = 'lecture',
+    studentInfo = {},
+    rawTitle = '',
+    courseContext = {}
+  ) {
     const catLabel = (() => {
       const c = (category || '').toLowerCase();
       if (c === 'grade') return '성적';
@@ -1246,10 +1326,19 @@ export const api = {
       return '강의';
     })();
 
+    const courseName = (courseContext?.courseName || '').trim();
+    const rawProfName = (courseContext?.professorName || '').trim();
+    const profGreeting = (() => {
+      if (!rawProfName) return '교수님';
+      if (rawProfName.endsWith('교수님')) return rawProfName;
+      if (rawProfName.endsWith('교수')) return `${rawProfName}님`;
+      return `${rawProfName} 교수님`;
+    })();
+
     if (USE_REMOTE_BACKEND) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         const res = await fetch(`${API_BASE_URL}/ai/refine`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1258,6 +1347,11 @@ export const api = {
             rawContent: rawText,
             title: rawTitle,
             rawTitle: rawTitle,
+            courseName: courseName || null,
+            professorName: rawProfName || null,
+            studentName: studentInfo?.name || null,
+            studentDepartment: studentInfo?.department || null,
+            studentIdentifier: studentInfo?.studentId || studentInfo?.identifier || null,
             category,
             studentInfo
           }),
@@ -1310,8 +1404,9 @@ export const api = {
     }
 
     const studentTag = studentInfo.name
-      ? `${studentInfo.department || '소프트웨어학과'} ${studentInfo.studentId || ''} ${studentInfo.name}`
+      ? `${studentInfo.department || '학부'} ${studentInfo.studentId || ''} ${studentInfo.name}`.replace(/\s+/g, ' ').trim()
       : '수강생';
+    const courseLabel = courseName ? `${courseName} 강의를` : '이번 학기 강의를';
     const cleanTitle = (rawTitle || '').replace(/[\[\]!?~]+/g, '').trim();
 
     let refinedTitle = '';
@@ -1321,7 +1416,7 @@ export const api = {
       refinedTitle = cleanTitle
         ? `[성적 문의] ${cleanTitle} 피드백 및 평가 기준 확인의 건`
         : '[성적 문의] 최종 평가 결과 및 피드백 문의의 건';
-      refinedBody = `안녕하십니까, 교수님.\n이번 학기 강의를 성실히 수강하고 있는 ${studentTag}입니다. 한 학기 동안 열정적인 가르침을 주셔서 감사드립니다.\n\n다름이 아니라 이번 학기 최종 성적 결과와 관련하여, 스스로 부족했던 부분을 점검하고 향후 학습 방향을 보완하고자 조심스럽게 피드백을 여쭙고자 연락을 드립니다.\n\n바쁘신 일정 중 시간 되실 때 확인해 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
+      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 성실히 수강하고 있는 ${studentTag}입니다. 한 학기 동안 열정적인 가르침을 주셔서 감사드립니다.\n\n다름이 아니라 이번 학기 최종 성적 결과와 관련하여, 스스로 부족했던 부분을 점검하고 향후 학습 방향을 보완하고자 조심스럽게 피드백을 여쭙고자 연락을 드립니다.\n\n바쁘신 일정 중 시간 되실 때 확인해 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
     } else if (
       category === 'assignment' ||
       rawText.includes('과제') ||
@@ -1331,12 +1426,12 @@ export const api = {
       refinedTitle = cleanTitle
         ? `[과제 문의] ${cleanTitle} 관련 일정 및 세부 사항 문의의 건`
         : '[과제 문의] 과제 수행 관련 일정 및 세부 사항 문의의 건';
-      refinedBody = `안녕하십니까 교수님.\n강의를 성실히 수강하고 있는 ${studentTag}입니다. 평소 깊이 있고 유익한 강의를 이끌어 주셔서 감사드립니다.\n\n현재 안내해 주신 과제를 성실히 수행하는 과정에서 핵심 요구사항 및 일정과 관련하여 명확히 확인하고자 조심스럽게 문의를 남깁니다.\n\n확인해 주시면 성실히 과제를 완수하도록 하겠습니다. 감사합니다.`;
+      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 성실히 수강하고 있는 ${studentTag}입니다. 평소 깊이 있고 유익한 강의를 이끌어 주셔서 감사드립니다.\n\n현재 안내해 주신 과제를 성실히 수행하는 과정에서 핵심 요구사항 및 일정과 관련하여 명확히 확인하고자 조심스럽게 문의를 남깁니다.\n\n확인해 주시면 성실히 과제를 완수하도록 하겠습니다. 감사합니다.`;
     } else {
       refinedTitle = cleanTitle
         ? `[강의 문의] ${cleanTitle} 개념 이해 및 학습 질의의 건`
         : '[강의 문의] 강의 내용 개념 이해 및 학습 관련 질의의 건';
-      refinedBody = `안녕하십니까 교수님.\n이번 학기 수업을 수강하고 있는 ${studentTag}입니다. 늘 알차고 유익한 강의를 준비해 주셔서 감사드립니다.\n\n수업 시간에 다루어 주신 강의 내용 및 핵심 개념을 복습하던 중 개념 정리와 원리 이해에 다소 부족한 부분이 있어 교수님의 고견과 조언을 조심스럽게 구하고자 질문을 올립니다.\n\n바쁘신 일정 중 시간 내어 주셔서 감사드립니다.`;
+      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 수강하고 있는 ${studentTag}입니다. 늘 알차고 유익한 강의를 준비해 주셔서 감사드립니다.\n\n수업 시간에 다루어 주신 강의 내용 및 핵심 개념을 복습하던 중 개념 정리와 원리 이해에 다소 부족한 부분이 있어 교수님의 고견과 조언을 조심스럽게 구하고자 질문을 올립니다.\n\n바쁘신 일정 중 시간 내어 주셔서 감사드립니다.`;
     }
 
     return {

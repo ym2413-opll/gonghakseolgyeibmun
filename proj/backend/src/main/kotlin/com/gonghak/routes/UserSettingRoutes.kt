@@ -1,6 +1,7 @@
 package com.gonghak.routes
 
 import com.gonghak.dto.*
+import com.gonghak.models.UserRole
 import com.gonghak.service.NotificationService
 import com.gonghak.service.UserService
 import io.ktor.http.*
@@ -8,6 +9,7 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import java.util.UUID
 
 fun Route.userSettingRoutes(
     userService: UserService,
@@ -38,7 +40,8 @@ fun Route.userSettingRoutes(
         )
     }
 
-    suspend fun applyUnifiedUpdate(userId: java.util.UUID, request: UpdateUnifiedSettingRequest): UnifiedSettingDto {
+    suspend fun applyUnifiedUpdate(user: UserDto, request: UpdateUnifiedSettingRequest): UnifiedSettingDto {
+        val userId = UUID.fromString(user.id)
         val mappedTheme = request.theme ?: request.themeMode
         val mappedFont = request.fontSize
         if (mappedTheme != null || mappedFont != null) {
@@ -51,28 +54,31 @@ fun Route.userSettingRoutes(
             )
         }
 
-        if (request.dndEnabled != null ||
-            request.dndStartTime != null ||
-            request.dndEndTime != null ||
-            request.coProfNotification != null ||
-            request.emailEnabled != null ||
-            request.notificationEmail != null
-        ) {
-            notificationService.updateProfessorNotificationSetting(
-                userId,
-                UpdateProfessorNotificationSettingRequest(
-                    quietHoursEnabled = request.dndEnabled,
-                    quietHoursStart = request.dndStartTime,
-                    quietHoursEnd = request.dndEndTime,
-                    notifyOtherProfessorQuestions = request.coProfNotification,
-                    emailEnabled = request.emailEnabled,
-                    notificationEmail = request.notificationEmail
+        val isProfessorOrAdmin = user.role == UserRole.PROFESSOR || user.role == UserRole.ADMIN || user.isAdmin
+        if (isProfessorOrAdmin) {
+            if (request.dndEnabled != null ||
+                request.dndStartTime != null ||
+                request.dndEndTime != null ||
+                request.coProfNotification != null ||
+                request.emailEnabled != null ||
+                request.notificationEmail != null
+            ) {
+                notificationService.updateProfessorNotificationSetting(
+                    userId,
+                    UpdateProfessorNotificationSettingRequest(
+                        quietHoursEnabled = request.dndEnabled,
+                        quietHoursStart = request.dndStartTime,
+                        quietHoursEnd = request.dndEndTime,
+                        notifyOtherProfessorQuestions = request.coProfNotification,
+                        emailEnabled = request.emailEnabled,
+                        notificationEmail = request.notificationEmail
+                    )
                 )
-            )
-        }
+            }
 
-        if (request.activeCategories != null) {
-            userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
+            if (request.activeCategories != null) {
+                userService.updateProfessorActiveCategoriesMap(userId, request.activeCategories)
+            }
         }
 
         return buildUnifiedSettings(userId)
@@ -80,18 +86,15 @@ fun Route.userSettingRoutes(
 
     route("/api/settings") {
         get {
-            val userId = call.getCurrentUserId()
-            call.respond(HttpStatusCode.OK, buildUnifiedSettings(userId))
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            call.respond(HttpStatusCode.OK, buildUnifiedSettings(UUID.fromString(user.id)))
         }
 
         post {
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
             val request = call.receive<UpdateUnifiedSettingRequest>()
-            val tokenUserId = call.getVerifiedTokenUserId()
-            val userId = tokenUserId
-                ?: (if (isDemoModeEnabled()) request.userId?.let { parseDemoUserIdOrNull(it) } else null)
-                ?: call.getCurrentUserId()
             try {
-                val updated = applyUnifiedUpdate(userId, request)
+                val updated = applyUnifiedUpdate(user, request)
                 call.respond(HttpStatusCode.OK, updated)
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
@@ -99,13 +102,10 @@ fun Route.userSettingRoutes(
         }
 
         put {
+            val user = call.requireAuthenticatedUser(userService) ?: return@put
             val request = call.receive<UpdateUnifiedSettingRequest>()
-            val tokenUserId = call.getVerifiedTokenUserId()
-            val userId = tokenUserId
-                ?: (if (isDemoModeEnabled()) request.userId?.let { parseDemoUserIdOrNull(it) } else null)
-                ?: call.getCurrentUserId()
             try {
-                val updated = applyUnifiedUpdate(userId, request)
+                val updated = applyUnifiedUpdate(user, request)
                 call.respond(HttpStatusCode.OK, updated)
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
@@ -115,30 +115,30 @@ fun Route.userSettingRoutes(
 
     route("/api/user/settings") {
         get {
-            val userId = call.getCurrentUserId()
-            val setting = userService.getUserSetting(userId)
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            val setting = userService.getUserSetting(UUID.fromString(user.id))
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = setting))
         }
 
         put {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@put
             val request = call.receive<UpdateUserSettingRequest>()
-            val updated = userService.updateUserSetting(userId, request)
+            val updated = userService.updateUserSetting(UUID.fromString(user.id), request)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
         }
     }
 
     route("/api/professor/notification-settings") {
         get {
-            val profId = call.getCurrentUserId()
-            val setting = notificationService.getProfessorNotificationSetting(profId)
+            val prof = call.requireProfessorOrAdmin(userService) ?: return@get
+            val setting = notificationService.getProfessorNotificationSetting(UUID.fromString(prof.id))
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = setting))
         }
 
         put {
-            val profId = call.getCurrentUserId()
+            val prof = call.requireProfessorOrAdmin(userService) ?: return@put
             val request = call.receive<UpdateProfessorNotificationSettingRequest>()
-            val updated = notificationService.updateProfessorNotificationSetting(profId, request)
+            val updated = notificationService.updateProfessorNotificationSetting(UUID.fromString(prof.id), request)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
         }
     }

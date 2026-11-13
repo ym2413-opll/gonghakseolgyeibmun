@@ -1,6 +1,7 @@
 package com.gonghak.routes
 
 import com.gonghak.dto.*
+import com.gonghak.models.UserRole
 import com.gonghak.service.EmailService
 import com.gonghak.service.QuestionService
 import com.gonghak.service.UserService
@@ -17,22 +18,15 @@ fun Route.adminRoutes(
     emailService: EmailService
 ) {
     suspend fun ApplicationCall.requireAdmin(): UUID? {
-        val userId = getVerifiedTokenUserId()
-        if (userId == null) {
-            respond(
-                HttpStatusCode.Unauthorized,
-                ApiResponse<String>(success = false, message = "유효한 인증 토큰이 필요합니다.")
-            )
-            return null
-        }
-        if (!userService.isUserAdmin(userId)) {
+        val activeUser = requireAuthenticatedUser(userService, allowDemoHeader = false) ?: return null
+        if (!activeUser.isAdmin && activeUser.role != UserRole.ADMIN) {
             respond(
                 HttpStatusCode.Forbidden,
                 ApiResponse<String>(success = false, message = "관리자 권한이 필요한 기능입니다.")
             )
             return null
         }
-        return userId
+        return UUID.fromString(activeUser.id)
     }
 
     route("/api/admin") {
@@ -139,6 +133,54 @@ fun Route.adminRoutes(
 
         patch("/answers/{id}/hide") { handleAnswerHide(call) }
         post("/answers/{id}/hide") { handleAnswerHide(call) }
+
+        // Delete question or answer permanently (Admin only)
+        delete("/questions/{id}") {
+            call.requireAdmin() ?: return@delete
+            val id = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
+                ?: return@delete call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(success = false, message = "유효한 질문 ID가 아닙니다.")
+                )
+            questionService.deleteQuestion(id)
+            call.respond(
+                HttpStatusCode.OK,
+                ApiResponse(
+                    success = true,
+                    message = "질문이 영구 삭제되었습니다.",
+                    data = kotlinx.serialization.json.JsonObject(
+                        mapOf(
+                            "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
+                            "questionId" to kotlinx.serialization.json.JsonPrimitive(id.toString())
+                        )
+                    )
+                )
+            )
+        }
+
+        delete("/answers/{id}") {
+            call.requireAdmin() ?: return@delete
+            val id = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
+                ?: return@delete call.respond(
+                    HttpStatusCode.BadRequest,
+                    ErrorResponse(success = false, message = "유효한 답변 ID가 아닙니다.")
+                )
+            val questionId = questionService.deleteAnswer(id)
+            call.respond(
+                HttpStatusCode.OK,
+                ApiResponse(
+                    success = true,
+                    message = "답변이 삭제되었습니다.",
+                    data = kotlinx.serialization.json.JsonObject(
+                        mapOf(
+                            "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
+                            "answerId" to kotlinx.serialization.json.JsonPrimitive(id.toString()),
+                            "questionId" to kotlinx.serialization.json.JsonPrimitive(questionId.toString())
+                        )
+                    )
+                )
+            )
+        }
 
         // View all email logs
         get("/emails") {

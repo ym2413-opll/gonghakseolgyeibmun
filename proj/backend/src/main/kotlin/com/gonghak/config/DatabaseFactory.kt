@@ -109,15 +109,22 @@ object DatabaseFactory {
         val hikariConfig = HikariConfig()
 
         if (!dbUrl.isNullOrBlank()) {
+            val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
             val dbDriver = config?.propertyOrNull("database.driver")?.getString()
                 ?: System.getenv("DB_DRIVER")
                 ?: "org.postgresql.Driver"
             val dbUser = config?.propertyOrNull("database.user")?.getString()
                 ?: System.getenv("DB_USER")
                 ?: "postgres"
-            val dbPassword = config?.propertyOrNull("database.password")?.getString()
+            val rawPassword = config?.propertyOrNull("database.password")?.getString()
                 ?: System.getenv("DB_PASSWORD")
-                ?: "postgres"
+            if (isProd && (rawPassword.isNullOrBlank() || rawPassword == "postgres")) {
+                throw IllegalStateException("DB_PASSWORD must be explicitly configured (not default) when PRODUCTION_MODE=true.")
+            }
+            if (rawPassword.isNullOrBlank() || rawPassword == "postgres") {
+                logger.warn("[Security] DB_PASSWORD is unset or using the default 'postgres' value.")
+            }
+            val dbPassword = rawPassword ?: "postgres"
 
             hikariConfig.driverClassName = dbDriver
             hikariConfig.jdbcUrl = dbUrl

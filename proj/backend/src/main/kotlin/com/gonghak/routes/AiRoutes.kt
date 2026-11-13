@@ -4,15 +4,30 @@ import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.RefineQuestionRequest
 import com.gonghak.dto.RefineQuestionResponse
 import com.gonghak.service.AiRefineService
+import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
-fun Route.aiRoutes(aiRefineService: AiRefineService) {
+fun Route.aiRoutes(
+    aiRefineService: AiRefineService,
+    userService: UserService = UserService()
+) {
+    val aiRateLimiter = SlidingWindowRateLimiter(maxRequests = 20, windowMillis = 60_000L)
+
     route("/api/ai") {
         post("/refine") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!aiRateLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "AI 문장 윤색 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+                )
+                return@post
+            }
+
             val request = call.receive<RefineQuestionRequest>()
             val contentToRefine = request.effectiveContent
             val titleToRefine = request.effectiveTitle
@@ -29,7 +44,11 @@ fun Route.aiRoutes(aiRefineService: AiRefineService) {
                 rawContent = contentToRefine.ifBlank { titleToRefine ?: "" },
                 rawTitle = titleToRefine,
                 courseName = request.courseName,
-                category = request.category
+                category = request.category,
+                professorName = request.effectiveProfessorName,
+                studentName = request.effectiveStudentName,
+                studentDepartment = request.effectiveStudentDepartment,
+                studentIdentifier = request.effectiveStudentIdentifier
             )
 
             call.respond(

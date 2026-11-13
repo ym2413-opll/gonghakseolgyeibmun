@@ -8,6 +8,7 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import java.util.UUID
 
 fun Route.courseRoutes(userService: UserService) {
     route("/api/departments") {
@@ -30,8 +31,8 @@ fun Route.courseRoutes(userService: UserService) {
                 val result = userService.searchCourses(query, college, dept, page, limit)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
             } else {
-                val userId = call.getCurrentUserId()
-                val courses = userService.getCoursesForUser(userId)
+                val user = call.requireAuthenticatedUser(userService) ?: return@get
+                val courses = userService.getCoursesForUser(UUID.fromString(user.id))
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = courses))
             }
         }
@@ -56,7 +57,7 @@ fun Route.courseRoutes(userService: UserService) {
                 HttpStatusCode.BadRequest,
                 ApiResponse<Unit>(success = false, message = "강의 ID가 필요합니다.")
             )
-            val courseId = parseCourseId(courseIdParam)
+            val courseId = parseCourseIdStrict(courseIdParam)
             val course = userService.getCourseById(courseId)
             if (course != null) {
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = course))
@@ -66,23 +67,25 @@ fun Route.courseRoutes(userService: UserService) {
         }
 
         get("/{courseId}/categories") {
-            val profId = call.getCurrentUserId()
+            val prof = call.requireProfessorOrAdmin(userService) ?: return@get
+            val profId = UUID.fromString(prof.id)
             val courseIdParam = call.parameters["courseId"] ?: return@get call.respond(
                 HttpStatusCode.BadRequest,
                 ApiResponse<Unit>(success = false, message = "강의 ID가 필요합니다.")
             )
-            val courseId = parseCourseId(courseIdParam)
+            val courseId = parseCourseIdStrict(courseIdParam)
             val categories = userService.getProfessorCategories(profId, courseId)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = categories))
         }
 
         put("/{courseId}/categories") {
-            val profId = call.getCurrentUserId()
+            val prof = call.requireProfessorOrAdmin(userService) ?: return@put
+            val profId = UUID.fromString(prof.id)
             val courseIdParam = call.parameters["courseId"] ?: return@put call.respond(
                 HttpStatusCode.BadRequest,
                 ApiResponse<Unit>(success = false, message = "강의 ID가 필요합니다.")
             )
-            val courseId = parseCourseId(courseIdParam)
+            val courseId = parseCourseIdStrict(courseIdParam)
             val request = call.receive<UpdateCategorySettingRequest>()
             val updated = userService.updateCategorySetting(profId, courseId, request)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))

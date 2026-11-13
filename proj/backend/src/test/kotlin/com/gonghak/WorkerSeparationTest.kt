@@ -13,7 +13,13 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Test
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.io.PrintWriter
+import java.net.Socket
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
 import javax.imageio.ImageIO
@@ -179,5 +185,126 @@ class WorkerSeparationTest {
             UsersTable.select { UsersTable.id eq legacyUserId }.singleOrNull()?.get(UsersTable.createdAt)
         }
         assertNotNull(reAddedCreatedAt, "Missing NOT NULL created_at column should be added with DEFAULT CURRENT_TIMESTAMP")
+    }
+
+    @Test
+    fun testAdminLoopbackSocketCommandWithoutStdin() = runBlocking {
+        DatabaseFactory.init()
+        val userService = UserService()
+        val reg = userService.registerUser(
+            com.gonghak.dto.RegisterRequest(
+                role = UserRole.STUDENT,
+                username = "",
+                password = "password1234",
+                name = "소켓관리대상",
+                department = "소프트웨어학과",
+                identifier = "20267788"
+            )
+        )
+        assertFalse(reg.user.isAdmin)
+
+        // Start loopback control socket with explicit port (simulates headless systemd run)
+        AdminConsoleManager.stopConsoleListener()
+        System.setProperty("admin.console.port", "28089")
+        System.setProperty("admin.console.secretFile", "build/tmp/test-admin-ctl.secret")
+        try {
+            AdminConsoleManager.startConsoleListener(userService)
+            // 1. Unauthenticated connection WITHOUT AUTH handshake must be rejected
+            var unauthRejected = false
+            for (attempt in 1..20) {
+                try {
+                    Socket("127.0.0.1", 28089).use { sock ->
+                        val writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8), true)
+                        val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.UTF_8))
+                        writer.println("users")
+                        val resp = reader.readLine().orEmpty()
+                        unauthRejected = resp.contains("오류") && resp.contains("인증")
+                    }
+                    break
+                } catch (_: Exception) {
+                    delay(50)
+                }
+            }
+            assertTrue(unauthRejected, "Unauthenticated loopback socket command must be rejected")
+
+            // 2. Authenticated connection WITH AUTH <token> handshake succeeds
+            val controlToken = AdminConsoleManager.readClientControlToken()
+            assertNotNull(controlToken, "Control token should be generated and readable locally")
+            var connected = false
+            var responseLines = listOf<String>()
+            for (attempt in 1..20) {
+                try {
+                    Socket("127.0.0.1", 28089).use { sock ->
+                        connected = true
+                        val writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8), true)
+                        val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.UTF_8))
+                        writer.println("AUTH $controlToken")
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line == "__END_ADMIN_RESPONSE__") break
+                        }
+                        writer.println("admin 20267788")
+                        val lines = mutableListOf<String>()
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line == "__END_ADMIN_RESPONSE__") break
+                            lines.add(line)
+                        }
+                        responseLines = lines
+                    }
+                    break
+                } catch (_: Exception) {
+                    delay(50)
+                }
+            }
+            assertTrue(connected, "Admin loopback socket should accept connection cleanly")
+            assertTrue(responseLines.any { it.contains("성공") && it.contains("20267788") })
+
+            val updatedUser = userService.getUserById(UUID.fromString(reg.user.id))
+            assertTrue(updatedUser?.isAdmin == true, "Admin flag should be persisted via socket command")
+
+            val revokeOutput = AdminConsoleManager.executeCommand("revoke-admin 20267788", userService)
+            assertTrue(revokeOutput.contains("해제"))
+            assertFalse(userService.getUserById(UUID.fromString(reg.user.id))?.isAdmin == true)
+        } finally {
+            AdminConsoleManager.stopConsoleListener()
+            java.nio.file.Files.deleteIfExists(AdminConsoleManager.resolveSecretFilePath())
+            System.clearProperty("admin.console.port")
+            System.clearProperty("admin.console.secretFile")
+        }
+    }
+
+    @Test
+    fun testAiRefineDistinguishesProfessorNameFromStudentName() = runBlocking {
+        val workerManager = BackgroundWorkerManager()
+        val service = AiRefineService(apiKey = null, workerManager = workerManager)
+        try {
+            val res1 = service.refineQuestion(
+                rawContent = "과제 제출 기한 하루만 연장 가능한가요?",
+                rawTitle = "과제 연장 문의",
+                courseName = "자료구조",
+                category = QuestionCategory.ASSIGNMENT,
+                professorName = "박철수",
+                studentName = "홍길동",
+                studentDepartment = "컴퓨터정보공학부",
+                studentIdentifier = "20261234"
+            )
+            assertTrue(res1.content.startsWith("안녕하십니까, 박철수 교수님."), "Should greet actual professor: ${res1.content}")
+            assertFalse(res1.content.contains("홍길동 교수님"), "Must never place student name in professor greeting")
+            assertTrue(res1.content.contains("홍길동"), "Student name should appear in self-intro")
+
+            val res2 = service.refineQuestion(
+                rawContent = "수업 내용이 헷갈립니다.",
+                courseName = "공학설계입문",
+                category = QuestionCategory.LECTURE,
+                professorName = "이교수",
+                studentName = "김학생"
+            )
+            assertTrue(res2.content.startsWith("안녕하십니까, 이교수님."), "Should format '이교수' cleanly as '이교수님': ${res2.content}")
+            assertFalse(res2.content.contains("이교수 교수님"), "Must not duplicate '교수' in greeting")
+        } finally {
+            service.close()
+            workerManager.shutdown()
+        }
     }
 }

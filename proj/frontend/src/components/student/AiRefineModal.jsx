@@ -11,6 +11,8 @@ export default function AiRefineModal({
   initialTitle = '',
   initialText = '',
   category = 'lecture',
+  courseName = '',
+  professorName = '',
   onApplyRefined
 }) {
   const { currentUser } = useAuth();
@@ -30,11 +32,14 @@ export default function AiRefineModal({
     setIsLoading(true);
     try {
       const studentInfo = {
-        name: currentUser?.name || '학생',
-        studentId: currentUser?.studentId || '',
-        department: currentUser?.department || '학부'
+        name: currentUser?.name || '',
+        studentId: currentUser?.identifier || currentUser?.studentId || '',
+        department: currentUser?.department || ''
       };
-      const result = await api.refineQuestionAI(text, category, studentInfo, ttl);
+      const result = await api.refineQuestionAI(text, category, studentInfo, ttl, {
+        courseName,
+        professorName
+      });
       setAiResult(result);
       setRefinedText(result.refined || '');
       setRefinedTitle(result.refinedTitle || '');
@@ -43,7 +48,7 @@ export default function AiRefineModal({
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, category]);
+  }, [currentUser, category, courseName, professorName]);
 
   useEffect(() => {
     if (isOpen) {

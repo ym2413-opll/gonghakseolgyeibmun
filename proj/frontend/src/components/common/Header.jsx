@@ -119,8 +119,7 @@ const Header = ({
             <GraduationCap size={24} />
           </div>
           <div className="brand-text">
-            <span className="brand-univ">KWANGWOON UNIVERSITY FORUM</span>
-            <h1 className="brand-title">광운 학업 Q&amp;A 포럼</h1>
+            <h1 className="brand-title">교수질문센터</h1>
           </div>
         </div>
 
@@ -288,7 +287,7 @@ const Header = ({
                 onClick={() => setAuthModalMode('register')}
               >
                 <UserPlus size={15} />
-                <span className="hide-mobile">전시용 </span>회원가입
+                <span>회원가입</span>
               </button>
             </div>
           )}

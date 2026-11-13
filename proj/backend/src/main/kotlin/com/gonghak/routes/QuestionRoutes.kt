@@ -3,6 +3,7 @@ package com.gonghak.routes
 import com.gonghak.dto.*
 import com.gonghak.models.QuestionCategory
 import com.gonghak.service.QuestionService
+import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -10,15 +11,21 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
-fun Route.questionRoutes(questionService: QuestionService) {
+fun Route.questionRoutes(
+    questionService: QuestionService,
+    userService: UserService = UserService()
+) {
     route("/api/questions") {
         // List questions
         get {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            val userId = UUID.fromString(user.id)
             val courseIdStr = call.request.queryParameters["courseId"]
             val categoryStr = call.request.queryParameters["category"]
 
-            val courseIdFilter = courseIdStr?.let { parseCourseId(it) }
+            val courseIdFilter = courseIdStr?.takeIf { it.isNotBlank() }?.let {
+                parseCourseIdOrNull(it) ?: throw IllegalArgumentException("유효하지 않은 강의 ID입니다.")
+            }
             val categoryFilter = categoryStr?.let {
                 try {
                     QuestionCategory.valueOf(it.uppercase())
@@ -38,6 +45,7 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Similar questions lookup (GET query parameters)
         get("/similar") {
+            call.requireAuthenticatedUser(userService) ?: return@get
             val courseIdStr = call.request.queryParameters["courseId"]
             val categoryStr = call.request.queryParameters["category"]
             val queryText = call.request.queryParameters["query"]
@@ -60,8 +68,8 @@ fun Route.questionRoutes(questionService: QuestionService) {
                 return@get
             }
 
-            val courseId = parseCourseId(courseIdStr)
-            val excludeId = call.request.queryParameters["excludeId"]?.let { parseQuestionId(it) }
+            val courseId = parseCourseIdStrict(courseIdStr)
+            val excludeId = call.request.queryParameters["excludeId"]?.takeIf { it.isNotBlank() }?.let { parseQuestionId(it) }
 
             val results = questionService.getSimilarQuestions(
                 courseId = courseId,
@@ -75,14 +83,15 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Similar questions lookup (POST JSON body for frontend api.js)
         post("/similar") {
+            call.requireAuthenticatedUser(userService) ?: return@post
             val request = call.receive<SimilarQuestionRequest>()
             if (request.category == QuestionCategory.GRADE) {
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = emptyList<SimilarQuestionDto>()))
                 return@post
             }
 
-            val courseId = request.courseId?.let { parseCourseId(it) } ?: DEFAULT_COURSE_ID
-            val excludeId = request.excludeId?.let { parseQuestionId(it) }
+            val courseId = request.courseId?.takeIf { it.isNotBlank() }?.let { parseCourseIdStrict(it) } ?: DEFAULT_COURSE_ID
+            val excludeId = request.excludeId?.takeIf { it.isNotBlank() }?.let { parseQuestionId(it) }
 
             val results = questionService.getSimilarQuestions(
                 courseId = courseId,
@@ -96,7 +105,8 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Create new question
         post {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            val userId = UUID.fromString(user.id)
             val request = call.receive<CreateQuestionRequest>()
 
             try {
@@ -111,7 +121,8 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Question detail
         get("/{id}") {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            val userId = UUID.fromString(user.id)
             val questionId = parseQuestionId(call.parameters["id"])
 
             try {
@@ -124,7 +135,8 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Update question
         put("/{id}") {
-            val userId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@put
+            val userId = UUID.fromString(user.id)
             val questionId = parseQuestionId(call.parameters["id"])
             val request = call.receive<UpdateQuestionRequest>()
 
@@ -140,7 +152,8 @@ fun Route.questionRoutes(questionService: QuestionService) {
 
         // Post answer
         post("/{id}/answers") {
-            val profId = call.getCurrentUserId()
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            val profId = UUID.fromString(user.id)
             val questionId = parseQuestionId(call.parameters["id"])
             val request = call.receive<CreateAnswerRequest>()
 

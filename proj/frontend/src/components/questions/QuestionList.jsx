@@ -17,7 +17,8 @@ const QuestionList = ({
   selectedQuestionId,
   onSelectQuestion,
   onOpenNewQuestion,
-  onToggleHideQuestion
+  onToggleHideQuestion,
+  onDeleteQuestion
 }) => {
   const { currentUser, allCourses } = useAuth();
 
@@ -71,22 +72,18 @@ const QuestionList = ({
 
   return (
     <div className="forum-board-container">
-      {/* 서양식 포럼 상단 배너 및 새 토픽(질문) 작성 CTA */}
       <div className="forum-board-hero">
         <div className="forum-hero-left">
           <div className="forum-hero-icon">
-            <MessagesSquare size={22} />
+            <MessagesSquare size={20} />
           </div>
           <div>
-            <h2 className="forum-board-title">학업 Q&amp;A 토픽 보드 (Discussion Threads)</h2>
-            <p className="forum-board-subtitle">
-              교과목 및 카테고리별 학술 토픽을 탐색하거나 AI 말투 교정 도우미로 새 질문 스레드를 시작하세요.
-            </p>
+            <h2 className="forum-board-title">질문 게시판</h2>
           </div>
         </div>
-        <button className="btn btn-primary btn-new-topic" onClick={onOpenNewQuestion}>
+        <button type="button" className="btn btn-primary btn-new-topic" onClick={onOpenNewQuestion}>
           <Plus size={18} />
-          <span>+ 새 토픽(질문) 작성</span>
+          <span>새 질문 작성</span>
         </button>
       </div>
 
@@ -189,9 +186,8 @@ const QuestionList = ({
       <div className="forum-topic-list">
         {filteredQuestions.length === 0 ? (
           <div className="empty-state-box">
-            <MessageSquarePlus size={36} className="text-muted" />
-            <h4>조건에 일치하는 토픽 스레드가 없습니다</h4>
-            <p>검색 필터를 초기화하거나 새로운 학업 질문 토픽을 작성해보세요.</p>
+            <MessageSquarePlus size={32} className="text-muted" />
+            <h4>표시할 질문이 없습니다</h4>
             <button
               type="button"
               className="btn btn-outline btn-sm"
@@ -214,6 +210,7 @@ const QuestionList = ({
               isSelected={q.id === selectedQuestionId}
               onClick={() => onSelectQuestion(q.id)}
               onToggleHide={onToggleHideQuestion}
+              onDelete={onDeleteQuestion}
             />
           ))
         )}

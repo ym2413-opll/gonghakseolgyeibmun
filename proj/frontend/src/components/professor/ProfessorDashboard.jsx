@@ -20,7 +20,8 @@ const ProfessorDashboard = ({
   selectedQuestionId,
   onSelectQuestion,
   onOpenProfSettings,
-  onToggleHideQuestion
+  onToggleHideQuestion,
+  onDeleteQuestion
 }) => {
   const { currentUser, allCourses } = useAuth();
   const { settings } = useTheme();
@@ -277,6 +278,7 @@ const ProfessorDashboard = ({
                 onClick={() => onSelectQuestion(q.id)}
                 canCoProfAnswer={isCoProfAnswerable}
                 onToggleHide={onToggleHideQuestion}
+                onDelete={onDeleteQuestion}
               />
             );
           })

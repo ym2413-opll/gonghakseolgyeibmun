@@ -184,6 +184,17 @@ export async function validateSecurity(file) {
   return { valid: true, extension, isImage };
 }
 
+export function isSafeAttachmentUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith('/api/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:')
+  );
+}
+
 /**
  * 용량 읽기 쉬운 포맷 변환 (예: 1.2 MB, 340 KB)
  */

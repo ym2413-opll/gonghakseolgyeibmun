@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
-import { formatFileSize } from '../../utils/fileSecurity';
+import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import {
   Send,
   Shield,
@@ -25,19 +25,9 @@ import {
   ShieldCheck,
   EyeOff,
   Eye,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
-
-const isSafeAttachmentUrl = (url) => {
-  if (!url || typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  return (
-    trimmed.startsWith('/api/') ||
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('blob:')
-  );
-};
 
 const QuestionDetail = ({
   question,
@@ -45,6 +35,8 @@ const QuestionDetail = ({
   onUpdateQuestion,
   onToggleHideQuestion,
   onToggleHideAnswer,
+  onDeleteQuestion,
+  onDeleteAnswer,
   onBack
 }) => {
   const { currentUser, isProfessor, isAdmin, allCourses } = useAuth();
@@ -196,7 +188,7 @@ const QuestionDetail = ({
       <div className="forum-thread-topbar">
         {onBack && (
           <button type="button" className="btn btn-secondary btn-sm" onClick={onBack}>
-            <ArrowLeft size={16} /> 포럼 토픽 보드로 돌아가기
+            <ArrowLeft size={15} /> 목록으로
           </button>
         )}
 
@@ -204,18 +196,28 @@ const QuestionDetail = ({
           {isAdmin && onToggleHideQuestion && (
             <button
               type="button"
-              className={`btn btn-sm ${question.isHidden ? 'btn-secondary' : 'btn-danger'}`}
+              className={`btn btn-sm ${question.isHidden ? 'btn-secondary' : 'btn-outline'}`}
               onClick={() => onToggleHideQuestion(question)}
             >
               {question.isHidden ? (
                 <>
-                  <Eye size={15} /> 토픽 가리기 해제
+                  <Eye size={14} /> 가리기 해제
                 </>
               ) : (
                 <>
-                  <EyeOff size={15} /> 토픽 가리기(비표시)
+                  <EyeOff size={14} /> 가리기
                 </>
               )}
+            </button>
+          )}
+
+          {isAdmin && onDeleteQuestion && (
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={() => onDeleteQuestion(question)}
+            >
+              <Trash2 size={14} /> 삭제
             </button>
           )}
 
@@ -225,7 +227,7 @@ const QuestionDetail = ({
               className="btn btn-outline btn-sm"
               onClick={handleStartEdit}
             >
-              <Edit3 size={14} /> 토픽 수정
+              <Edit3 size={14} /> 수정
             </button>
           )}
         </div>
@@ -451,17 +453,13 @@ const QuestionDetail = ({
 
         {/* 스레드 구분선 */}
         <div className="forum-stream-divider">
-          <span>
-            Replies ({answers.length}) · Chronological Thread Stream
-          </span>
+          <span>답변 ({answers.length})</span>
         </div>
 
         {/* Posts #2, #3...: Professor Replies */}
         {answers.length === 0 ? (
           <div className="no-answer-box">
-            <p>
-              아직 등록된 교수님 답변 포스트가 없습니다. 담당 교수님께 질문 알림 및 이메일이 전달되었습니다.
-            </p>
+            <p>등록된 답변이 없습니다.</p>
           </div>
         ) : (
           answers.map((ans, index) => {
@@ -525,9 +523,18 @@ const QuestionDetail = ({
                             </>
                           ) : (
                             <>
-                              <EyeOff size={12} /> 답변 가리기
+                              <EyeOff size={12} /> 가리기
                             </>
                           )}
+                        </button>
+                      )}
+                      {isAdmin && onDeleteAnswer && (
+                        <button
+                          type="button"
+                          className="btn-admin-inline-delete"
+                          onClick={() => onDeleteAnswer(ans, question.id)}
+                        >
+                          <Trash2 size={12} /> 삭제
                         </button>
                       )}
                       <span className="post-index-badge">#{index + 2}</span>

@@ -18,6 +18,11 @@ import kotlinx.serialization.json.Json
 import org.slf4j.event.Level
 
 fun main(args: Array<String>) {
+    val first = args.firstOrNull()
+    if (first == "--admin" || first == "--admin-ctl") {
+        val code = AdminConsoleManager.runCli(args.drop(1).toTypedArray())
+        kotlin.system.exitProcess(code)
+    }
     EngineMain.main(args)
 }
 
@@ -34,18 +39,25 @@ fun Application.module() {
     val aiRefineService = AiRefineService(geminiApiKey, workerManager)
     val userService = UserService()
     val attachmentService = AttachmentService(workerManager = workerManager)
-    val questionService = QuestionService(similarityService, notificationService, aiRefineService, workerManager)
+    val questionService = QuestionService(
+        similarityService = similarityService,
+        notificationService = notificationService,
+        aiRefineService = aiRefineService,
+        workerManager = workerManager,
+        attachmentService = attachmentService
+    )
 
     // Start background schedulers (DND notification release, orphan attachment cleanup)
     workerManager.startSchedulers(notificationService, attachmentService)
 
     // Graceful shutdown hook for worker thread pools, schedulers, and HTTP clients
     environment.monitor.subscribe(ApplicationStopped) {
+        AdminConsoleManager.stopConsoleListener()
         workerManager.shutdown()
         aiRefineService.close()
     }
 
-    // Start interactive server console listener for admin grant commands (`admin <id>`)
+    // Start interactive server console + loopback admin socket listener (`admin <id>`)
     AdminConsoleManager.startConsoleListener(userService)
 
     // 3. Plugins
@@ -59,10 +71,48 @@ fun Application.module() {
     }
 
     install(CORS) {
-        anyHost()
+        val rawOrigins = System.getenv("CORS_ALLOWED_ORIGINS")?.trim().orEmpty()
+        val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
+        val configuredOrigins = rawOrigins.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        if (configuredOrigins.any { it == "*" }) {
+            anyHost()
+        } else {
+            val originsToAllow = if (configuredOrigins.isNotEmpty()) {
+                configuredOrigins
+            } else if (!isProd) {
+                listOf(
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                    "http://localhost:4173",
+                    "http://127.0.0.1:4173",
+                    "http://localhost:8080",
+                    "http://127.0.0.1:8080"
+                )
+            } else {
+                emptyList()
+            }
+            originsToAllow.forEach { originUrl ->
+                runCatching { java.net.URI(originUrl) }.getOrNull()?.let { uri ->
+                    val scheme = uri.scheme ?: "http"
+                    val host = uri.host ?: return@let
+                    val hostPort = if (uri.port > 0) "$host:${uri.port}" else host
+                    allowHost(hostPort, schemes = listOf(scheme))
+                }
+            }
+            if (originsToAllow.isNotEmpty()) {
+                allowCredentials = true
+            }
+        }
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
-        allowHeader("X-User-Id")
+        if (isDemoModeEnabled()) {
+            allowHeader("X-User-Id")
+        }
         allowMethod(HttpMethod.Options)
         allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Patch)
@@ -119,6 +169,8 @@ fun Application.module() {
                 | - POST /api/admin/courses
                 | - PATCH /api/admin/questions/{id}/hide
                 | - PATCH /api/admin/answers/{id}/hide
+                | - DELETE /api/admin/questions/{id}
+                | - DELETE /api/admin/answers/{id}
                 | - GET  /api/questions
                 | - POST /api/questions
                 | - GET  /api/questions/{id}
@@ -133,10 +185,10 @@ fun Application.module() {
         authRoutes(userService)
         userSettingRoutes(userService, notificationService)
         courseRoutes(userService)
-        aiRoutes(aiRefineService)
-        questionRoutes(questionService)
+        aiRoutes(aiRefineService, userService)
+        questionRoutes(questionService, userService)
         notificationRoutes(notificationService, emailService, userService)
-        attachmentRoutes(attachmentService)
+        attachmentRoutes(attachmentService, userService)
         adminRoutes(userService, questionService, emailService)
     }
 }

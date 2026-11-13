@@ -18,6 +18,7 @@ object UsersTable : UUIDTable("users") {
     val isWithdrawn = bool("is_withdrawn").default(false)
     val questionBanUntil = timestamp("question_ban_until").nullable()
     val answerBanUntil = timestamp("answer_ban_until").nullable()
+    val tokenVersion = integer("token_version").default(0)
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 

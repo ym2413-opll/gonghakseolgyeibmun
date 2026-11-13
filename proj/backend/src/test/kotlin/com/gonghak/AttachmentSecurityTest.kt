@@ -3,6 +3,7 @@ package com.gonghak
 import com.gonghak.dto.*
 import com.gonghak.models.QuestionCategory
 import com.gonghak.service.AttachmentService
+import com.gonghak.service.PasswordSecurity
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -29,6 +30,9 @@ class AttachmentSecurityTest {
 
     private val studentId = "11111111-1111-1111-1111-111111111101"
     private val courseId = "33333333-3333-3333-3333-333333333301"
+
+    private fun tokenFor(userId: String): String =
+        "Bearer ${PasswordSecurity.generateAuthToken(java.util.UUID.fromString(userId))}"
 
     /**
      * 테스트용 유효한 PNG 이미지 바이트 생성 (2000x1500)
@@ -114,7 +118,7 @@ class AttachmentSecurityTest {
             install(ContentNegotiation) { json(json) }
         }
 
-        // 1. 대용량 이미지 업로드 및 압축 검증
+        // 1. 대용량 이미지 업로드 및 압축 검증 (인증 Bearer 토큰 필수)
         val samplePngBytes = createSampleLargeImageBytes(2000, 1500)
         val uploadRes = client.submitFormWithBinaryData(
             url = "/api/attachments/upload",
@@ -125,7 +129,7 @@ class AttachmentSecurityTest {
                 })
             }
         ) {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
 
         assertEquals(HttpStatusCode.Created, uploadRes.status)
@@ -137,10 +141,17 @@ class AttachmentSecurityTest {
         assertTrue(att.isImage)
         assertTrue(att.fileSize > 0)
 
-        // 2. 파일 다운로드/미리보기 엔드포인트 확인
-        val downloadRes = client.get("/api/attachments/${att.id}/download")
+        // 2-a. 인증 없는 다운로드 시도는 401 차단되어야 함
+        val unauthDownloadRes = client.get("/api/attachments/${att.id}/download")
+        assertEquals(HttpStatusCode.Unauthorized, unauthDownloadRes.status)
+
+        // 2-b. 파일 다운로드/미리보기 엔드포인트 확인 (sandbox CSP + nosniff)
+        val downloadRes = client.get("/api/attachments/${att.id}/download") {
+            header(HttpHeaders.Authorization, tokenFor(studentId))
+        }
         assertEquals(HttpStatusCode.OK, downloadRes.status)
         assertEquals("nosniff", downloadRes.headers["X-Content-Type-Options"])
+        assertEquals("sandbox", downloadRes.headers["Content-Security-Policy"])
         assertTrue(downloadRes.headers[HttpHeaders.ContentDisposition]?.contains("attachment") == true)
 
         // 3. 위조된 파일(확장자는 png인데 내용은 텍스트/스크립트) 업로드 시도 -> 보안 검사 차단 확인
@@ -154,7 +165,7 @@ class AttachmentSecurityTest {
                 })
             }
         ) {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
         assertEquals(HttpStatusCode.BadRequest, fakeUploadRes.status)
 
@@ -169,13 +180,13 @@ class AttachmentSecurityTest {
                 })
             }
         ) {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
         assertEquals(HttpStatusCode.BadRequest, exeUploadRes.status)
 
         // 5. 질문 생성 시 첨부파일 연동 및 조회 검증
         val createQRes = client.post("/api/questions") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
             contentType(ContentType.Application.Json)
             setBody(
                 CreateQuestionRequest(
@@ -196,7 +207,7 @@ class AttachmentSecurityTest {
 
         // 6. 질문 상세 조회 시 첨부파일 확인
         val detailRes = client.get("/api/questions/${createdQ.id}") {
-            header("X-User-Id", studentId)
+            header(HttpHeaders.Authorization, tokenFor(studentId))
         }
         assertEquals(HttpStatusCode.OK, detailRes.status)
         val detailQ = detailRes.body<ApiResponse<QuestionDetailDto>>().data
