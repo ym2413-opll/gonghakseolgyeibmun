@@ -5893,9 +5893,9 @@ html[data-theme="dark"] .form-textarea:focus {
   border-color: #3f3f46;
 }
 .theme-preview.green-dark-preview {
-  background: #06120b;
-  color: #22c55e;
-  border-color: #1f4d32;
+  background: #18211c;
+  color: #74b08b;
+  border-color: #355743;
 }
 
 .theme-option-info {
@@ -6836,15 +6836,14 @@ html[data-theme="dark"] .course-tab.active .tab-count {
 .btn-theme-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 34px;
   height: 34px;
-  padding: 0 10px;
+  padding: 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-card-subtle);
   color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 700;
   cursor: pointer;
   transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
 }
@@ -6929,11 +6928,19 @@ html[data-theme="dark"] .course-tab.active .tab-count {
   margin-top: 8px;
 }
 
-/* 5) 다크 그린 (초록 + 검정) 추가 다크 대비 보정 */
+.followup-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 5) 다크 그린 (연화된 세이지 다크) 추가 대비 보정 */
 html[data-theme="green-dark"] .dnd-notice-banner {
-  background: #422006;
+  background: #3b260b;
   color: #fde68a;
-  border-bottom-color: #78350f;
+  border-bottom-color: #6b4416;
 }
 
 html[data-theme="green-dark"] .ai-applied-tag,
@@ -6955,47 +6962,47 @@ html[data-theme="green-dark"] .co-prof-action-badge {
 }
 
 html[data-theme="green-dark"] .similar-detect-banner {
-  background: #0f3822;
-  border-color: #22c55e;
+  background: #1c3526;
+  border-color: #4b8262;
 }
 
 html[data-theme="green-dark"] .detect-text {
-  color: #bbf7d0;
+  color: #c2dfd0;
 }
 
 html[data-theme="green-dark"] .edited-badge {
-  color: #86efac;
-  background: #0f3822;
-  border-color: #166534;
+  color: #a5d3b8;
+  background: #1c3526;
+  border-color: #355743;
 }
 
 html[data-theme="green-dark"] .original-diff-box.author-only-box {
-  background: #102619;
-  border-color: #22543a;
+  background: #1b2a22;
+  border-color: #355743;
 }
 
 html[data-theme="green-dark"] .diff-privacy-tag {
-  color: #86efac;
-  background: rgba(34, 197, 94, 0.18);
+  color: #a5d3b8;
+  background: rgba(116, 176, 139, 0.16);
 }
 
 html[data-theme="green-dark"] .diff-note {
-  color: #4ade80;
+  color: #82c49b;
 }
 
 html[data-theme="green-dark"] .slider,
 html[data-theme="green-dark"] .toggle-slider {
-  background-color: #244732;
+  background-color: #2f4538;
 }
 
 html[data-theme="green-dark"] .form-input:focus,
 html[data-theme="green-dark"] .form-select:focus,
 html[data-theme="green-dark"] .form-textarea:focus {
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+  box-shadow: 0 0 0 3px rgba(116, 176, 139, 0.22);
 }
 
 html[data-theme="green-dark"] .tab-count {
-  background: rgba(34, 197, 94, 0.16);
+  background: rgba(116, 176, 139, 0.16);
 }
 
 html[data-theme="green-dark"] .course-tab.active .tab-count {

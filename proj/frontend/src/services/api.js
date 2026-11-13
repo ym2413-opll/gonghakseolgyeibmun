@@ -1427,7 +1427,11 @@ export const api = {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
-          body: JSON.stringify({ content: followUpData?.content || '' }),
+          body: JSON.stringify({
+            content: followUpData?.content || '',
+            originalContent: followUpData?.originalContent || null,
+            hasAiRefined: Boolean(followUpData?.hasAiRefined)
+          }),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -1564,7 +1568,9 @@ export const api = {
             studentDepartment: studentInfo?.department || null,
             studentIdentifier: studentInfo?.studentId || studentInfo?.identifier || null,
             category,
-            studentInfo
+            studentInfo,
+            isFollowUp: Boolean(courseContext?.isFollowUp),
+            previousAnswer: courseContext?.previousAnswer || null
           }),
           signal: controller.signal
         });
@@ -1620,10 +1626,14 @@ export const api = {
     const courseLabel = courseName ? `${courseName} 강의를` : '이번 학기 강의를';
     const cleanTitle = (rawTitle || '').replace(/[\[\]!?~]+/g, '').trim();
 
+    const isFollowUp = Boolean(courseContext?.isFollowUp);
     let refinedTitle = '';
     let refinedBody = '';
 
-    if (category === 'grade' || rawText.includes('성적') || cleanTitle.includes('성적')) {
+    if (isFollowUp) {
+      refinedTitle = rawTitle || '추가 질문';
+      refinedBody = `${profGreeting}, 정성스러운 답변을 남겨주셔서 진심으로 감사드립니다.\n\n남겨주신 답변 내용을 바탕으로 복습하던 중 추가로 명확히 확인하고 싶은 부분이 있어 조심스럽게 후속 질문을 올립니다.\n\n바쁘신 일정 중에 거듭 여쭈어 송구하오며, 시간 되실 때 가볍게 추가 조언을 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
+    } else if (category === 'grade' || rawText.includes('성적') || cleanTitle.includes('성적')) {
       refinedTitle = cleanTitle
         ? `[성적 문의] ${cleanTitle} 피드백 및 평가 기준 확인의 건`
         : '[성적 문의] 최종 평가 결과 및 피드백 문의의 건';

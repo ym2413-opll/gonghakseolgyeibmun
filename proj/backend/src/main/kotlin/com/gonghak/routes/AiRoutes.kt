@@ -48,7 +48,9 @@ fun Route.aiRoutes(
                 professorName = request.effectiveProfessorName,
                 studentName = request.effectiveStudentName,
                 studentDepartment = request.effectiveStudentDepartment,
-                studentIdentifier = request.effectiveStudentIdentifier
+                studentIdentifier = request.effectiveStudentIdentifier,
+                isFollowUp = request.isFollowUp,
+                previousAnswer = request.previousAnswer
             )
 
             call.respond(

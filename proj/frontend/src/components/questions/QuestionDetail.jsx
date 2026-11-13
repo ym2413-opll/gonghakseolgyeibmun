@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
+import AiRefineModal from '../student/AiRefineModal';
 import {
   Send,
   Shield,
@@ -26,7 +27,8 @@ import {
   EyeOff,
   Eye,
   AlertCircle,
-  Trash2
+  Trash2,
+  PenTool
 } from 'lucide-react';
 
 const QuestionDetail = ({
@@ -43,6 +45,9 @@ const QuestionDetail = ({
   const { currentUser, isProfessor, isAdmin, allCourses, refreshCurrentUser } = useAuth();
   const [answerText, setAnswerText] = useState('');
   const [followUpText, setFollowUpText] = useState('');
+  const [followUpOriginalText, setFollowUpOriginalText] = useState('');
+  const [hasFollowUpAiRefined, setHasFollowUpAiRefined] = useState(false);
+  const [isFollowUpAiModalOpen, setIsFollowUpAiModalOpen] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -221,9 +226,13 @@ const QuestionDetail = ({
       }
       await onAddFollowUp(question.id, {
         authorId: currentUser.id,
-        content: followUpText.trim()
+        content: followUpText.trim(),
+        originalContent: followUpOriginalText || followUpText.trim(),
+        hasAiRefined: hasFollowUpAiRefined
       });
       setFollowUpText('');
+      setFollowUpOriginalText('');
+      setHasFollowUpAiRefined(false);
     } catch (err) {
       setErrorMsg(err.message || '추가 질문 등록에 실패했습니다.');
     } finally {
@@ -640,19 +649,36 @@ const QuestionDetail = ({
           )}
 
           <form onSubmit={handleFollowUpSubmit} className="answer-form">
-            <div className="answer-form-header">
+            <div className="answer-form-header followup-form-header">
               <span className="editor-role-indicator">
                 <MessageSquare size={15} className="text-primary" /> 교수님 답변에 이어 추가 질문(Post #{answers.length + 2}) 작성
               </span>
+              <button
+                type="button"
+                className={`btn-ai-assist ${hasFollowUpAiRefined ? 'refined-active' : ''}`}
+                onClick={() => setIsFollowUpAiModalOpen(true)}
+              >
+                <PenTool size={14} />
+                <span>{hasFollowUpAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
+              </button>
             </div>
             <textarea
-              className="answer-textarea"
+              className={`answer-textarea ${hasFollowUpAiRefined ? 'has-refined-border' : ''}`}
               rows={3}
               placeholder="답변 내용 중 더 궁금한 점이나 후속 질문을 구체적으로 작성해주세요..."
               value={followUpText}
-              onChange={(e) => setFollowUpText(e.target.value)}
+              onChange={(e) => {
+                setFollowUpText(e.target.value);
+                if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
+              }}
               required
             />
+            {hasFollowUpAiRefined && (
+              <div className="refined-status-hint" style={{ marginTop: 6 }}>
+                <CheckCircle2 size={14} />
+                <span>정제된 문장이 적용되었습니다.</span>
+              </div>
+            )}
             <div className="answer-form-footer">
               <span className="answer-hint">
                 추가 질문 등록 시 담당 교수님께 알림이 전송되며 답변 대기 상태로 전환됩니다.
@@ -667,6 +693,26 @@ const QuestionDetail = ({
               </button>
             </div>
           </form>
+
+          <AiRefineModal
+            isOpen={isFollowUpAiModalOpen}
+            onClose={() => setIsFollowUpAiModalOpen(false)}
+            initialTitle={question.title || ''}
+            initialText={followUpText}
+            category={categoryKey}
+            courseName={question.courseName || ''}
+            professorName={question.profName || question.assignedProfessorName || ''}
+            isFollowUp={true}
+            previousAnswer={
+              profAnswers.length > 0 ? profAnswers[profAnswers.length - 1]?.content || '' : ''
+            }
+            isAnonymous={Boolean(question.isAnonymous)}
+            onApplyRefined={(refinedText, origText) => {
+              setFollowUpText(refinedText);
+              setFollowUpOriginalText(origText || followUpText);
+              setHasFollowUpAiRefined(true);
+            }}
+          />
         </div>
       )}
 

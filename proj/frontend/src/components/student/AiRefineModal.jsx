@@ -13,6 +13,9 @@ export default function AiRefineModal({
   category = 'lecture',
   courseName = '',
   professorName = '',
+  isFollowUp = false,
+  previousAnswer = '',
+  isAnonymous = false,
   onApplyRefined
 }) {
   const { currentUser } = useAuth();
@@ -31,14 +34,18 @@ export default function AiRefineModal({
 
     setIsLoading(true);
     try {
-      const studentInfo = {
-        name: currentUser?.name || '',
-        studentId: currentUser?.identifier || currentUser?.studentId || '',
-        department: currentUser?.department || ''
-      };
+      const studentInfo = isAnonymous
+        ? {}
+        : {
+            name: currentUser?.name || '',
+            studentId: currentUser?.identifier || currentUser?.studentId || '',
+            department: currentUser?.department || ''
+          };
       const result = await api.refineQuestionAI(text, category, studentInfo, ttl, {
         courseName,
-        professorName
+        professorName,
+        isFollowUp,
+        previousAnswer
       });
       setAiResult(result);
       setRefinedText(result.refined || '');
@@ -48,7 +55,7 @@ export default function AiRefineModal({
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, category, courseName, professorName]);
+  }, [currentUser, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
 
   useEffect(() => {
     if (isOpen) {
@@ -88,7 +95,7 @@ export default function AiRefineModal({
       <div className="modal-content ai-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header ai-modal-header">
           <div className="modal-title">
-            <span>문장 다듬기</span>
+            <span>{isFollowUp ? '추가 질문 문장 다듬기' : '문장 다듬기'}</span>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="닫기">
             <X size={18} />
@@ -96,21 +103,23 @@ export default function AiRefineModal({
         </div>
 
         <div className="modal-body">
-          {/* 학업 문의 추천 서식 템플릿 */}
-          <div className="ai-quick-templates">
-            <span className="template-label">예시 문장:</span>
-            <div className="template-chips">
-              {AI_INQUIRY_TEMPLATES.map((tmpl, idx) => (
-                <button
-                  key={idx}
-                  className="template-chip-btn"
-                  onClick={() => loadTemplate(tmpl)}
-                >
-                  {tmpl.title}
-                </button>
-              ))}
+          {/* 학업 문의 추천 서식 템플릿 (일반 질문에서만 표시) */}
+          {!isFollowUp && (
+            <div className="ai-quick-templates">
+              <span className="template-label">예시 문장:</span>
+              <div className="template-chips">
+                {AI_INQUIRY_TEMPLATES.map((tmpl, idx) => (
+                  <button
+                    key={idx}
+                    className="template-chip-btn"
+                    onClick={() => loadTemplate(tmpl)}
+                  >
+                    {tmpl.title}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="ai-compare-grid">
             {/* 좌측: 원문 */}
@@ -173,16 +182,18 @@ export default function AiRefineModal({
                   </div>
                 ) : (refinedText || refinedTitle) ? (
                   <>
-                    <div className="compare-field-wrap">
-                      <label className="ai-sub-label">제목</label>
-                      <input
-                        type="text"
-                        value={refinedTitle}
-                        onChange={(e) => setRefinedTitle(e.target.value)}
-                        readOnly={!isEditingRefined}
-                        className={`ai-title-input refined-title-input ${isEditingRefined ? 'editable' : ''}`}
-                      />
-                    </div>
+                    {!isFollowUp && (
+                      <div className="compare-field-wrap">
+                        <label className="ai-sub-label">제목</label>
+                        <input
+                          type="text"
+                          value={refinedTitle}
+                          onChange={(e) => setRefinedTitle(e.target.value)}
+                          readOnly={!isEditingRefined}
+                          className={`ai-title-input refined-title-input ${isEditingRefined ? 'editable' : ''}`}
+                        />
+                      </div>
+                    )}
 
                     <div className="compare-field-wrap">
                       <label className="ai-sub-label">본문</label>

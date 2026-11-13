@@ -151,7 +151,7 @@ const Header = ({
             </button>
           )}
 
-          {/* 분리된 테마 전환 버튼 (배색: 무채색/초록, 밝기: 라이트/다크) */}
+          {/* 분리된 아이콘 전용 테마 전환 버튼 (배색: 무채색/초록, 밝기: 라이트/다크) */}
           <div className="theme-toggle-group" role="group" aria-label="화면 테마 전환">
             <button
               type="button"
@@ -161,8 +161,7 @@ const Header = ({
               aria-label={colorSchemeTooltip}
               aria-pressed={isGreen}
             >
-              <Leaf size={15} />
-              <span className="hide-mobile">{isGreen ? '초록' : '무채색'}</span>
+              <Leaf size={17} />
             </button>
             <button
               type="button"
@@ -172,8 +171,7 @@ const Header = ({
               aria-label={brightnessTooltip}
               aria-pressed={isDark}
             >
-              {isDark ? <Moon size={15} /> : <Sun size={15} />}
-              <span className="hide-mobile">{isDark ? '다크' : '라이트'}</span>
+              {isDark ? <Moon size={17} /> : <Sun size={17} />}
             </button>
           </div>
 

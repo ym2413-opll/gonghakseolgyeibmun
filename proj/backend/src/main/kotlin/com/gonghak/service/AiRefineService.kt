@@ -42,7 +42,9 @@ class AiRefineService(
         professorName: String? = null,
         studentName: String? = null,
         studentDepartment: String? = null,
-        studentIdentifier: String? = null
+        studentIdentifier: String? = null,
+        isFollowUp: Boolean = false,
+        previousAnswer: String? = null
     ): RefinedResult {
         val effectiveApiKey = apiKey?.takeIf { it.isNotBlank() } ?: System.getenv("GEMINI_API_KEY")
 
@@ -59,7 +61,9 @@ class AiRefineService(
                             professorName = professorName,
                             studentName = studentName,
                             studentDepartment = studentDepartment,
-                            studentIdentifier = studentIdentifier
+                            studentIdentifier = studentIdentifier,
+                            isFollowUp = isFollowUp,
+                            previousAnswer = previousAnswer
                         )
                     }
                 }
@@ -78,7 +82,9 @@ class AiRefineService(
                 professorName = professorName,
                 studentName = studentName,
                 studentDepartment = studentDepartment,
-                studentIdentifier = studentIdentifier
+                studentIdentifier = studentIdentifier,
+                isFollowUp = isFollowUp,
+                previousAnswer = previousAnswer
             )
         }
     }
@@ -141,7 +147,9 @@ class AiRefineService(
         professorName: String? = null,
         studentName: String? = null,
         studentDepartment: String? = null,
-        studentIdentifier: String? = null
+        studentIdentifier: String? = null,
+        isFollowUp: Boolean = false,
+        previousAnswer: String? = null
     ): RefinedResult {
         val preferredModel = System.getenv("GEMINI_MODEL")
             ?.trim()
@@ -162,7 +170,32 @@ class AiRefineService(
         val studentIntro = formatStudentIntro(studentName, studentDepartment, studentIdentifier)
         val courseDisplay = courseName?.trim()?.takeIf { it.isNotBlank() } ?: "이번 학기 강의"
 
-        val prompt = """
+        val prompt = if (isFollowUp) {
+            val prevSnippet = previousAnswer?.trim()?.take(400)?.takeIf { it.isNotBlank() } ?: "교수님의 이전 답변"
+            """
+            당신은 대학교 강의 질의응답 시스템의 'AI 질문 도우미'입니다.
+            학생이 교수님의 답변을 확인한 뒤 남기는 '꼬리물기 추가 질문(Follow-up Question)' 원문을 읽고, 스레드 맥락에 맞게 정중하고 명확한 추가 질문 본문으로 교정 및 윤색(Refine)해주세요.
+
+            [필수 요구사항]
+            1. 원문의 비격식적인 문장을 그대로 복사/인용하지 말고, 교수님의 답변에 대한 감사와 추가 궁금점을 자연스럽고 예의 바르게 재구성하세요.
+            2. 이미 진행 중인 질문 스레드의 후속 질문이므로, 첫인사는 "${profGreeting}, 정성스러운 답변 감사합니다." 등으로 간결히 이어가고 불필요한 긴 자기소개는 줄이세요.
+            3. 반드시 아래 JSON 형식으로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 문자열만 출력):
+            {
+              "title": "${rawTitle?.ifBlank { "추가 질문" } ?: "추가 질문"}",
+              "content": "윤색된 추가 질문 본문"
+            }
+
+            [수신 교수님 및 강의 정보]
+            - 교수님 호칭: $profGreeting
+            - 강의명: $courseDisplay
+            - 기존 스레드 제목: ${rawTitle?.ifBlank { "제목 없음" } ?: "제목 없음"}
+            - 직전 교수님 답변 요약: $prevSnippet
+
+            [학생 작성 추가 질문 원문]:
+            $rawContent
+            """.trimIndent()
+        } else {
+            """
             당신은 대학교 강의 질의응답 시스템의 'AI 질문 도우미'입니다.
             학생이 작성한 거칠거나 비격식적인 제목과 질문 원문을 읽고, 교수님께 예의 바르고 명확하게 전달될 수 있도록 '제목'과 '본문'을 모두 교정 및 윤색(Refine)해주세요.
             
@@ -193,7 +226,8 @@ class AiRefineService(
             [학생 작성 원문 제목]: ${rawTitle?.ifBlank { "제목 없음" } ?: "제목 없음"}
             [학생 작성 원문 본문]:
             $rawContent
-        """.trimIndent()
+            """.trimIndent()
+        }
 
         val requestBody = buildJsonObject {
             putJsonArray("contents") {
@@ -232,7 +266,7 @@ class AiRefineService(
                         val content = parsed["content"]?.jsonPrimitive?.contentOrNull?.trim()
                         if (!content.isNullOrBlank()) {
                             val finalTitle = title?.takeIf { it.isNotBlank() } ?: fallbackRefine(
-                                rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier
+                                rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, isFollowUp, previousAnswer
                             ).title
                             val cleanContent = sanitizeSwappedProfessorName(content, professorName, studentName)
                             return RefinedResult(finalTitle, cleanContent)
@@ -240,7 +274,7 @@ class AiRefineService(
                     } catch (e: Exception) {
                         logger.warn("Failed to parse Gemini JSON output, using clean text directly: ${e.message}")
                         val fallback = fallbackRefine(
-                            rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier
+                            rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, isFollowUp, previousAnswer
                         )
                         return RefinedResult(fallback.title, sanitizeSwappedProfessorName(cleanedText, professorName, studentName))
                     }
@@ -261,7 +295,9 @@ class AiRefineService(
         professorName: String? = null,
         studentName: String? = null,
         studentDepartment: String? = null,
-        studentIdentifier: String? = null
+        studentIdentifier: String? = null,
+        isFollowUp: Boolean = false,
+        previousAnswer: String? = null
     ): RefinedResult {
         val courseText = courseName?.trim()?.takeIf { it.isNotBlank() } ?: "이번 학기"
         val profGreeting = formatProfessorGreeting(professorName)
@@ -271,6 +307,30 @@ class AiRefineService(
             QuestionCategory.ASSIGNMENT -> "과제"
             QuestionCategory.LECTURE -> "강의"
             null -> if (rawContent.contains("성적")) "성적" else if (rawContent.contains("과제")) "과제" else "강의"
+        }
+
+        if (isFollowUp) {
+            val followTitle = rawTitle?.trim()?.takeIf { it.isNotBlank() } ?: "추가 질문"
+            val contextHint = if (!previousAnswer.isNullOrBlank()) {
+                "남겨주신 답변을 참고하여 복습하던 중"
+            } else {
+                "앞서 주신 답변 내용을 확인하던 중"
+            }
+            val followBody = when (category) {
+                QuestionCategory.GRADE ->
+                    "$profGreeting, 바쁘신 중에도 성적 관련 안내 답변을 주셔서 진심으로 감사드립니다.\n\n" +
+                    "${contextHint}, 평가 기준과 보완해야 할 세부 부분에 대해 한 가지 추가로 여쭙고자 조심스럽게 후속 질문을 올립니다.\n\n" +
+                    "바쁘신 일정 중에 거듭 여쭈어 송구하오나, 시간 되실 때 짧게라도 추가 조언을 주시면 감사하겠습니다."
+                QuestionCategory.ASSIGNMENT ->
+                    "$profGreeting, 과제 관련하여 상세히 답변해 주셔서 진심으로 감사드립니다.\n\n" +
+                    "${contextHint}, 제출 요건과 세부 구현 방향을 명확히 맞추고자 추가로 확인이 필요한 사항이 있어 후속 질문을 드립니다.\n\n" +
+                    "바쁘시겠지만 가볍게 검토해 주시면 안내에 따라 성실히 과제를 마무리하겠습니다. 감사합니다."
+                else ->
+                    "$profGreeting, $courseText 강의 질문에 정성껏 답변해 주셔서 진심으로 감사드립니다.\n\n" +
+                    "${contextHint}, 핵심 개념과 적용 과정을 보다 정확히 이해하고자 한 가지 추가로 여쭙고 싶은 부분이 있어 후속 질문을 올립니다.\n\n" +
+                    "시간 되실 때 추가 설명이나 참고할 방향을 말씀해 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다."
+            }
+            return RefinedResult(followTitle, followBody)
         }
 
         val cleanTitle = rawTitle?.replace(Regex("[\\[\\]!~?]+"), "")?.trim()?.takeIf { it.isNotBlank() }

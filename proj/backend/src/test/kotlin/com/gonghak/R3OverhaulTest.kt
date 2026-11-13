@@ -798,5 +798,25 @@ class R3OverhaulTest {
         assertEquals(com.gonghak.models.QuestionStatus.ANSWERED, detailAfterSecondAnswer.status)
         assertTrue(detailAfterSecondAnswer.canFollowUp)
         assertEquals(3, detailAfterSecondAnswer.answers.size)
+
+        // 9. AI refinement supports follow-up questions with thread context
+        val followUpRefineRes = client.post("/api/ai/refine") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RefineQuestionRequest(
+                    rawContent = "방금 설명해주신 2차 답변에서 예제 부분이 잘 안 와닿는데 예시 하나만 더 들려주세요",
+                    title = validStuQ.title,
+                    courseName = allCourse.name,
+                    professorName = adminReg.user.name,
+                    category = QuestionCategory.LECTURE,
+                    isFollowUp = true,
+                    previousAnswer = "추가 질문에 대한 2차 답변입니다."
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.OK, followUpRefineRes.status)
+        val followUpRefined = followUpRefineRes.body<ApiResponse<RefineQuestionResponse>>().data!!
+        assertTrue(followUpRefined.refined.isNotBlank())
     }
 }

@@ -282,7 +282,9 @@ data class RefineQuestionRequest(
     val studentDepartment: String? = null,
     val studentIdentifier: String? = null,
     val category: QuestionCategory? = null,
-    val studentInfo: Map<String, String>? = null
+    val studentInfo: Map<String, String>? = null,
+    val isFollowUp: Boolean = false,
+    val previousAnswer: String? = null
 ) {
     val effectiveContent: String
         get() = text?.takeIf { it.isNotBlank() } ?: rawContent ?: ""
@@ -458,7 +460,9 @@ data class CreateAnswerRequest(
 
 @Serializable
 data class CreateFollowUpRequest(
-    val content: String
+    val content: String,
+    val originalContent: String? = null,
+    val hasAiRefined: Boolean = false
 )
 
 @Serializable

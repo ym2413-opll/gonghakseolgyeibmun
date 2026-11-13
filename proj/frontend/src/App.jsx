@@ -274,6 +274,7 @@ function MainApp() {
                 </div>
                 <div className="forum-split-right">
                   <QuestionDetail
+                    key={activeQuestion?.id || 'empty'}
                     question={activeQuestion}
                     onAddAnswer={handleAddAnswer}
                     onAddFollowUp={handleAddFollowUp}
@@ -287,6 +288,7 @@ function MainApp() {
               </div>
             ) : currentView === 'detail' && activeQuestion ? (
               <QuestionDetail
+                key={activeQuestion.id}
                 question={activeQuestion}
                 onAddAnswer={handleAddAnswer}
                 onAddFollowUp={handleAddFollowUp}
