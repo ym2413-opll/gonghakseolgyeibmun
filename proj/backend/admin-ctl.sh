@@ -3,13 +3,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$SCRIPT_DIR/build/install/backend/bin/backend"
+SECRET_FILE="${ADMIN_CTL_SECRET_FILE:-$SCRIPT_DIR/.admin-ctl.secret}"
+
+if [ -z "${ADMIN_CTL_TOKEN:-}" ] && [ ! -r "$SECRET_FILE" ] && [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+  if sudo test -r "$SECRET_FILE" 2>/dev/null; then
+    exec sudo env \
+      ADMIN_CONSOLE_PORT="${ADMIN_CONSOLE_PORT:-18089}" \
+      ADMIN_CTL_SECRET_FILE="$SECRET_FILE" \
+      bash "${BASH_SOURCE[0]}" "$@"
+  fi
+fi
 
 if [ -x "$BIN_PATH" ]; then
   exec "$BIN_PATH" --admin "$@"
 fi
 
 PORT="${ADMIN_CONSOLE_PORT:-18089}"
-SECRET_FILE="${ADMIN_CTL_SECRET_FILE:-$SCRIPT_DIR/.admin-ctl.secret}"
 TOKEN="${ADMIN_CTL_TOKEN:-}"
 if [ -z "$TOKEN" ] && [ -r "$SECRET_FILE" ]; then
   TOKEN="$(tr -d '\r\n' < "$SECRET_FILE")"
