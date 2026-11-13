@@ -1132,6 +1132,13 @@ export const api = {
         ...q,
         title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
         content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
+        originalContent: isProfessor ? '' : q.originalContent,
+        rawContent: isProfessor ? '' : q.rawContent,
+        answers: (q.answers || []).map(a => ({
+          ...a,
+          originalContent: isProfessor ? '' : a.originalContent,
+          rawContent: isProfessor ? '' : a.rawContent
+        })),
         canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
         realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
         realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
@@ -1170,13 +1177,17 @@ export const api = {
       ...q,
       title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
       content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
+      originalContent: isProfessor ? '' : q.originalContent,
+      rawContent: isProfessor ? '' : q.rawContent,
       canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
       realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
       realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
       realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null,
       answers: (q.answers || []).map(a => ({
         ...a,
-        content: a.isHidden && !isAdmin ? '관리자에 의해 가려진 답변입니다.' : a.content
+        content: a.isHidden && !isAdmin ? '관리자에 의해 가려진 답변입니다.' : a.content,
+        originalContent: isProfessor ? '' : a.originalContent,
+        rawContent: isProfessor ? '' : a.rawContent
       }))
     };
   },

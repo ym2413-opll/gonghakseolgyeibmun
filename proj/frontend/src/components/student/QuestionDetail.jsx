@@ -89,8 +89,9 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
     if (onUpdateQuestion) onUpdateQuestion(updated, '답변이 등록되었습니다.');
   };
 
-  // AI 교정 전 원문과의 차이 여부
+  // AI 교정 전 원문과의 차이 여부 (교수 계정에서는 노출하지 않음)
   const hasOriginalDiff = Boolean(
+    !isProfessor &&
     question.originalContent &&
     question.content &&
     question.originalContent.trim() !== question.content.trim()

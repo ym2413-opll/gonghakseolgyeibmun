@@ -518,8 +518,9 @@ const QuestionDetail = ({
                     </div>
                   )}
 
-                {/* AI 다듬기 전 원문 보기 */}
-                {(question.originalContent || question.rawContent) &&
+                {/* AI 다듬기 전 원문 보기 (교수 계정에서는 노출하지 않음) */}
+                {!isProfessor &&
+                  (question.originalContent || question.rawContent) &&
                   (question.originalContent || question.rawContent) !== mainContent && (
                     <div className="original-content-toggle">
                       <button
@@ -666,6 +667,7 @@ const QuestionDetail = ({
                     const followUpOrig = (ans.originalContent || ans.rawContent || '').trim();
                     const followUpCurrent = (ans.content || '').trim();
                     const hasFollowUpOriginalDraft =
+                      !isProfessor &&
                       isStudentFollowUp &&
                       !question.isDeleted &&
                       Boolean(followUpOrig) &&

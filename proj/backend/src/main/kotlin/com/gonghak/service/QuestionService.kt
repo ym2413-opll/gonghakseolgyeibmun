@@ -320,8 +320,7 @@ class QuestionService(
                 else -> actualContent
             }
             val displayOrigContent = when {
-                isQuestionDeleted -> ""
-                maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+                isQuestionDeleted || isProfessor || maskedForHidden -> ""
                 else -> rawContent
             }
 
@@ -347,7 +346,8 @@ class QuestionService(
                     isQuestionAnonymous = isAnonymous,
                     isMyQuestion = isMyQuestion,
                     isAdminViewer = isAdmin,
-                    isQuestionDeleted = isQuestionDeleted
+                    isQuestionDeleted = isQuestionDeleted,
+                    hideOriginalDraft = isProfessor
                 )
             }
 
@@ -475,7 +475,8 @@ class QuestionService(
                     isQuestionAnonymous = isAnonymous,
                     isMyQuestion = isMyQuestion,
                     isAdminViewer = isAdmin,
-                    isQuestionDeleted = isQuestionDeleted
+                    isQuestionDeleted = isQuestionDeleted,
+                    hideOriginalDraft = isProfessor
                 )
             }
 
@@ -540,8 +541,7 @@ class QuestionService(
             else -> actualContent
         }
         val displayOrigContent = when {
-            isQuestionDeleted -> ""
-            maskedForHidden -> "관리자에 의해 가려진 게시물입니다."
+            isQuestionDeleted || isProfessor || maskedForHidden -> ""
             else -> actualRaw
         }
         val displayRefinedContent = when {
@@ -616,7 +616,7 @@ class QuestionService(
             professorDepartment = aRow[UsersTable.department],
             authorRole = authorRole,
             content = aRow[AnswersTable.content],
-            originalContent = if (authorRole == UserRole.STUDENT.name) aRow[AnswersTable.rawContent] else "",
+            originalContent = "",
             isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
             isHidden = isHidden,
             createdAt = aRow[AnswersTable.createdAt].toString()
@@ -1143,7 +1143,8 @@ class QuestionService(
         isQuestionAnonymous: Boolean,
         isMyQuestion: Boolean,
         isAdminViewer: Boolean,
-        isQuestionDeleted: Boolean = false
+        isQuestionDeleted: Boolean = false,
+        hideOriginalDraft: Boolean = false
     ): AnswerDto {
         val isStudentFollowUp = authorSummary.role == UserRole.STUDENT.name
         val maskedId = if (isStudentFollowUp && isQuestionAnonymous && !isMyQuestion && !isAdminViewer) {
@@ -1170,6 +1171,7 @@ class QuestionService(
         }
         val safeOriginalContent = when {
             !isStudentFollowUp -> ""
+            hideOriginalDraft -> ""
             maskedByDeletion -> ""
             isAnsHidden && !isAdminViewer -> ""
             else -> originalDraftContent

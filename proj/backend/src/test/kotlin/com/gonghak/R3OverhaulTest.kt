@@ -819,7 +819,8 @@ class R3OverhaulTest {
         val followUpRefined = followUpRefineRes.body<ApiResponse<RefineQuestionResponse>>().data!!
         assertTrue(followUpRefined.refined.isNotBlank())
 
-        // 10. Second follow-up persists originalContent (pre-AI draft) and returns it to both student and professor
+        // 10. Second follow-up persists originalContent (pre-AI draft) for the student,
+        // while professor accounts never receive student pre-AI drafts on main or follow-up questions
         val rawDraft2 = "교수님 방금 설명하신 부분 예제 하나만 더 알려주세요"
         val stuFollowUp2Res = client.post("/api/questions/${validStuQ.id}/followups") {
             header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
@@ -836,13 +837,29 @@ class R3OverhaulTest {
         val followUp2Dto = stuFollowUp2Res.body<ApiResponse<AnswerDto>>().data!!
         assertEquals(rawDraft2, followUp2Dto.originalContent)
 
-        val detailWithAllFollowUps = client.get("/api/questions/${validStuQ.id}") {
+        val stuDetailWithAllFollowUps = client.get("/api/questions/${validStuQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(4, stuDetailWithAllFollowUps.answers.size)
+        val stuLoadedFollowUp2 = stuDetailWithAllFollowUps.answers.last()
+        assertEquals(rawDraft2, stuLoadedFollowUp2.originalContent)
+        assertEquals(followUpRefined.refined, stuLoadedFollowUp2.content)
+
+        val profDetailWithAllFollowUps = client.get("/api/questions/${validStuQ.id}") {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
         }.body<ApiResponse<QuestionDetailDto>>().data!!
-        assertEquals(4, detailWithAllFollowUps.answers.size)
-        val loadedFollowUp2 = detailWithAllFollowUps.answers.last()
-        assertEquals(rawDraft2, loadedFollowUp2.originalContent)
-        assertEquals(followUpRefined.refined, loadedFollowUp2.content)
+        assertEquals(4, profDetailWithAllFollowUps.answers.size)
+        assertEquals("", profDetailWithAllFollowUps.originalContent)
+        assertEquals("", profDetailWithAllFollowUps.rawContent)
+        assertEquals("", profDetailWithAllFollowUps.answers.last().originalContent)
+
+        val profListWithAllFollowUps = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }.body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        val profListItem = profListWithAllFollowUps.find { it.id == validStuQ.id }
+        assertNotNull(profListItem)
+        assertEquals("", profListItem.originalContent)
+        assertEquals("", profListItem.answers.last().originalContent)
 
         // 11. Author can delete their own question; students no longer see it while professor sees a redacted tombstone
         val otherDelStuAuth = client.post("/api/auth/register") {
