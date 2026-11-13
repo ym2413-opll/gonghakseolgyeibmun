@@ -81,11 +81,20 @@ const CoursePicker = ({
           filteredCourses.map((course) => {
             const checked = selectedIds.includes(course.id);
             const scopeLabel = course.department || course.college || '';
+            const profNames = Array.isArray(course.professors)
+              ? course.professors.map((p) => p?.name).filter(Boolean)
+              : [];
+            const profLabel =
+              profNames.length > 0
+                ? profNames.join(', ')
+                : course.profName && course.profName !== '미배정'
+                  ? course.profName
+                  : '미배정';
             return (
               <label
                 key={course.id}
                 className={`course-checkbox-pill ${checked ? 'checked' : ''}`}
-                title={`${course.name}${course.code ? ` (${course.code})` : ''}${scopeLabel ? ` · ${scopeLabel}` : ''}`}
+                title={`${course.name}${course.code ? ` (${course.code})` : ''}${scopeLabel ? ` · ${scopeLabel}` : ''} · 담당: ${profLabel}`}
               >
                 <input
                   type="checkbox"
@@ -96,6 +105,7 @@ const CoursePicker = ({
                   {course.name}
                   {course.code ? ` (${course.code})` : ''}
                   {scopeLabel ? ` · ${scopeLabel}` : ''}
+                  {` · 담당: ${profLabel}`}
                 </span>
               </label>
             );

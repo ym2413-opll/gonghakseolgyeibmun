@@ -39,7 +39,7 @@ const QuestionDetail = ({
   onDeleteAnswer,
   onBack
 }) => {
-  const { currentUser, isProfessor, isAdmin, allCourses } = useAuth();
+  const { currentUser, isProfessor, isAdmin, allCourses, refreshCurrentUser } = useAuth();
   const [answerText, setAnswerText] = useState('');
   const [showOriginal, setShowOriginal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -165,6 +165,15 @@ const QuestionDetail = ({
     setErrorMsg('');
     setIsSubmitting(true);
     try {
+      const latestUser = await refreshCurrentUser();
+      if (!latestUser || latestUser.role !== 'professor' || latestUser.id !== currentUser?.id) {
+        setErrorMsg(
+          latestUser?.role === 'student'
+            ? '학생 계정으로 변경되어 답변을 작성할 수 없습니다.'
+            : '로그인 상태가 변경되었습니다. 계정을 확인한 뒤 다시 시도해 주세요.'
+        );
+        return;
+      }
       await onAddAnswer(question.id, {
         authorId: currentUser.id,
         authorName: currentUser.name,

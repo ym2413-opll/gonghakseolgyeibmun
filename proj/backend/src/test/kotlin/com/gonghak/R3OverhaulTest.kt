@@ -683,6 +683,7 @@ class R3OverhaulTest {
         assertTrue(profCourses.first().professors.any { it.id == adminReg.user.id })
 
         // 6. Verify session remains valid via /api/auth/me and /api/courses after course updates
+        //    and that student + catalog courses reflect the newly assigned professor
         val stuMeAfter = client.get("/api/auth/me") {
             header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
         }
@@ -690,6 +691,10 @@ class R3OverhaulTest {
         val stuMeUser = stuMeAfter.body<ApiResponse<UserDto>>().data!!
         assertEquals(stuAuth.user.id, stuMeUser.id)
         assertEquals(setOf(deptCourse.id, allCourse.id), stuMeUser.courses.map { it.id }.toSet())
+        val stuAllCourse = stuMeUser.courses.first { it.id == allCourse.id }
+        assertEquals(adminReg.user.id, stuAllCourse.assignedProfessorId)
+        assertEquals(adminReg.user.name, stuAllCourse.assignedProfessorName)
+        assertTrue(stuAllCourse.professors.any { it.id == adminReg.user.id && it.name == adminReg.user.name })
 
         val profMeAfter = client.get("/api/auth/me") {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
@@ -698,5 +703,47 @@ class R3OverhaulTest {
         val profMeUser = profMeAfter.body<ApiResponse<UserDto>>().data!!
         assertEquals(adminReg.user.id, profMeUser.id)
         assertEquals(listOf(allCourse.id), profMeUser.courses.map { it.id })
+        assertEquals(adminReg.user.name, profMeUser.courses.first().assignedProfessorName)
+
+        val catalogAfter = client.get("/api/courses?all=true&limit=2000")
+            .body<ApiResponse<CourseListResponse>>().data!!
+        val catalogAllCourse = catalogAfter.courses.first { it.id == allCourse.id }
+        assertEquals(adminReg.user.id, catalogAllCourse.assignedProfessorId)
+        assertEquals(adminReg.user.name, catalogAllCourse.assignedProfessorName)
+
+        // 7. Role guard: professor cannot post a question, student cannot post an answer
+        val profQuestionAttempt = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = allCourse.id,
+                    category = QuestionCategory.LECTURE,
+                    content = "교수 계정으로 질문 작성을 시도합니다."
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, profQuestionAttempt.status)
+
+        val validStuQuestionRes = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = allCourse.id,
+                    category = QuestionCategory.LECTURE,
+                    content = "학생이 작성한 정상 질문입니다. 교수님께 여쭙습니다."
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, validStuQuestionRes.status)
+        val validStuQ = validStuQuestionRes.body<ApiResponse<QuestionDetailDto>>().data!!
+
+        val stuAnswerAttempt = client.post("/api/questions/${validStuQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "학생 계정으로 답변 작성을 시도합니다."))
+        }
+        assertEquals(HttpStatusCode.Forbidden, stuAnswerAttempt.status)
     }
 }

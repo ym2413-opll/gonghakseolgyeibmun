@@ -33,8 +33,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   // Catalog form state
   const [deptName, setDeptName] = useState('');
-  const [deptShortName, setDeptShortName] = useState('');
-  const [deptCode, setDeptCode] = useState('');
+  const [deptCollege, setDeptCollege] = useState('');
 
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
@@ -75,24 +74,28 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      loadAdminData();
-      if (!courseDept && departments.length > 0) {
-        setCourseDept(departments[0].name);
-      }
-      if (!courseCollege) {
-        const cols = Array.from(
-          new Set(
-            [
-              ...departments.map((d) => (d.college || '').trim()),
-              ...allCourses.map((c) => (c.college || '').trim())
-            ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
-          )
-        );
-        setCourseCollege(cols[0] || '전자정보공과대학');
-      }
+    if (!isOpen) return;
+    loadAdminData();
+    refreshCatalog();
+  }, [isOpen, loadAdminData, refreshCatalog]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!courseDept && departments.length > 0) {
+      setCourseDept(departments[0].name);
     }
-  }, [isOpen, loadAdminData, departments, allCourses, courseDept, courseCollege]);
+    if (!courseCollege) {
+      const cols = Array.from(
+        new Set(
+          [
+            ...departments.map((d) => (d.college || '').trim()),
+            ...allCourses.map((c) => (c.college || '').trim())
+          ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
+        )
+      );
+      setCourseCollege(cols[0] || '전자정보공과대학');
+    }
+  }, [isOpen, departments, allCourses, courseDept, courseCollege]);
 
   if (!isOpen) return null;
 
@@ -110,17 +113,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleAddDepartment = async (e) => {
     e.preventDefault();
     if (!deptName.trim()) return;
+    const addedDeptName = deptName.trim();
     try {
       await api.createDepartment({
-        name: deptName.trim(),
-        shortName: deptShortName.trim() || deptName.trim().slice(0, 3),
-        code: deptCode.trim() || 'DEPT'
+        name: addedDeptName,
+        college: deptCollege.trim() || '광운대학교'
       });
       setDeptName('');
-      setDeptShortName('');
-      setDeptCode('');
+      setDeptCollege('');
       await refreshCatalog();
-      notifySuccess(`학과 '${deptName}'이(가) 동적으로 추가되었습니다.`);
+      notifySuccess(`학과 '${addedDeptName}'이(가) 동적으로 추가되었습니다.`);
     } catch (err) {
       notifyError(err.message || '학과 추가 중 오류가 발생했습니다.');
     }
@@ -298,27 +300,21 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       required
                     />
                   </div>
-                  <div className="auth-form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label">약칭 (태그 표시용)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="예: 인사융"
-                        value={deptShortName}
-                        onChange={(e) => setDeptShortName(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">영문 코드</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="예: AI"
-                        value={deptCode}
-                        onChange={(e) => setDeptCode(e.target.value)}
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">소속 단과대학</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      list="admin-college-options"
+                      placeholder="예: 인공지능융합대학 (미입력 시 광운대학교)"
+                      value={deptCollege}
+                      onChange={(e) => setDeptCollege(e.target.value)}
+                    />
+                    <datalist id="admin-college-options">
+                      {collegeOptions.map((col) => (
+                        <option key={col} value={col} />
+                      ))}
+                    </datalist>
                   </div>
                   <button type="submit" className="btn btn-primary btn-sm">
                     <PlusCircle size={15} />
@@ -329,11 +325,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 <div className="admin-chip-list-wrap">
                   <div className="admin-chip-header">현재 등록된 학과 ({departments.length}개)</div>
                   <div className="admin-chip-list">
-                    {departments.map((d) => (
-                      <span key={d.id || d.name} className="admin-dept-chip">
-                        {d.name} <small>({d.shortName})</small>
-                      </span>
-                    ))}
+                    {departments.map((d) => {
+                      const subLabel = (d.college || d.shortName || '').trim();
+                      return (
+                        <span key={d.id || d.name} className="admin-dept-chip">
+                          {d.name}
+                          {subLabel ? <small> ({subLabel})</small> : null}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -446,11 +446,27 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 <div className="admin-chip-list-wrap">
                   <div className="admin-chip-header">등록된 교과목 ({allCourses.length}개)</div>
                   <div className="admin-chip-list">
-                    {allCourses.slice(0, 24).map((c) => (
-                      <span key={c.id} className="admin-dept-chip">
-                        {c.name} <small>({c.code}{c.department ? ` · ${c.department}` : ''})</small>
-                      </span>
-                    ))}
+                    {allCourses.slice(0, 24).map((c) => {
+                      const profNames = Array.isArray(c.professors)
+                        ? c.professors.map((p) => p?.name).filter(Boolean)
+                        : [];
+                      const profLabel =
+                        profNames.length > 0
+                          ? profNames.join(', ')
+                          : c.profName && c.profName !== '미배정'
+                            ? c.profName
+                            : '미배정';
+                      return (
+                        <span key={c.id} className="admin-dept-chip">
+                          {c.name}{' '}
+                          <small>
+                            ({c.code}
+                            {c.department ? ` · ${c.department}` : ''}
+                            {` · 담당: ${profLabel}`})
+                          </small>
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

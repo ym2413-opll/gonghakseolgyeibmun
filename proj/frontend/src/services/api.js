@@ -140,29 +140,50 @@ function initializeStorage() {
 initializeStorage();
 
 function mapCourseDto(c) {
+  if (!c || typeof c !== 'object') return c;
+  const professors = Array.isArray(c.professors) ? c.professors : [];
+  const rawAssignedId = c.assignedProfessorId || c.profId || '';
+  const matchedProf = rawAssignedId
+    ? professors.find((p) => p.id === rawAssignedId)
+    : null;
+  const primaryProf = matchedProf || professors[0] || null;
+  const explicitProfName = [c.assignedProfessorName, c.profName]
+    .map((n) => (n || '').trim())
+    .find((n) => n && n !== '미배정');
+  const resolvedProfId = rawAssignedId || primaryProf?.id || '';
+  const resolvedProfName = explicitProfName || primaryProf?.name || '미배정';
+  const resolvedSection = primaryProf?.section || c.section || '01분반';
+
   return {
     id: c.id,
     name: c.name,
     code: c.code,
     semester: c.semester || '2026-1',
     college: c.college || '',
-    department: c.department || c.professors?.[0]?.department || '',
+    department: c.department || primaryProf?.department || '',
     group: c.group || 'COMMON',
-    section: c.professors?.[0]?.section || '01분반',
-    profId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-    profName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
-    assignedProfessorId: c.assignedProfessorId || c.professors?.[0]?.id || '',
-    assignedProfessorName: c.assignedProfessorName || c.professors?.[0]?.name || '미배정',
-    professors: c.professors || [],
-    enabledCategories: c.enabledCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
+    section: resolvedSection,
+    profId: resolvedProfId,
+    profName: resolvedProfName,
+    assignedProfessorId: resolvedProfId,
+    assignedProfessorName: resolvedProfName,
+    professors,
+    enabledCategories: c.enabledCategories || c.availableCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
   };
 }
 
-function normalizeUserObject(u, allCourses = []) {
+function normalizeUserObject(u, coursesFallback = []) {
   if (!u || typeof u !== 'object' || Array.isArray(u)) return null;
   const roleLower = (u.role || 'student').toLowerCase();
   const isProf = roleLower === 'professor';
   const isAdmin = Boolean(u.isAdmin || roleLower === 'admin');
+  const rawCourses =
+    Array.isArray(coursesFallback) && coursesFallback.length > 0
+      ? coursesFallback
+      : Array.isArray(u.courses)
+        ? u.courses
+        : [];
+  const normalizedCourses = rawCourses.map(mapCourseDto);
   return {
     ...u,
     role: isProf ? 'professor' : 'student',
@@ -170,7 +191,7 @@ function normalizeUserObject(u, allCourses = []) {
     studentId: u.identifier || u.studentId || '',
     identifier: u.identifier || u.studentId || '',
     avatar: u.avatar || (u.name ? u.name.trim().charAt(0) : 'U'),
-    courses: Array.isArray(u.courses) && u.courses.length > 0 ? u.courses : allCourses
+    courses: normalizedCourses
   };
 }
 
@@ -653,6 +674,7 @@ export const api = {
       try {
         const res = await fetch(`${API_BASE_URL}/admin/departments`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
@@ -1199,6 +1221,7 @@ export const api = {
       try {
         await fetch(`${API_BASE_URL}/attachments/${attachmentId}`, {
           method: 'DELETE',
+          credentials: 'include',
           headers: getAuthHeaders()
         });
       } catch (e) {
@@ -1222,9 +1245,10 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 2500);
         const res = await fetch(`${API_BASE_URL}/questions`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...getAuthHeaders(uid)
+            ...getAuthHeaders()
           },
           body: JSON.stringify(questionPayload),
           signal: controller.signal
@@ -1234,11 +1258,12 @@ export const api = {
         if (res.ok) {
           return body?.data || body;
         }
-        if (res.status === 403 || res.status === 400) {
-          throw new Error(body.message || '질문 등록 권한이 제한되어 있습니다.');
-        }
+        const httpErr = new Error(body.message || '질문 등록 권한이 제한되어 있습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
-        if (e.message && (e.message.includes('제한') || e.message.includes('탈퇴') || e.message.includes('비활성화'))) {
+        if (e?.isHttpError) {
           throw e;
         }
         console.warn('[API] Remote createQuestion failed, using local fallback', e);
@@ -1246,6 +1271,9 @@ export const api = {
     }
 
     const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser || sessionUser.role !== 'student') {
+      throw new Error('학생 계정만 질문을 작성할 수 있습니다.');
+    }
     if (sessionUser?.questionBanUntil && new Date(sessionUser.questionBanUntil) > new Date()) {
       throw new Error(`현재 질문 작성 제한 상태입니다. (해제 일시: ${sessionUser.questionBanUntil})`);
     }
@@ -1289,19 +1317,25 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 2000);
         const res = await fetch(`${API_BASE_URL}/questions/${questionId}`, {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...getAuthHeaders(uid)
+            ...getAuthHeaders()
           },
           body: JSON.stringify(updatedData),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
+        const body = await res.json().catch(() => ({}));
         if (res.ok) {
-          const body = await res.json();
           return body?.data || body;
         }
+        const httpErr = new Error(body.message || '질문 수정 권한이 없습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote updateQuestion failed, using local fallback', e);
       }
     }
@@ -1329,9 +1363,10 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 2500);
         const res = await fetch(`${API_BASE_URL}/questions/${questionId}/answers`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...getAuthHeaders(uid)
+            ...getAuthHeaders()
           },
           body: JSON.stringify(answerData),
           signal: controller.signal
@@ -1341,11 +1376,12 @@ export const api = {
         if (res.ok) {
           return body?.data || body;
         }
-        if (res.status === 403 || res.status === 400) {
-          throw new Error(body.message || '답변 작성 권한이 제한되어 있습니다.');
-        }
+        const httpErr = new Error(body.message || '답변 작성 권한이 제한되어 있습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
-        if (e.message && (e.message.includes('제한') || e.message.includes('탈퇴') || e.message.includes('권한'))) {
+        if (e?.isHttpError) {
           throw e;
         }
         console.warn('[API] Remote createAnswer failed, using local storage', e);
@@ -1353,6 +1389,9 @@ export const api = {
     }
 
     const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser || sessionUser.role !== 'professor') {
+      throw new Error('교수 계정만 답변을 등록할 수 있습니다.');
+    }
     if (sessionUser?.answerBanUntil && new Date(sessionUser.answerBanUntil) > new Date()) {
       throw new Error(`현재 답변 작성 제한 상태입니다. (해제 일시: ${sessionUser.answerBanUntil})`);
     }

@@ -6,7 +6,7 @@ import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import { Send, CheckCircle2, Lock, ShieldAlert, Users } from 'lucide-react';
 
 export default function AnswerForm({ question, onAnswerAdded }) {
-  const { currentUser, isProfessor } = useAuth();
+  const { currentUser, isProfessor, refreshCurrentUser } = useAuth();
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -76,6 +76,16 @@ export default function AnswerForm({ question, onAnswerAdded }) {
     setErrorMsg('');
 
     try {
+      const latestUser = await refreshCurrentUser();
+      if (!latestUser || latestUser.role !== 'professor' || latestUser.id !== currentUser?.id) {
+        setErrorMsg(
+          latestUser?.role === 'student'
+            ? '학생 계정으로 변경되어 답변을 작성할 수 없습니다.'
+            : '로그인 상태가 변경되었습니다. 계정을 확인한 뒤 다시 시도해 주세요.'
+        );
+        return;
+      }
+
       // 주교수/부교수 구분 없이 모든 교수의 표시 직함은 동일하게 '담당교수'로 통일
       const answerPayload = {
         authorId: currentUser.id,

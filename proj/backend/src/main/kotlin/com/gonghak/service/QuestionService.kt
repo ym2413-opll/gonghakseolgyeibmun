@@ -54,9 +54,14 @@ class QuestionService(
         request: CreateQuestionRequest
     ): QuestionDetailDto {
         val created = dbQuery {
-            // 0. Check User Existence, Withdrawal & Question Restriction (Ban)
+            // 0. Check User Existence, Role, Withdrawal & Question Restriction (Ban)
             val studentUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
                 ?: throw IllegalStateException("유효한 사용자 계정을 찾을 수 없습니다.")
+            val creatorRole = runCatching { UserRole.valueOf(studentUser[UsersTable.role]) }
+                .getOrDefault(UserRole.STUDENT)
+            if (creatorRole != UserRole.STUDENT) {
+                throw IllegalStateException("학생 계정만 질문을 작성할 수 있습니다.")
+            }
             if (studentUser[UsersTable.isWithdrawn]) {
                 throw IllegalStateException("탈퇴 처리된 계정입니다. 질문을 작성할 수 없습니다.")
             }
@@ -627,8 +632,8 @@ class QuestionService(
             }
 
             val role = runCatching { UserRole.valueOf(profUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
-            if (role != UserRole.PROFESSOR && !profUser[UsersTable.isAdmin]) {
-                throw IllegalArgumentException("교수 계정만 답변을 등록할 수 있습니다.")
+            if (role != UserRole.PROFESSOR) {
+                throw IllegalStateException("교수 계정만 답변을 등록할 수 있습니다.")
             }
 
             val courseId = qRow[QuestionsTable.courseId]

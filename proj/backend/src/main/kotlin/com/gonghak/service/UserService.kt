@@ -136,8 +136,6 @@ class UserService {
             targetCourseUuids.forEach { cId ->
                 val assignedProfId = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }
                     .firstOrNull()?.get(CourseProfessorsTable.professorId)
-                    ?: UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
-                        .firstOrNull()?.get(UsersTable.id)?.value
 
                 EnrollmentsTable.insert {
                     it[courseId] = cId
@@ -191,21 +189,7 @@ class UserService {
 
             // Assign professor to selected courses
             val targetCourseUuids = resolveCourseUuids(request.courseIds, request.courseNames, cleanDept)
-            targetCourseUuids.forEach { cId ->
-                if (CourseProfessorsTable.select {
-                        (CourseProfessorsTable.courseId eq cId) and (CourseProfessorsTable.professorId eq newUserId)
-                    }.count() == 0L
-                ) {
-                    val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
-                    val nextSection = String.format("%02d분반", existingSections + 1)
-                    CourseProfessorsTable.insert {
-                        it[courseId] = cId
-                        it[professorId] = newUserId
-                        it[section] = nextSection
-                        it[schedule] = "학사 시간표 참조"
-                    }
-                }
-            }
+            assignProfessorToCoursesInternal(newUserId, targetCourseUuids)
         }
 
         UserSettingsTable.insert {
@@ -655,8 +639,11 @@ class UserService {
                     )
                 }
 
-                val effectiveProfId = assignedProfId
-                    ?: profRows.firstOrNull()?.get(UsersTable.id)?.value
+                val effectiveProfRow = assignedProfId?.let { targetId ->
+                    profRows.firstOrNull { it[UsersTable.id].value == targetId }
+                } ?: profRows.firstOrNull()
+                val effectiveProfId = effectiveProfRow?.get(UsersTable.id)?.value
+                val effectiveProfName = effectiveProfRow?.get(UsersTable.name)
                 val enabledCategories = effectiveProfId?.let {
                     getAvailableCategoriesForStudent(it, cId)
                 } ?: QuestionCategory.values().toList()
@@ -673,7 +660,8 @@ class UserService {
                     credit = row[CoursesTable.credit],
                     professors = profList,
                     availableCategories = enabledCategories,
-                    assignedProfessorId = effectiveProfId?.toString()
+                    assignedProfessorId = effectiveProfId?.toString(),
+                    assignedProfessorName = effectiveProfName
                 )
             }
         } else {
@@ -712,8 +700,36 @@ class UserService {
                     credit = row[CoursesTable.credit],
                     professors = profList,
                     availableCategories = myCategories,
-                    assignedProfessorId = userId.toString()
+                    assignedProfessorId = userId.toString(),
+                    assignedProfessorName = user[UsersTable.name]
                 )
+            }
+        }
+    }
+
+    private fun assignProfessorToCoursesInternal(professorId: UUID, courseUuids: List<UUID>) {
+        courseUuids.forEach { cId ->
+            val alreadyAssigned = CourseProfessorsTable.select {
+                (CourseProfessorsTable.courseId eq cId) and (CourseProfessorsTable.professorId eq professorId)
+            }.count() > 0
+            if (!alreadyAssigned) {
+                val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
+                val nextSection = String.format("%02d분반", existingSections + 1)
+                CourseProfessorsTable.insert {
+                    it[courseId] = cId
+                    it[CourseProfessorsTable.professorId] = professorId
+                    it[section] = nextSection
+                    it[schedule] = "학사 시간표 참조"
+                }
+            }
+
+            val validProfIds = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }
+                .map { it[CourseProfessorsTable.professorId] }
+            EnrollmentsTable.update({
+                (EnrollmentsTable.courseId eq cId) and
+                    (EnrollmentsTable.assignedProfessorId.isNull() or (EnrollmentsTable.assignedProfessorId notInList validProfIds))
+            }) {
+                it[assignedProfessorId] = professorId
             }
         }
     }
@@ -741,27 +757,7 @@ class UserService {
                 (CourseProfessorsTable.professorId eq userId) and
                     (CourseProfessorsTable.courseId notInList validCourseUuids)
             }
-            validCourseUuids.forEach { cId ->
-                val alreadyAssigned = CourseProfessorsTable.select {
-                    (CourseProfessorsTable.courseId eq cId) and (CourseProfessorsTable.professorId eq userId)
-                }.count() > 0
-                if (!alreadyAssigned) {
-                    val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
-                    val nextSection = String.format("%02d분반", existingSections + 1)
-                    CourseProfessorsTable.insert {
-                        it[courseId] = cId
-                        it[professorId] = userId
-                        it[section] = nextSection
-                        it[schedule] = "학사 시간표 참조"
-                    }
-                }
-                // Backfill enrollments for students who registered before a professor claimed this course
-                EnrollmentsTable.update({
-                    (EnrollmentsTable.courseId eq cId) and EnrollmentsTable.assignedProfessorId.isNull()
-                }) {
-                    it[assignedProfessorId] = userId
-                }
-            }
+            assignProfessorToCoursesInternal(userId, validCourseUuids)
         } else {
             EnrollmentsTable.deleteWhere {
                 (EnrollmentsTable.studentId eq userId) and
@@ -947,7 +943,9 @@ class UserService {
             completionType = row[CoursesTable.completionType],
             credit = row[CoursesTable.credit],
             professors = profList,
-            availableCategories = listOf(QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT, QuestionCategory.LECTURE)
+            availableCategories = listOf(QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT, QuestionCategory.LECTURE),
+            assignedProfessorId = profList.firstOrNull()?.id,
+            assignedProfessorName = profList.firstOrNull()?.name
         )
     }
 

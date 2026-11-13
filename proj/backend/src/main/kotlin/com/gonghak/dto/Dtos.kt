@@ -159,7 +159,8 @@ data class CourseDto(
     val credit: Int = 3,
     val professors: List<ProfessorSimpleDto> = emptyList(),
     val availableCategories: List<QuestionCategory> = emptyList(),
-    val assignedProfessorId: String? = null
+    val assignedProfessorId: String? = null,
+    val assignedProfessorName: String? = null
 )
 
 @Serializable

@@ -29,9 +29,14 @@ import {
 } from 'lucide-react';
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
-  const { currentUser, allCourses } = useAuth();
+  const { currentUser, isStudent, allCourses, refreshCurrentUser, refreshCatalog } = useAuth();
   const { profSettings } = useNotifications();
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    refreshCurrentUser();
+    refreshCatalog();
+  }, [refreshCurrentUser, refreshCatalog]);
 
   // 학생의 수강 과목 목록
   const studentCourses = currentUser?.courses?.length
@@ -247,6 +252,16 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     setErrorMsg('');
 
     try {
+      const latestUser = await refreshCurrentUser();
+      if (!latestUser || latestUser.role !== 'student' || latestUser.id !== currentUser?.id) {
+        setErrorMsg(
+          latestUser?.role === 'professor'
+            ? '교수 계정으로 변경되어 질문을 작성할 수 없습니다.'
+            : '로그인 상태가 변경되었습니다. 계정을 확인한 뒤 다시 시도해 주세요.'
+        );
+        return;
+      }
+
       // AI 정제 제목이 있으면 우선 사용하고, 없으면 본문에서 자동으로 요약 생성
       const summaryTitle = (hasAiRefined && refinedTitle?.trim())
         ? refinedTitle.trim()
@@ -294,6 +309,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     if (['c', 'cpp', 'py', 'java', 'js', 'html'].includes(ext)) return <FileCode size={20} className="file-icon-code" />;
     return <FileText size={20} className="file-icon-doc" />;
   };
+
+  if (!isStudent) {
+    return null;
+  }
 
   return (
     <div className="question-form-container">

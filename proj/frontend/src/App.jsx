@@ -26,7 +26,7 @@ function getDeviceTier(width) {
 }
 
 function MainApp() {
-  const { currentUser, isAuthenticated, isProfessor, isAdmin } = useAuth();
+  const { currentUser, isAuthenticated, isStudent, isProfessor, isAdmin } = useAuth();
 
   const [questions, setQuestions] = useState([]);
   const [selectedQuestionId, setSelectedQuestionId] = useState(null);
@@ -96,6 +96,16 @@ function MainApp() {
       setSelectedQuestionDetail(null);
     }
   }, [selectedQuestionId, fetchSelectedDetail, isAdmin]);
+
+  // 계정 전환 또는 로그아웃 시 작성 중이던 화면·상세·모달 상태를 초기화하여 권한 혼선 방지
+  useEffect(() => {
+    setCurrentView('list');
+    setSelectedQuestionId(null);
+    setSelectedQuestionDetail(null);
+    setIsSettingsOpen(false);
+    setIsProfSettingsOpen(false);
+    setIsAdminModalOpen(false);
+  }, [currentUser?.id, currentUser?.role, isAuthenticated]);
 
   const handleSelectQuestion = (id) => {
     if (!id) {
@@ -226,7 +236,7 @@ function MainApp() {
             }`}
             aria-hidden={!isAuthenticated}
           >
-            {currentView === 'new' && isAuthenticated ? (
+            {currentView === 'new' && isAuthenticated && isStudent ? (
               <QuestionForm
                 onQuestionCreated={handleQuestionCreated}
                 onCancel={() => setCurrentView('list')}
