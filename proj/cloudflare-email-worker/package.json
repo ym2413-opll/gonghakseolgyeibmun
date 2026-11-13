@@ -1,0 +1,17 @@
+{
+  "name": "cistus-cloudflare-email-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Email Worker that parses incoming professor reply emails and forwards them to the Cistus Q&A backend webhook.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.1"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}

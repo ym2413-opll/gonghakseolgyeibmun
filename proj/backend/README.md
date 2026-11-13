@@ -147,3 +147,9 @@ DB_URL이 지정되지 않으면 **PostgreSQL 호환 인메모리 H2 데이터�
 | `GET` | `/api/questions/similar` | 유사 질답 검색 (Word2Vec 코사인 유사도) |
 | `GET` | `/api/notifications` | 알림 목록 조회 (방해금지 해제 자동 반영) |
 | `POST` | `/api/notifications/{id}/read` | 알림 읽음 처리 |
+| `POST` | `/api/webhooks/email-reply` | Cloudflare Email Worker 인바운드 답변 등록 웹훅 (`X-Email-Webhook-Secret`) |
+
+### 8. 이메일 답장 자동 등록 (Cloudflare Email Worker 연동)
+- 아웃바운드 알림 메일에 `Reply-To: reply+<token>@<EMAIL_REPLY_DOMAIN>` 헤더를 포함합니다.
+- Cloudflare Email Worker([proj/cloudflare-email-worker](file:///d:/gonghakseolgyeibmun/proj/cloudflare-email-worker/README.md))가 답장을 파싱해 `/api/webhooks/email-reply`로 전달하면, 백엔드가 시크릿·SPF/DKIM·토큰·교수 이메일 일치·`Message-ID` 중복 여부를 검증한 뒤 답변을 등록합니다.
+- 주요 환경변수: `EMAIL_REPLY_DOMAIN`, `EMAIL_REPLY_PREFIX`(기본 `reply`), `EMAIL_WEBHOOK_SECRET`, `EMAIL_ENFORCE_SENDER_AUTH`(기본 `true`).

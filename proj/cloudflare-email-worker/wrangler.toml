@@ -1,0 +1,10 @@
+name = "cistus-email-reply-worker"
+main = "src/index.js"
+compatibility_date = "2025-03-01"
+
+# Non-secret configuration defaults.
+# Sensitive values (BACKEND_WEBHOOK_URL, EMAIL_WEBHOOK_SECRET) MUST be stored via:
+#   npx wrangler secret put BACKEND_WEBHOOK_URL
+#   npx wrangler secret put EMAIL_WEBHOOK_SECRET
+[vars]
+ALLOWED_REPLY_PREFIX = "reply"

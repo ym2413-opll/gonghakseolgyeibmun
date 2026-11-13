@@ -23,7 +23,9 @@ data class PendingEmailJob(
     val logId: UUID,
     val recipientEmail: String,
     val subject: String,
-    val body: String
+    val body: String,
+    val replyTo: String? = null,
+    val messageId: String? = null
 )
 
 class EmailService(
@@ -56,9 +58,21 @@ class EmailService(
             QuestionCategory.LECTURE -> "강의"
         }
 
+        val replyRoute = issueEmailReplyRouteInTx(
+            replyDomain = configuredReplyDomain,
+            replyPrefix = configuredReplyPrefix,
+            recipientEmail = cleanEmail,
+            professorId = professorId,
+            questionId = questionId
+        )
+
         val prefix = if (isCoProfessor) "[공동강의 질문 알림]" else "[새 질문 알림]"
         val subject = "$prefix [$courseName - $categoryLabel] $questionTitle"
         val body = buildString {
+            if (replyRoute != null) {
+                appendLine(EMAIL_REPLY_ABOVE_MARKER)
+                appendLine()
+            }
             appendLine("안녕하십니까, ${professorName} 교수님.")
             appendLine("광운대학교 학업 Q&A 포럼에 새로운 질문이 등록되어 안내 메일을 발송합니다.")
             appendLine("--------------------------------------------------")
@@ -70,7 +84,11 @@ class EmailService(
             appendLine("[질문 본문]")
             appendLine(questionContent)
             appendLine("--------------------------------------------------")
-            appendLine("포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
+            if (replyRoute != null) {
+                appendLine("이 메일에 바로 답장을 보내시거나, 포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
+            } else {
+                appendLine("포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
+            }
         }
 
         val logId = UUID.randomUUID()
@@ -97,7 +115,9 @@ class EmailService(
             logId = logId,
             recipientEmail = cleanEmail,
             subject = subject,
-            body = body
+            body = body,
+            replyTo = replyRoute?.replyToAddress,
+            messageId = replyRoute?.messageId
         )
     }
 
@@ -105,6 +125,19 @@ class EmailService(
      * Dispatches a queued email job on the dedicated email worker thread pool
      * (or isolated SMTP OS subprocess when SMTP_SUBPROCESS_ENABLED=true).
      */
+    @Volatile
+    private var configuredReplyDomain: String? = normalizeReplyDomain(System.getenv("EMAIL_REPLY_DOMAIN"))
+
+    @Volatile
+    private var configuredReplyPrefix: String = normalizeReplyPrefix(System.getenv("EMAIL_REPLY_PREFIX"))
+
+    fun configureReplyRouting(domain: String?, prefix: String? = null) {
+        configuredReplyDomain = normalizeReplyDomain(domain)
+        if (!prefix.isNullOrBlank()) {
+            configuredReplyPrefix = normalizeReplyPrefix(prefix)
+        }
+    }
+
     fun dispatchEmailAsync(job: PendingEmailJob): Job {
         return workerManager.launchEmailTask("email-${job.logId}") {
             val smtpHost = System.getenv("SMTP_HOST")?.trim()
@@ -126,7 +159,9 @@ class EmailService(
                     from = smtpFrom,
                     to = job.recipientEmail,
                     subject = job.subject,
-                    body = job.body
+                    body = job.body,
+                    replyTo = job.replyTo,
+                    messageId = job.messageId
                 )
                 try {
                     if (useSubprocess) {

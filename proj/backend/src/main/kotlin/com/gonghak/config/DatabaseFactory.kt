@@ -40,7 +40,9 @@ object DatabaseFactory {
             AnswersTable,
             NotificationsTable,
             AttachmentsTable,
-            EmailLogsTable
+            EmailLogsTable,
+            EmailReplyTokensTable,
+            ProcessedInboundEmailsTable
         )
 
         // 1. Create missing tables first in an isolated transaction

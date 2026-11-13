@@ -216,6 +216,27 @@ fun Application.module() {
             )
         }
 
+        val appConfig = this@module.environment.config
+        val replyDomain = appConfig.propertyOrNull("emailReply.domain")?.getString()
+            ?: System.getenv("EMAIL_REPLY_DOMAIN")
+        val replyPrefix = appConfig.propertyOrNull("emailReply.prefix")?.getString()
+            ?: System.getenv("EMAIL_REPLY_PREFIX")
+        val webhookSecret = appConfig.propertyOrNull("emailReply.webhookSecret")?.getString()
+            ?: System.getenv("EMAIL_WEBHOOK_SECRET")
+        val enforceSenderAuth = appConfig.propertyOrNull("emailReply.enforceSenderAuth")?.getString()
+            ?.trim()?.lowercase()?.let { it != "false" && it != "0" }
+            ?: System.getenv("EMAIL_ENFORCE_SENDER_AUTH")?.trim()?.lowercase()?.let { it != "false" && it != "0" }
+            ?: true
+
+        emailService.configureReplyRouting(replyDomain, replyPrefix)
+        val emailReplyService = EmailReplyService(
+            questionService = questionService,
+            replyDomainOverride = replyDomain,
+            replyPrefixOverride = replyPrefix,
+            webhookSecretOverride = webhookSecret,
+            enforceSenderAuthOverride = enforceSenderAuth
+        )
+
         authRoutes(userService)
         userSettingRoutes(userService, notificationService)
         courseRoutes(userService)
@@ -224,6 +245,7 @@ fun Application.module() {
         notificationRoutes(notificationService, emailService, userService)
         attachmentRoutes(attachmentService, userService)
         adminRoutes(userService, questionService, emailService)
+        webhookRoutes(emailReplyService)
     }
 }
 

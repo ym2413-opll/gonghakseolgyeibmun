@@ -32,7 +32,9 @@ data class SmtpJobPayload(
     val from: String,
     val to: String,
     val subject: String,
-    val body: String
+    val body: String,
+    val replyTo: String? = null,
+    val messageId: String? = null
 )
 
 @Serializable
@@ -148,6 +150,15 @@ object SmtpTransport {
             val encodedSubject = "=?UTF-8?B?${Base64.getEncoder().encodeToString(payload.subject.toByteArray(Charsets.UTF_8))}?="
             writeCrlf(writer, "From: <$cleanFrom>")
             writeCrlf(writer, "To: <$cleanTo>")
+            val cleanReplyTo = payload.replyTo?.replace(Regex("[\\r\\n<>]"), "")?.trim()
+            if (!cleanReplyTo.isNullOrBlank() && cleanReplyTo.contains("@")) {
+                writeCrlf(writer, "Reply-To: <$cleanReplyTo>")
+            }
+            val cleanMessageId = payload.messageId?.replace(Regex("[\\r\\n]"), "")?.trim()
+            if (!cleanMessageId.isNullOrBlank()) {
+                val wrappedMsgId = if (cleanMessageId.startsWith("<") && cleanMessageId.endsWith(">")) cleanMessageId else "<$cleanMessageId>"
+                writeCrlf(writer, "Message-ID: $wrappedMsgId")
+            }
             writeCrlf(writer, "Subject: $encodedSubject")
             writeCrlf(writer, "MIME-Version: 1.0")
             writeCrlf(writer, "Content-Type: text/plain; charset=UTF-8")

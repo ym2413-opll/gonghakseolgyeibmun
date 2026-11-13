@@ -562,3 +562,27 @@ data class EmailLogDto(
     val status: String,
     val createdAt: String
 )
+
+@Serializable
+data class InboundEmailWebhookRequest(
+    val messageId: String? = null,
+    val from: String,
+    val to: String,
+    val subject: String? = null,
+    val textBody: String? = null,
+    val htmlBody: String? = null,
+    val spfResult: String? = null,
+    val dkimResult: String? = null,
+    val dmarcResult: String? = null,
+    val authenticationResults: String? = null,
+    val inReplyTo: String? = null
+)
+
+@Serializable
+data class InboundEmailWebhookResponse(
+    val accepted: Boolean,
+    val alreadyProcessed: Boolean = false,
+    val questionId: String? = null,
+    val answerId: String? = null,
+    val message: String
+)
