@@ -3,25 +3,25 @@ package com.gonghak.service
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.AttachmentDto
 import com.gonghak.models.AttachmentsTable
+import com.gonghak.worker.ImageCompressionProcessor
+import com.gonghak.worker.SubprocessRunner
+import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.slf4j.LoggerFactory
-import java.awt.RenderingHints
-import java.awt.image.BufferedImage
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.util.UUID
-import javax.imageio.IIOImage
-import javax.imageio.ImageIO
-import javax.imageio.ImageWriteParam
 
 class AttachmentService(
-    private val uploadDirPath: String = "uploads/attachments"
+    private val uploadDirPath: String = "uploads/attachments",
+    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
 ) {
     private val logger = LoggerFactory.getLogger(AttachmentService::class.java)
 
@@ -87,43 +87,58 @@ class AttachmentService(
         validateMagicBytes(originalBytes, extension)
 
         val isImage = IMAGE_EXTENSIONS.contains(extension)
-        var finalBytes = originalBytes
-        var isCompressed = false
-        var compressionRatio = 0.0
-
-        // 5. 이미지인 경우 압축 및 리사이징 적용
-        if (isImage) {
-            try {
-                val compressed = compressImage(originalBytes, extension)
-                if (compressed != null && compressed.size < originalBytes.size) {
-                    finalBytes = compressed
-                    isCompressed = true
-                    val savedBytesCount = originalBytes.size - finalBytes.size
-                    compressionRatio = Math.round((savedBytesCount.toDouble() / originalBytes.size.toDouble()) * 1000.0) / 10.0
-                    logger.info("Image compressed: ${originalBytes.size} bytes -> ${finalBytes.size} bytes (ratio: $compressionRatio%)")
-                }
-            } catch (e: Exception) {
-                logger.warn("Image compression failed or skipped for $sanitizedOriginalName, using original", e)
-            }
-        }
-
-        // 6. 안전한 고유 파일명 생성 및 디스크 저장
         val attachmentId = UUID.randomUUID()
         val safeSavedName = "${attachmentId}.$extension"
-        val targetPath = Paths.get(uploadDirPath, safeSavedName)
 
-        Files.write(
-            targetPath,
-            finalBytes,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING,
-            StandardOpenOption.WRITE
-        )
+        // 5-6. CPU-집약적인 이미지 압축 및 디스크 I/O는 전용 워커 스레드 풀(및 필요시 격리 프로세스)에서 처리
+        val (finalBytes, isCompressed, compressionRatio) = withContext(workerManager.attachmentDispatcher) {
+            var processedBytes = originalBytes
+            var compressedFlag = false
+            var ratio = 0.0
+
+            if (isImage) {
+                try {
+                    val useSubprocess = System.getenv("IMAGE_SUBPROCESS_ENABLED")
+                        ?.trim()?.equals("true", ignoreCase = true) == true
+                    val compressed = if (useSubprocess) {
+                        SubprocessRunner.runImageCompressSubprocess(
+                            originalBytes = originalBytes,
+                            extension = extension,
+                            maxDimension = MAX_IMAGE_DIMENSION,
+                            jpegQuality = JPEG_COMPRESSION_QUALITY
+                        ) ?: compressImage(originalBytes, extension)
+                    } else {
+                        compressImage(originalBytes, extension)
+                    }
+
+                    if (compressed != null && compressed.size < originalBytes.size) {
+                        processedBytes = compressed
+                        compressedFlag = true
+                        val savedBytesCount = originalBytes.size - processedBytes.size
+                        ratio = Math.round((savedBytesCount.toDouble() / originalBytes.size.toDouble()) * 1000.0) / 10.0
+                        logger.info("[AttachmentWorker:${Thread.currentThread().name}] Image compressed: ${originalBytes.size} bytes -> ${processedBytes.size} bytes (ratio: $ratio%)")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("[AttachmentWorker] Image compression failed or skipped for $sanitizedOriginalName, using original", e)
+                }
+            }
+
+            val targetPath = Paths.get(uploadDirPath, safeSavedName)
+            Files.write(
+                targetPath,
+                processedBytes,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE
+            )
+
+            Triple(processedBytes, compressedFlag, ratio)
+        }
 
         val resolvedMimeType = declaredContentType ?: getMimeTypeByExtension(extension)
 
         // 7. DB 기록
-        val created = dbQuery {
+        val created = dbQuery(workerManager.attachmentDispatcher) {
             AttachmentsTable.insert {
                 it[id] = attachmentId
                 it[AttachmentsTable.uploaderId] = uploaderId
@@ -291,71 +306,12 @@ class AttachmentService(
      * 이미지 압축 및 최적화 리사이징
      */
     fun compressImage(originalBytes: ByteArray, extension: String): ByteArray? {
-        val originalImage: BufferedImage = ImageIO.read(ByteArrayInputStream(originalBytes))
-            ?: return null
-
-        val originalWidth = originalImage.width
-        val originalHeight = originalImage.height
-
-        // 리사이즈 필요 여부 확인 (최대 가로/세로 1920px)
-        var targetWidth = originalWidth
-        var targetHeight = originalHeight
-        var needResize = false
-
-        if (originalWidth > MAX_IMAGE_DIMENSION || originalHeight > MAX_IMAGE_DIMENSION) {
-            needResize = true
-            if (originalWidth > originalHeight) {
-                targetWidth = MAX_IMAGE_DIMENSION
-                targetHeight = (originalHeight.toDouble() * (MAX_IMAGE_DIMENSION.toDouble() / originalWidth)).toInt()
-            } else {
-                targetHeight = MAX_IMAGE_DIMENSION
-                targetWidth = (originalWidth.toDouble() * (MAX_IMAGE_DIMENSION.toDouble() / originalHeight)).toInt()
-            }
-        }
-
-        // 대상 이미지 생성 (알파 채널 지원 여부 고려)
-        val imageType = if (extension == "png" && originalImage.colorModel.hasAlpha()) {
-            BufferedImage.TYPE_INT_ARGB
-        } else {
-            BufferedImage.TYPE_INT_RGB
-        }
-
-        val resizedImage = BufferedImage(targetWidth, targetHeight, imageType)
-        val g2d = resizedImage.createGraphics()
-        try {
-            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g2d.drawImage(originalImage, 0, 0, targetWidth, targetHeight, null)
-        } finally {
-            g2d.dispose()
-        }
-
-        // 압축 출력
-        val outputStream = ByteArrayOutputStream()
-        val formatName = if (extension == "png") "png" else "jpeg"
-
-        if (formatName == "jpeg") {
-            val writers = ImageIO.getImageWritersByFormatName("jpeg")
-            if (writers.hasNext()) {
-                val writer = writers.next()
-                val param = writer.defaultWriteParam
-                param.compressionMode = ImageWriteParam.MODE_EXPLICIT
-                param.compressionQuality = JPEG_COMPRESSION_QUALITY
-                val ios = ImageIO.createImageOutputStream(outputStream)
-                writer.output = ios
-                writer.write(null, IIOImage(resizedImage, null, null), param)
-                writer.dispose()
-                ios.close()
-            } else {
-                ImageIO.write(resizedImage, "jpeg", outputStream)
-            }
-        } else {
-            ImageIO.write(resizedImage, "png", outputStream)
-        }
-
-        val compressedBytes = outputStream.toByteArray()
-        return if (compressedBytes.isNotEmpty()) compressedBytes else null
+        return ImageCompressionProcessor.compressImageBytes(
+            originalBytes = originalBytes,
+            extension = extension,
+            maxDimension = MAX_IMAGE_DIMENSION,
+            jpegQuality = JPEG_COMPRESSION_QUALITY
+        )
     }
 
     /**
@@ -436,24 +392,55 @@ class AttachmentService(
     /**
      * 첨부파일 삭제
      */
-    suspend fun deleteAttachment(attachmentId: UUID, userId: UUID?): Boolean = dbQuery {
-        val row = AttachmentsTable.select { AttachmentsTable.id eq attachmentId }.singleOrNull()
-            ?: return@dbQuery false
+    suspend fun deleteAttachment(attachmentId: UUID, userId: UUID?): Boolean {
+        val savedName = dbQuery(workerManager.attachmentDispatcher) {
+            val row = AttachmentsTable.select { AttachmentsTable.id eq attachmentId }.singleOrNull()
+                ?: return@dbQuery null
 
-        // 질문에 이미 묶여있지 않거나 본인이 업로드한 경우만 삭제 가능
-        val uploader = row[AttachmentsTable.uploaderId]
-        if (uploader != null && userId != null && uploader != userId) {
-            throw IllegalStateException("본인이 업로드한 첨부파일만 삭제할 수 있습니다.")
+            // 질문에 이미 묶여있지 않거나 본인이 업로드한 경우만 삭제 가능
+            val uploader = row[AttachmentsTable.uploaderId]
+            if (uploader != null && userId != null && uploader != userId) {
+                throw IllegalStateException("본인이 업로드한 첨부파일만 삭제할 수 있습니다.")
+            }
+
+            val name = row[AttachmentsTable.savedName]
+            AttachmentsTable.deleteWhere { AttachmentsTable.id eq attachmentId }
+            name
+        } ?: return false
+
+        withContext(workerManager.attachmentDispatcher) {
+            Files.deleteIfExists(Paths.get(uploadDirPath, savedName))
+        }
+        return true
+    }
+
+    /**
+     * Executed periodically by the background scheduler thread to clean up unlinked
+     * temporary attachments older than the retention window (default 24 hours).
+     */
+    suspend fun cleanupOrphanAttachments(maxAgeSeconds: Long = 24 * 3600L): Int {
+        val cutoff = Instant.now().minusSeconds(maxAgeSeconds)
+        val orphaned = dbQuery(workerManager.attachmentDispatcher) {
+            val rows = AttachmentsTable.select {
+                AttachmentsTable.questionId.isNull() and (AttachmentsTable.createdAt less cutoff)
+            }.toList()
+
+            if (rows.isEmpty()) return@dbQuery emptyList<String>()
+
+            val ids = rows.map { it[AttachmentsTable.id].value }
+            val names = rows.map { it[AttachmentsTable.savedName] }
+            AttachmentsTable.deleteWhere { AttachmentsTable.id inList ids }
+            names
         }
 
-        val savedName = row[AttachmentsTable.savedName]
-        AttachmentsTable.deleteWhere { AttachmentsTable.id eq attachmentId }
-
-        val file = File(uploadDirPath, savedName)
-        if (file.exists()) {
-            file.delete()
+        if (orphaned.isNotEmpty()) {
+            withContext(workerManager.attachmentDispatcher) {
+                orphaned.forEach { savedName ->
+                    runCatching { Files.deleteIfExists(Paths.get(uploadDirPath, savedName)) }
+                }
+            }
         }
-        true
+        return orphaned.size
     }
 
     private fun getExtension(fileName: String): String {

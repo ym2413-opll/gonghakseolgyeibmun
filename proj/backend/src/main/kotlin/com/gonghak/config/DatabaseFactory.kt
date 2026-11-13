@@ -5,6 +5,7 @@ import com.gonghak.models.*
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.ktor.server.config.*
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Database
@@ -92,8 +93,10 @@ object DatabaseFactory {
         return HikariDataSource(hikariConfig)
     }
 
-    suspend fun <T> dbQuery(block: suspend () -> T): T =
-        newSuspendedTransaction(Dispatchers.IO) { block() }
+    suspend fun <T> dbQuery(
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        block: suspend () -> T
+    ): T = newSuspendedTransaction(dispatcher) { block() }
 
     private fun seedDefaultDepartments() {
         val initialDepartments = listOf(

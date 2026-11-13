@@ -8,6 +8,8 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
@@ -17,7 +19,10 @@ data class RefinedResult(
     val content: String
 )
 
-class AiRefineService(private val apiKey: String? = null) {
+class AiRefineService(
+    private val apiKey: String? = null,
+    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
+) {
     private val logger = LoggerFactory.getLogger(AiRefineService::class.java)
 
     private val httpClient = HttpClient(CIO) {
@@ -39,14 +44,20 @@ class AiRefineService(private val apiKey: String? = null) {
 
         if (!effectiveApiKey.isNullOrBlank()) {
             try {
-                return callGeminiApi(effectiveApiKey, rawContent, rawTitle, courseName, category)
+                return withContext(workerManager.aiDispatcher) {
+                    withTimeout(12_000L) {
+                        callGeminiApi(effectiveApiKey, rawContent, rawTitle, courseName, category)
+                    }
+                }
             } catch (e: Exception) {
-                logger.warn("Failed to call Gemini API, falling back to rule-based refiner: ${e.message}")
+                logger.warn("[AiWorker] Failed to call Gemini API, falling back to rule-based refiner: ${e.message}")
             }
         }
 
-        // Fallback rule-based polite refiner
-        return fallbackRefine(rawContent, rawTitle, courseName, category)
+        // Fallback rule-based polite refiner runs on dedicated AI worker thread
+        return withContext(workerManager.aiDispatcher) {
+            fallbackRefine(rawContent, rawTitle, courseName, category)
+        }
     }
 
     suspend fun refineQuestion(
@@ -204,5 +215,9 @@ class AiRefineService(private val apiKey: String? = null) {
         }
 
         return RefinedResult(refinedTitle, refinedContent)
+    }
+
+    fun close() {
+        runCatching { httpClient.close() }
     }
 }

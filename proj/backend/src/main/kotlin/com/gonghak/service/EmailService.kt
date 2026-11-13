@@ -4,29 +4,38 @@ import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.EmailLogDto
 import com.gonghak.models.EmailLogsTable
 import com.gonghak.models.QuestionCategory
+import com.gonghak.worker.SmtpJobPayload
+import com.gonghak.worker.SmtpTransport
+import com.gonghak.worker.SubprocessRunner
+import kotlinx.coroutines.Job
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
+import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
-import java.net.Socket
 import java.time.Instant
-import java.util.Base64
 import java.util.UUID
-import javax.net.ssl.SSLSocketFactory
 
-class EmailService {
+data class PendingEmailJob(
+    val logId: UUID,
+    val recipientEmail: String,
+    val subject: String,
+    val body: String
+)
+
+class EmailService(
+    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
+) {
     private val logger = LoggerFactory.getLogger(EmailService::class.java)
 
     /**
-     * Send email notification to professor's registered email address when a new question is posted.
-     * Must be called inside or outside a transaction (inserts log via Exposed).
+     * Records an outbox row with status QUEUED in the current transaction (or a new one)
+     * and returns a PendingEmailJob to be dispatched asynchronously after transaction commit.
      */
-    fun sendQuestionEmailInternal(
+    fun enqueueQuestionEmail(
         recipientEmail: String,
         professorId: UUID,
         professorName: String,
@@ -37,9 +46,9 @@ class EmailService {
         category: QuestionCategory,
         authorDisplay: String,
         isCoProfessor: Boolean = false
-    ) {
+    ): PendingEmailJob? {
         val cleanEmail = recipientEmail.trim()
-        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) return
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) return null
 
         val categoryLabel = when (category) {
             QuestionCategory.GRADE -> "성적"
@@ -64,47 +73,120 @@ class EmailService {
             appendLine("포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
         }
 
-        val smtpHost = System.getenv("SMTP_HOST")?.trim()
-        val smtpPort = System.getenv("SMTP_PORT")?.trim()?.toIntOrNull() ?: 587
-        val smtpUser = System.getenv("SMTP_USER")?.trim()
-        val smtpPass = System.getenv("SMTP_PASS")?.trim()
-        val smtpFrom = System.getenv("SMTP_FROM")?.trim()?.takeIf { it.isNotBlank() }
-            ?: smtpUser?.takeIf { it.isNotBlank() }
-            ?: "noreply@kw.ac.kr"
+        val logId = UUID.randomUUID()
+        val insertOutbox: () -> Unit = {
+            EmailLogsTable.insert {
+                it[id] = logId
+                it[EmailLogsTable.recipientEmail] = cleanEmail
+                it[EmailLogsTable.professorId] = professorId
+                it[EmailLogsTable.questionId] = questionId
+                it[EmailLogsTable.subject] = subject.take(250)
+                it[EmailLogsTable.body] = body
+                it[EmailLogsTable.status] = "QUEUED"
+                it[EmailLogsTable.createdAt] = Instant.now()
+            }
+        }
 
-        var status = "SENT"
-        if (!smtpHost.isNullOrBlank()) {
-            try {
-                dispatchSmtpMail(
+        if (TransactionManager.currentOrNull() != null) {
+            insertOutbox()
+        } else {
+            transaction { insertOutbox() }
+        }
+
+        return PendingEmailJob(
+            logId = logId,
+            recipientEmail = cleanEmail,
+            subject = subject,
+            body = body
+        )
+    }
+
+    /**
+     * Dispatches a queued email job on the dedicated email worker thread pool
+     * (or isolated SMTP OS subprocess when SMTP_SUBPROCESS_ENABLED=true).
+     */
+    fun dispatchEmailAsync(job: PendingEmailJob): Job {
+        return workerManager.launchEmailTask("email-${job.logId}") {
+            val smtpHost = System.getenv("SMTP_HOST")?.trim()
+            val smtpPort = System.getenv("SMTP_PORT")?.trim()?.toIntOrNull() ?: 587
+            val smtpUser = System.getenv("SMTP_USER")?.trim()
+            val smtpPass = System.getenv("SMTP_PASS")?.trim()
+            val smtpFrom = System.getenv("SMTP_FROM")?.trim()?.takeIf { it.isNotBlank() }
+                ?: smtpUser?.takeIf { it.isNotBlank() }
+                ?: "noreply@kw.ac.kr"
+            val useSubprocess = System.getenv("SMTP_SUBPROCESS_ENABLED")?.trim()?.equals("true", ignoreCase = true) == true
+
+            var status = "SENT"
+            if (!smtpHost.isNullOrBlank()) {
+                val payload = SmtpJobPayload(
                     host = smtpHost,
                     port = smtpPort,
                     user = smtpUser,
                     pass = smtpPass,
                     from = smtpFrom,
-                    to = cleanEmail,
-                    subject = subject,
-                    body = body
+                    to = job.recipientEmail,
+                    subject = job.subject,
+                    body = job.body
                 )
-                status = "SENT_SMTP"
-                logger.info("[EmailService] Sent SMTP email to $cleanEmail (subject: $subject)")
-            } catch (e: Exception) {
-                logger.warn("[EmailService] SMTP delivery failed (${e.message}), recorded in local outbox log.")
-                status = "SENT_LOGGED"
+                try {
+                    if (useSubprocess) {
+                        val subResult = SubprocessRunner.runSmtpSubprocess(payload)
+                        if (!subResult.success) {
+                            throw RuntimeException(subResult.message ?: "SMTP subprocess failed")
+                        }
+                    } else {
+                        SmtpTransport.dispatchSmtpMail(payload)
+                    }
+                    status = "SENT_SMTP"
+                    logger.info("[EmailWorker:${Thread.currentThread().name}] Sent SMTP email to ${job.recipientEmail} (subject: ${job.subject})")
+                } catch (e: Exception) {
+                    logger.warn("[EmailWorker:${Thread.currentThread().name}] SMTP delivery failed (${e.message}), recorded in local outbox log.")
+                    status = "SENT_LOGGED"
+                }
+            } else {
+                logger.info("[EmailWorker:${Thread.currentThread().name}] Dispatched question notification email to ${job.recipientEmail} -> ${job.subject}")
             }
-        } else {
-            logger.info("[EmailService] Dispatched question notification email to $cleanEmail -> $subject")
-        }
 
-        EmailLogsTable.insert {
-            it[id] = UUID.randomUUID()
-            it[EmailLogsTable.recipientEmail] = cleanEmail
-            it[EmailLogsTable.professorId] = professorId
-            it[EmailLogsTable.questionId] = questionId
-            it[EmailLogsTable.subject] = subject.take(250)
-            it[EmailLogsTable.body] = body
-            it[EmailLogsTable.status] = status
-            it[EmailLogsTable.createdAt] = Instant.now()
+            if (!workerManager.isShuttingDown) {
+                runCatching {
+                    dbQuery(workerManager.emailDispatcher) {
+                        EmailLogsTable.update({ EmailLogsTable.id eq job.logId }) {
+                            it[EmailLogsTable.status] = status
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    /**
+     * Convenience wrapper that enqueues outbox log and dispatches asynchronously.
+     */
+    fun sendQuestionEmailInternal(
+        recipientEmail: String,
+        professorId: UUID,
+        professorName: String,
+        courseName: String,
+        questionId: UUID,
+        questionTitle: String,
+        questionContent: String,
+        category: QuestionCategory,
+        authorDisplay: String,
+        isCoProfessor: Boolean = false
+    ) {
+        val job = enqueueQuestionEmail(
+            recipientEmail = recipientEmail,
+            professorId = professorId,
+            professorName = professorName,
+            courseName = courseName,
+            questionId = questionId,
+            questionTitle = questionTitle,
+            questionContent = questionContent,
+            category = category,
+            authorDisplay = authorDisplay,
+            isCoProfessor = isCoProfessor
+        ) ?: return
+        dispatchEmailAsync(job)
     }
 
     suspend fun getEmailLogs(professorId: UUID? = null, isAdmin: Boolean = false): List<EmailLogDto> = dbQuery {
@@ -128,62 +210,5 @@ class EmailService {
                     createdAt = row[EmailLogsTable.createdAt].toString()
                 )
             }
-    }
-
-    private fun dispatchSmtpMail(
-        host: String,
-        port: Int,
-        user: String?,
-        pass: String?,
-        from: String,
-        to: String,
-        subject: String,
-        body: String
-    ) {
-        val socket = if (port == 465) {
-            SSLSocketFactory.getDefault().createSocket(host, port)
-        } else {
-            Socket(host, port)
-        }
-        socket.soTimeout = 4000
-        socket.use { sock ->
-            val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
-            val writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), true)
-
-            reader.readLine()
-            writer.println("EHLO kwangwoon.ac.kr")
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.length < 4 || line[3] != '-') break
-            }
-
-            if (!user.isNullOrBlank() && !pass.isNullOrBlank()) {
-                writer.println("AUTH LOGIN")
-                reader.readLine()
-                writer.println(Base64.getEncoder().encodeToString(user.toByteArray(Charsets.UTF_8)))
-                reader.readLine()
-                writer.println(Base64.getEncoder().encodeToString(pass.toByteArray(Charsets.UTF_8)))
-                reader.readLine()
-            }
-
-            writer.println("MAIL FROM:<$from>")
-            reader.readLine()
-            writer.println("RCPT TO:<$to>")
-            reader.readLine()
-            writer.println("DATA")
-            reader.readLine()
-
-            val encodedSubject = "=?UTF-8?B?${Base64.getEncoder().encodeToString(subject.toByteArray(Charsets.UTF_8))}?="
-            writer.println("From: <$from>")
-            writer.println("To: <$to>")
-            writer.println("Subject: $encodedSubject")
-            writer.println("MIME-Version: 1.0")
-            writer.println("Content-Type: text/plain; charset=UTF-8")
-            writer.println()
-            writer.println(body)
-            writer.println(".")
-            reader.readLine()
-            writer.println("QUIT")
-        }
     }
 }

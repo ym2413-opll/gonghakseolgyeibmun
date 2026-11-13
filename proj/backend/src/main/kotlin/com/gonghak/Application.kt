@@ -25,15 +25,25 @@ fun Application.module() {
     // 1. Initialize Database
     DatabaseFactory.init(environment.config)
 
-    // 2. Services
+    // 2. Background Worker Coordinator & Services
+    val workerManager = BackgroundWorkerManager()
     val similarityService = SimilarityService()
-    val emailService = EmailService()
-    val notificationService = NotificationService(emailService)
+    val emailService = EmailService(workerManager)
+    val notificationService = NotificationService(emailService, workerManager)
     val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
-    val aiRefineService = AiRefineService(geminiApiKey)
+    val aiRefineService = AiRefineService(geminiApiKey, workerManager)
     val userService = UserService()
-    val attachmentService = AttachmentService()
-    val questionService = QuestionService(similarityService, notificationService, aiRefineService)
+    val attachmentService = AttachmentService(workerManager = workerManager)
+    val questionService = QuestionService(similarityService, notificationService, aiRefineService, workerManager)
+
+    // Start background schedulers (DND notification release, orphan attachment cleanup)
+    workerManager.startSchedulers(notificationService, attachmentService)
+
+    // Graceful shutdown hook for worker thread pools, schedulers, and HTTP clients
+    environment.monitor.subscribe(ApplicationStopped) {
+        workerManager.shutdown()
+        aiRefineService.close()
+    }
 
     // Start interactive server console listener for admin grant commands (`admin <id>`)
     AdminConsoleManager.startConsoleListener(userService)
