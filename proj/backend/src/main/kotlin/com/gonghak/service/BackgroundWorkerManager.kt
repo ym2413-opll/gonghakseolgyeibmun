@@ -103,6 +103,29 @@ class BackgroundWorkerManager {
         logger.info("[WorkerManager] Started background worker pools (email, notification, similarity, attachment, ai) and periodic schedulers.")
     }
 
+    @Synchronized
+    fun startImapPollingScheduler(poller: EmailReplyImapPoller) {
+        if (isShuttingDown || !poller.isEnabled) return
+        val intervalSeconds = poller.config.pollIntervalSeconds
+        schedulerExecutor.scheduleWithFixedDelay({
+            if (isShuttingDown) return@scheduleWithFixedDelay
+            runBlocking {
+                runGuarded("imap-reply-poller") {
+                    val count = poller.pollOnce()
+                    if (count > 0) {
+                        logger.info("[IMAP Poller] Registered $count professor email reply(s).")
+                    }
+                }
+            }
+        }, 5L, intervalSeconds, TimeUnit.SECONDS)
+        logger.info(
+            "[IMAP Poller] Started inbound email reply polling on {}:{} ({}s interval).",
+            poller.config.host,
+            poller.config.port,
+            intervalSeconds
+        )
+    }
+
     fun shutdown(timeoutSeconds: Long = 2L) {
         if (isShuttingDown) return
         isShuttingDown = true

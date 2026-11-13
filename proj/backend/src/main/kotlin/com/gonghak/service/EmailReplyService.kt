@@ -96,17 +96,17 @@ class EmailReplyService(
     private val logger = LoggerFactory.getLogger(EmailReplyService::class.java)
 
     private val expectedReplyDomain: String? =
-        normalizeReplyDomain(replyDomainOverride ?: System.getenv("EMAIL_REPLY_DOMAIN"))
+        normalizeReplyDomain(replyDomainOverride ?: com.gonghak.config.EnvConfig.get("EMAIL_REPLY_DOMAIN"))
 
     private val expectedReplyPrefix: String =
-        normalizeReplyPrefix(replyPrefixOverride ?: System.getenv("EMAIL_REPLY_PREFIX"))
+        normalizeReplyPrefix(replyPrefixOverride ?: com.gonghak.config.EnvConfig.get("EMAIL_REPLY_PREFIX"))
 
     private val webhookSecret: String? =
-        (webhookSecretOverride ?: System.getenv("EMAIL_WEBHOOK_SECRET"))?.trim()?.takeIf { it.isNotBlank() }
+        (webhookSecretOverride ?: com.gonghak.config.EnvConfig.get("EMAIL_WEBHOOK_SECRET"))?.trim()?.takeIf { it.isNotBlank() }
 
     private val enforceSenderAuth: Boolean =
         enforceSenderAuthOverride
-            ?: System.getenv("EMAIL_ENFORCE_SENDER_AUTH")
+            ?: com.gonghak.config.EnvConfig.get("EMAIL_ENFORCE_SENDER_AUTH")
                 ?.trim()
                 ?.lowercase()
                 ?.let { it != "false" && it != "0" }

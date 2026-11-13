@@ -149,7 +149,11 @@ DB_URL이 지정되지 않으면 **PostgreSQL 호환 인메모리 H2 데이터�
 | `POST` | `/api/notifications/{id}/read` | 알림 읽음 처리 |
 | `POST` | `/api/webhooks/email-reply` | Cloudflare Email Worker 인바운드 답변 등록 웹훅 (`X-Email-Webhook-Secret`) |
 
-### 8. 이메일 답장 자동 등록 (Cloudflare Email Worker 연동)
-- 아웃바운드 알림 메일에 `Reply-To: reply+<token>@<EMAIL_REPLY_DOMAIN>` 헤더를 포함합니다.
-- Cloudflare Email Worker([proj/cloudflare-email-worker](file:///d:/gonghakseolgyeibmun/proj/cloudflare-email-worker/README.md))가 답장을 파싱해 `/api/webhooks/email-reply`로 전달하면, 백엔드가 시크릿·SPF/DKIM·토큰·교수 이메일 일치·`Message-ID` 중복 여부를 검증한 뒤 답변을 등록합니다.
-- 주요 환경변수: `EMAIL_REPLY_DOMAIN`, `EMAIL_REPLY_PREFIX`(기본 `reply`), `EMAIL_WEBHOOK_SECRET`, `EMAIL_ENFORCE_SENDER_AUTH`(기본 `true`).
+### 8. 이메일 답장 자동 등록 (IMAP 폴링 / Cloudflare Email Worker)
+- 아웃바운드 알림 메일에 `Reply-To: <prefix>+<token>@<domain>` 헤더를 포함합니다.
+- **`nip.io` 등 DNS/MX 수정이 불가능한 환경 (IMAP 폴링, 권장)**:
+  - 기존 SMTP 메일 계정(예: Gmail `SMTP_HOST=smtp.gmail.com`, `SMTP_USER`, `SMTP_PASS`)에 **`IMAP_ENABLED=true`** 만 추가하면 서버 백그라운드 스케줄러(`EmailReplyImapPoller`)가 20초 간격으로 `INBOX`의 새 답장을 읽어 답변으로 자동 등록합니다.
+  - 선택 환경변수: `IMAP_HOST`(기본 자동 추론), `IMAP_PORT`(기본 `993`), `IMAP_USER`/`IMAP_PASS`(기본 `SMTP_*` 재사용), `IMAP_FOLDER`(기본 `INBOX`), `IMAP_POLL_INTERVAL_SECONDS`(기본 `20`).
+- **커스텀 도메인 + Cloudflare Email Worker 웹훅 방식**:
+  - [proj/cloudflare-email-worker](file:///d:/gonghakseolgyeibmun/proj/cloudflare-email-worker/README.md)가 답장을 파싱해 `POST /api/webhooks/email-reply`로 전달합니다.
+  - 주요 환경변수: `EMAIL_REPLY_DOMAIN`, `EMAIL_REPLY_PREFIX`(기본 `reply`), `EMAIL_WEBHOOK_SECRET`, `EMAIL_ENFORCE_SENDER_AUTH`(기본 `true`).

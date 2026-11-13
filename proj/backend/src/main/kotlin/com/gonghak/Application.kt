@@ -217,16 +217,33 @@ fun Application.module() {
         }
 
         val appConfig = this@module.environment.config
-        val replyDomain = appConfig.propertyOrNull("emailReply.domain")?.getString()
-            ?: System.getenv("EMAIL_REPLY_DOMAIN")
-        val replyPrefix = appConfig.propertyOrNull("emailReply.prefix")?.getString()
-            ?: System.getenv("EMAIL_REPLY_PREFIX")
+        val imapConfig = EmailReplyImapConfig.from(appConfig)
+        val replyDomain = appConfig.propertyOrNull("emailReply.domain")?.getString()?.takeIf { it.isNotBlank() }
+            ?: com.gonghak.config.EnvConfig.get("EMAIL_REPLY_DOMAIN")
+            ?: imapConfig.inferredReplyDomain
+        val replyPrefix = appConfig.propertyOrNull("emailReply.prefix")?.getString()?.takeIf { it.isNotBlank() }
+            ?: com.gonghak.config.EnvConfig.get("EMAIL_REPLY_PREFIX")
+            ?: imapConfig.inferredReplyPrefix
         val webhookSecret = appConfig.propertyOrNull("emailReply.webhookSecret")?.getString()
-            ?: System.getenv("EMAIL_WEBHOOK_SECRET")
+            ?: com.gonghak.config.EnvConfig.get("EMAIL_WEBHOOK_SECRET")
         val enforceSenderAuth = appConfig.propertyOrNull("emailReply.enforceSenderAuth")?.getString()
             ?.trim()?.lowercase()?.let { it != "false" && it != "0" }
-            ?: System.getenv("EMAIL_ENFORCE_SENDER_AUTH")?.trim()?.lowercase()?.let { it != "false" && it != "0" }
+            ?: com.gonghak.config.EnvConfig.get("EMAIL_ENFORCE_SENDER_AUTH")?.trim()?.lowercase()?.let { it != "false" && it != "0" }
             ?: true
+
+        val configuredSmtpHost = com.gonghak.config.EnvConfig.get("SMTP_HOST")
+            ?: if (!com.gonghak.config.EnvConfig.get("SMTP_USER").isNullOrBlank() &&
+                !com.gonghak.config.EnvConfig.get("SMTP_PASS").isNullOrBlank()
+            ) {
+                "auto(${com.gonghak.config.EnvConfig.get("SMTP_USER")?.substringAfter("@", "")})"
+            } else {
+                null
+            }
+        if (configuredSmtpHost == null) {
+            this@module.environment.log.warn("[Email] SMTP_HOST / SMTP_USER / SMTP_PASS 환경변수가 설정되지 않아 알림 메일이 실제 발송되지 않고 DB 로그(SENT)로만 기록됩니다.")
+        } else {
+            this@module.environment.log.info("[Email] Outbound SMTP active via $configuredSmtpHost")
+        }
 
         emailService.configureReplyRouting(replyDomain, replyPrefix)
         val emailReplyService = EmailReplyService(
@@ -236,6 +253,10 @@ fun Application.module() {
             webhookSecretOverride = webhookSecret,
             enforceSenderAuthOverride = enforceSenderAuth
         )
+        val imapPoller = EmailReplyImapPoller(emailReplyService, imapConfig)
+        if (imapPoller.isEnabled) {
+            workerManager.startImapPollingScheduler(imapPoller)
+        }
 
         authRoutes(userService)
         userSettingRoutes(userService, notificationService)

@@ -1,27 +1,26 @@
 package com.gonghak.worker
 
+import com.gonghak.config.EnvConfig
+import jakarta.mail.Message
+import jakarta.mail.Session
+import jakarta.mail.internet.InternetAddress
+import jakarta.mail.internet.MimeMessage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
-import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
-import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.Base64
+import java.util.Date
+import java.util.Properties
 import java.util.concurrent.TimeUnit
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
 
 @Serializable
 data class SmtpJobPayload(
@@ -44,34 +43,12 @@ data class SmtpJobResult(
 )
 
 /**
- * Shared low-level SMTP socket client used by both the dedicated email worker thread
+ * Shared SMTP transport client used by both the dedicated email worker thread
  * and the isolated SMTP OS subprocess worker.
  */
 object SmtpTransport {
     private fun sanitizeHeaderAddress(raw: String): String =
         raw.replace(Regex("[\\r\\n\\u0000<>]"), "").trim()
-
-    private fun readSmtpResponse(reader: BufferedReader): Pair<Int, List<String>> {
-        val lines = mutableListOf<String>()
-        var code = -1
-        while (true) {
-            val line = reader.readLine() ?: break
-            lines.add(line)
-            if (line.length >= 3) {
-                code = line.substring(0, 3).toIntOrNull() ?: code
-            }
-            if (line.length < 4 || line[3] != '-') {
-                break
-            }
-        }
-        return code to lines
-    }
-
-    private fun writeCrlf(writer: PrintWriter, line: String) {
-        writer.print(line)
-        writer.print("\r\n")
-        writer.flush()
-    }
 
     internal fun dotStuffBody(body: String): String {
         val normalized = body.replace("\r\n", "\n").replace('\r', '\n')
@@ -87,88 +64,66 @@ object SmtpTransport {
             "유효한 발신자/수신자 이메일 주소가 필요합니다."
         }
 
-        val implicitTls = payload.port == 465
-        var sock: Socket = if (implicitTls) {
-            (SSLSocketFactory.getDefault().createSocket(payload.host, payload.port) as SSLSocket).apply {
-                soTimeout = 4000
-                startHandshake()
-            }
-        } else {
-            Socket(payload.host, payload.port).apply {
-                soTimeout = 4000
+        val hasAuth = !payload.user.isNullOrBlank() && !payload.pass.isNullOrBlank()
+        val implicitSsl = payload.port == 465
+        val allowPlaintext = EnvConfig.get("SMTP_ALLOW_INSECURE_PLAINTEXT")
+            ?.equals("true", ignoreCase = true) == true
+
+        val props = Properties().apply {
+            put("mail.transport.protocol", "smtp")
+            put("mail.smtp.host", payload.host)
+            put("mail.smtp.port", payload.port.toString())
+            put("mail.smtp.connectiontimeout", "10000")
+            put("mail.smtp.timeout", "15000")
+            put("mail.smtp.writetimeout", "15000")
+            put("mail.smtp.auth", hasAuth.toString())
+            if (implicitSsl) {
+                put("mail.smtp.ssl.enable", "true")
+            } else {
+                put("mail.smtp.starttls.enable", "true")
+                if (hasAuth && !allowPlaintext) {
+                    put("mail.smtp.starttls.required", "true")
+                }
             }
         }
 
-        var isTlsActive = implicitTls
-        try {
-            var reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
-            var writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), false)
+        val session = Session.getInstance(props)
+        val cleanMessageId = payload.messageId?.replace(Regex("[\\r\\n]"), "")?.trim()?.let { rawId ->
+            if (rawId.isBlank()) null
+            else if (rawId.startsWith("<") && rawId.endsWith(">")) rawId else "<$rawId>"
+        }
 
-            readSmtpResponse(reader)
-            writeCrlf(writer, "EHLO kwangwoon.ac.kr")
-            val (_, ehloCaps) = readSmtpResponse(reader)
-
-            val supportsStartTls = ehloCaps.any { it.contains("STARTTLS", ignoreCase = true) }
-            if (!isTlsActive && supportsStartTls) {
-                writeCrlf(writer, "STARTTLS")
-                val (startTlsCode, _) = readSmtpResponse(reader)
-                if (startTlsCode in 200..299) {
-                    val sslSock = (SSLSocketFactory.getDefault() as SSLSocketFactory)
-                        .createSocket(sock, payload.host, payload.port, true) as SSLSocket
-                    sslSock.soTimeout = 4000
-                    sslSock.startHandshake()
-                    sock = sslSock
-                    isTlsActive = true
-                    reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
-                    writer = PrintWriter(OutputStreamWriter(sock.getOutputStream(), Charsets.UTF_8), false)
-                    writeCrlf(writer, "EHLO kwangwoon.ac.kr")
-                    readSmtpResponse(reader)
+        val mimeMsg = object : MimeMessage(session) {
+            override fun updateMessageID() {
+                if (cleanMessageId != null) {
+                    setHeader("Message-ID", cleanMessageId)
+                } else {
+                    super.updateMessageID()
                 }
             }
-
-            if (!payload.user.isNullOrBlank() && !payload.pass.isNullOrBlank()) {
-                val allowPlaintext = System.getenv("SMTP_ALLOW_INSECURE_PLAINTEXT")
-                    ?.trim()?.equals("true", ignoreCase = true) == true
-                if (!isTlsActive && !allowPlaintext) {
-                    throw SecurityException("TLS/STARTTLS 없이 SMTP AUTH 인증을 전송할 수 없습니다.")
-                }
-                writeCrlf(writer, "AUTH LOGIN")
-                readSmtpResponse(reader)
-                writeCrlf(writer, Base64.getEncoder().encodeToString(payload.user.toByteArray(Charsets.UTF_8)))
-                readSmtpResponse(reader)
-                writeCrlf(writer, Base64.getEncoder().encodeToString(payload.pass.toByteArray(Charsets.UTF_8)))
-                readSmtpResponse(reader)
-            }
-
-            writeCrlf(writer, "MAIL FROM:<$cleanFrom>")
-            readSmtpResponse(reader)
-            writeCrlf(writer, "RCPT TO:<$cleanTo>")
-            readSmtpResponse(reader)
-            writeCrlf(writer, "DATA")
-            readSmtpResponse(reader)
-
-            val encodedSubject = "=?UTF-8?B?${Base64.getEncoder().encodeToString(payload.subject.toByteArray(Charsets.UTF_8))}?="
-            writeCrlf(writer, "From: <$cleanFrom>")
-            writeCrlf(writer, "To: <$cleanTo>")
-            val cleanReplyTo = payload.replyTo?.replace(Regex("[\\r\\n<>]"), "")?.trim()
+        }.apply {
+            setFrom(InternetAddress(cleanFrom))
+            setRecipient(Message.RecipientType.TO, InternetAddress(cleanTo))
+            val cleanReplyTo = payload.replyTo?.let(::sanitizeHeaderAddress)
             if (!cleanReplyTo.isNullOrBlank() && cleanReplyTo.contains("@")) {
-                writeCrlf(writer, "Reply-To: <$cleanReplyTo>")
+                replyTo = arrayOf(InternetAddress(cleanReplyTo))
             }
-            val cleanMessageId = payload.messageId?.replace(Regex("[\\r\\n]"), "")?.trim()
-            if (!cleanMessageId.isNullOrBlank()) {
-                val wrappedMsgId = if (cleanMessageId.startsWith("<") && cleanMessageId.endsWith(">")) cleanMessageId else "<$cleanMessageId>"
-                writeCrlf(writer, "Message-ID: $wrappedMsgId")
+            setSubject(payload.subject, Charsets.UTF_8.name())
+            setText(payload.body, Charsets.UTF_8.name())
+            sentDate = Date()
+            saveChanges()
+        }
+
+        val transport = session.getTransport("smtp")
+        try {
+            if (hasAuth) {
+                transport.connect(payload.host, payload.port, payload.user, payload.pass)
+            } else {
+                transport.connect(payload.host, payload.port, null, null)
             }
-            writeCrlf(writer, "Subject: $encodedSubject")
-            writeCrlf(writer, "MIME-Version: 1.0")
-            writeCrlf(writer, "Content-Type: text/plain; charset=UTF-8")
-            writeCrlf(writer, "")
-            writeCrlf(writer, dotStuffBody(payload.body))
-            writeCrlf(writer, ".")
-            readSmtpResponse(reader)
-            writeCrlf(writer, "QUIT")
+            transport.sendMessage(mimeMsg, mimeMsg.allRecipients)
         } finally {
-            runCatching { sock.close() }
+            runCatching { transport.close() }
         }
     }
 }

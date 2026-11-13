@@ -727,18 +727,30 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 </div>
               ) : (
                 <div className="admin-email-log-list">
-                  {emailLogs.map((log) => (
-                    <div key={log.id} className="admin-email-log-item">
-                      <div className="admin-email-log-top">
-                        <strong>To: {log.recipientEmail}</strong>
-                        <span className="status-pill success">{log.status}</span>
+                  {emailLogs.map((log) => {
+                    const statusBadge =
+                      log.status === 'SENT_SMTP'
+                        ? { cls: 'success', label: 'SMTP 발송 완료' }
+                        : log.status === 'SENT_LOGGED'
+                          ? { cls: 'danger', label: 'SMTP 발송 실패 (로그 기록)' }
+                          : log.status === 'QUEUED'
+                            ? { cls: 'warning', label: '발송 대기' }
+                            : { cls: 'warning', label: 'SMTP 미설정 (DB 로그만 기록)' };
+                    return (
+                      <div key={log.id} className="admin-email-log-item">
+                        <div className="admin-email-log-top">
+                          <strong>To: {log.recipientEmail}</strong>
+                          <span className={`status-pill ${statusBadge.cls}`} title={log.status}>
+                            {statusBadge.label}
+                          </span>
+                        </div>
+                        <div className="admin-email-log-subject">{log.subject}</div>
+                        <div className="text-xs text-muted">
+                          {log.createdAt?.slice(0, 19).replace('T', ' ')}
+                        </div>
                       </div>
-                      <div className="admin-email-log-subject">{log.subject}</div>
-                      <div className="text-xs text-muted">
-                        {log.createdAt?.slice(0, 19).replace('T', ' ')}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

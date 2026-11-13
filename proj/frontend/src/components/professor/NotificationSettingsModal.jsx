@@ -186,7 +186,17 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                   {emailLogs.map((log) => (
                     <div key={log.id} className="email-log-mini-row">
                       <span>{log.subject}</span>
-                      <span className="text-muted">→ {log.recipientEmail}</span>
+                      <span className="text-muted">
+                        → {log.recipientEmail} (
+                        {log.status === 'SENT_SMTP'
+                          ? '발송 완료'
+                          : log.status === 'SENT_LOGGED'
+                            ? '발송 실패'
+                            : log.status === 'QUEUED'
+                              ? '대기 중'
+                              : 'SMTP 미설정'}
+                        )
+                      </span>
                     </div>
                   ))}
                 </div>

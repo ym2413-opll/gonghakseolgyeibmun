@@ -126,10 +126,10 @@ class EmailService(
      * (or isolated SMTP OS subprocess when SMTP_SUBPROCESS_ENABLED=true).
      */
     @Volatile
-    private var configuredReplyDomain: String? = normalizeReplyDomain(System.getenv("EMAIL_REPLY_DOMAIN"))
+    private var configuredReplyDomain: String? = normalizeReplyDomain(com.gonghak.config.EnvConfig.get("EMAIL_REPLY_DOMAIN"))
 
     @Volatile
-    private var configuredReplyPrefix: String = normalizeReplyPrefix(System.getenv("EMAIL_REPLY_PREFIX"))
+    private var configuredReplyPrefix: String = normalizeReplyPrefix(com.gonghak.config.EnvConfig.get("EMAIL_REPLY_PREFIX"))
 
     fun configureReplyRouting(domain: String?, prefix: String? = null) {
         configuredReplyDomain = normalizeReplyDomain(domain)
@@ -138,16 +138,31 @@ class EmailService(
         }
     }
 
+    private fun resolveSmtpHost(explicitHost: String?, smtpUser: String?, smtpPass: String?): String? {
+        if (!explicitHost.isNullOrBlank()) return explicitHost
+        if (smtpUser.isNullOrBlank() || smtpPass.isNullOrBlank()) return null
+        val domain = smtpUser.substringAfter("@", "").trim().lowercase()
+        return when (domain) {
+            "gmail.com", "googlemail.com" -> "smtp.gmail.com"
+            "naver.com" -> "smtp.naver.com"
+            "daum.net", "hanmail.net" -> "smtp.daum.net"
+            "kakao.com" -> "smtp.kakao.com"
+            "outlook.com", "hotmail.com", "live.com" -> "smtp.office365.com"
+            else -> null
+        }
+    }
+
     fun dispatchEmailAsync(job: PendingEmailJob): Job {
         return workerManager.launchEmailTask("email-${job.logId}") {
-            val smtpHost = System.getenv("SMTP_HOST")?.trim()
-            val smtpPort = System.getenv("SMTP_PORT")?.trim()?.toIntOrNull() ?: 587
-            val smtpUser = System.getenv("SMTP_USER")?.trim()
-            val smtpPass = System.getenv("SMTP_PASS")?.trim()
-            val smtpFrom = System.getenv("SMTP_FROM")?.trim()?.takeIf { it.isNotBlank() }
-                ?: smtpUser?.takeIf { it.isNotBlank() }
+            val smtpUser = com.gonghak.config.EnvConfig.get("SMTP_USER")
+            val smtpPass = com.gonghak.config.EnvConfig.get("SMTP_PASS")
+            val smtpHost = resolveSmtpHost(com.gonghak.config.EnvConfig.get("SMTP_HOST"), smtpUser, smtpPass)
+            val smtpPort = com.gonghak.config.EnvConfig.get("SMTP_PORT")?.toIntOrNull() ?: 587
+            val smtpFrom = com.gonghak.config.EnvConfig.get("SMTP_FROM")
+                ?: smtpUser
                 ?: "noreply@kw.ac.kr"
-            val useSubprocess = System.getenv("SMTP_SUBPROCESS_ENABLED")?.trim()?.equals("true", ignoreCase = true) == true
+            val useSubprocess = com.gonghak.config.EnvConfig.get("SMTP_SUBPROCESS_ENABLED")
+                ?.equals("true", ignoreCase = true) == true
 
             var status = "SENT"
             if (!smtpHost.isNullOrBlank()) {
@@ -175,7 +190,10 @@ class EmailService(
                     status = "SENT_SMTP"
                     logger.info("[EmailWorker:${Thread.currentThread().name}] Sent SMTP email to ${job.recipientEmail} (subject: ${job.subject})")
                 } catch (e: Exception) {
-                    logger.warn("[EmailWorker:${Thread.currentThread().name}] SMTP delivery failed (${e.message}), recorded in local outbox log.")
+                    logger.warn(
+                        "[EmailWorker:${Thread.currentThread().name}] SMTP delivery failed for ${job.recipientEmail} via $smtpHost:$smtpPort (${e.message}), recorded in local outbox log.",
+                        e
+                    )
                     status = "SENT_LOGGED"
                 }
             } else {

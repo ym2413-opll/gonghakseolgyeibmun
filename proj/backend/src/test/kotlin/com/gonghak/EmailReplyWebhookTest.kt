@@ -8,9 +8,17 @@ import com.gonghak.models.QuestionStatus
 import com.gonghak.models.UserRole
 import com.gonghak.service.BackgroundWorkerManager
 import com.gonghak.service.EMAIL_REPLY_ABOVE_MARKER
+import com.gonghak.service.EmailReplyImapConfig
+import com.gonghak.service.EmailReplyImapPoller
 import com.gonghak.service.EmailReplyService
 import com.gonghak.service.EmailService
 import com.gonghak.service.PasswordSecurity
+import jakarta.mail.Session
+import jakarta.mail.internet.InternetAddress
+import jakarta.mail.internet.MimeBodyPart
+import jakarta.mail.internet.MimeMessage
+import jakarta.mail.internet.MimeMultipart
+import kotlinx.coroutines.runBlocking
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -378,5 +386,136 @@ class EmailReplyWebhookTest {
             )
         }
         assertEquals(HttpStatusCode.ServiceUnavailable, res.status)
+    }
+
+    @Test
+    fun testImapConfigInferenceAndMimeParsingEndToEnd() = runBlocking {
+        val imapConfig = EmailReplyImapConfig.from(
+            MapApplicationConfig(
+                "emailImap.enabled" to "true",
+                "emailImap.smtpHost" to "smtp.gmail.com",
+                "emailImap.smtpUser" to "cistus.qna.bot@gmail.com",
+                "emailImap.smtpPass" to "app-password-xyz"
+            )
+        )
+        assertTrue(imapConfig.isReadyToPoll)
+        assertEquals("imap.gmail.com", imapConfig.host)
+        assertEquals(993, imapConfig.port)
+        assertEquals("gmail.com", imapConfig.inferredReplyDomain)
+        assertEquals("cistus.qna.bot", imapConfig.inferredReplyPrefix)
+
+        // End-to-end check: IMAP-derived prefix+domain -> outbound token -> MimeMessage -> EmailReplyService answer
+        DatabaseFactory.init()
+        val workers = BackgroundWorkerManager()
+        try {
+            val emailService = EmailService(workers)
+            emailService.configureReplyRouting(
+                domain = imapConfig.inferredReplyDomain,
+                prefix = imapConfig.inferredReplyPrefix
+            )
+
+            val aiRefineService = com.gonghak.service.AiRefineService(null, workers)
+            val attachmentService = com.gonghak.service.AttachmentService(workerManager = workers)
+            val questionService = com.gonghak.service.QuestionService(
+                similarityService = com.gonghak.service.SimilarityService(),
+                notificationService = com.gonghak.service.NotificationService(emailService, workers),
+                aiRefineService = aiRefineService,
+                workerManager = workers,
+                attachmentService = attachmentService
+            )
+            val replyService = EmailReplyService(
+                questionService = questionService,
+                replyDomainOverride = imapConfig.inferredReplyDomain,
+                replyPrefixOverride = imapConfig.inferredReplyPrefix,
+                webhookSecretOverride = null,
+                enforceSenderAuthOverride = true
+            )
+
+            val qId = UUID.fromString("44444444-4444-4444-4444-444444444402")
+            val profId = UUID.fromString(assignedProfId)
+            val job = transaction {
+                emailService.enqueueQuestionEmail(
+                    recipientEmail = "kim.prof@kw.ac.kr",
+                    professorId = profId,
+                    professorName = "김교수",
+                    courseName = "공학설계입문",
+                    questionId = qId,
+                    questionTitle = "IMAP 회신 테스트 질문",
+                    questionContent = "원문 질문 내용",
+                    category = QuestionCategory.ASSIGNMENT,
+                    authorDisplay = "서영민"
+                )
+            }
+            assertNotNull(job)
+            assertTrue(job.replyTo!!.startsWith("cistus.qna.bot+") && job.replyTo!!.endsWith("@gmail.com"))
+
+            // Build a genuine multipart/alternative Korean MimeMessage matching Gmail IMAP delivery
+            val session = Session.getInstance(java.util.Properties())
+            val mimeMsg = MimeMessage(session).apply {
+                setFrom(InternetAddress("kim.prof@kw.ac.kr", "김교수", "UTF-8"))
+                addHeader("Delivered-To", job.replyTo!!)
+                setRecipient(jakarta.mail.Message.RecipientType.TO, InternetAddress(job.replyTo!!))
+                setHeader("Message-ID", "<imap-e2e-${UUID.randomUUID()}@mail.gmail.com>")
+                setHeader(
+                    "Authentication-Results",
+                    "mx.google.com; dkim=pass header.i=@kw.ac.kr; spf=pass smtp.mailfrom=kw.ac.kr; dmarc=pass"
+                )
+                setSubject("Re: ${job.subject}", "UTF-8")
+
+                val multipart = MimeMultipart("alternative")
+                val textPart = MimeBodyPart().apply {
+                    setText(
+                        "Gmail IMAP 폴링으로 답변을 정상 등록했습니다.\n\n$EMAIL_REPLY_ABOVE_MARKER\n질문 원문",
+                        "UTF-8"
+                    )
+                }
+                val htmlPart = MimeBodyPart().apply {
+                    setContent(
+                        "<div>Gmail IMAP 폴링으로 답변을 정상 등록했습니다.</div><div>$EMAIL_REPLY_ABOVE_MARKER</div>",
+                        "text/html; charset=UTF-8"
+                    )
+                }
+                multipart.addBodyPart(textPart)
+                multipart.addBodyPart(htmlPart)
+                setContent(multipart)
+                saveChanges()
+            }
+
+            val combinedTo = EmailReplyImapPoller.collectRecipientHeaders(mimeMsg)
+            assertNotNull(replyService.extractReplyToken(combinedTo))
+
+            val inboundReq = EmailReplyImapPoller.extractWebhookRequest(mimeMsg, combinedTo)
+            val result = replyService.processInboundReply(inboundReq)
+            assertTrue(result.accepted)
+            assertFalse(result.alreadyProcessed)
+            assertEquals(qId.toString(), result.questionId)
+            assertNotNull(result.answerId)
+
+            val detail = questionService.getQuestionDetail(qId, UUID.fromString(studentId))
+            assertTrue(detail.answers.any { it.content == "Gmail IMAP 폴링으로 답변을 정상 등록했습니다." })
+        } finally {
+            workers.shutdown()
+        }
+    }
+
+    @Test
+    fun testSmtpTransportFailsLoudlyOnUnreachableHostOrBadConfig() {
+        val ex = assertFailsWith<jakarta.mail.MessagingException> {
+            com.gonghak.worker.SmtpTransport.dispatchSmtpMail(
+                com.gonghak.worker.SmtpJobPayload(
+                    host = "127.0.0.1",
+                    port = 1,
+                    user = "bot@gmail.com",
+                    pass = "bad-pass",
+                    from = "bot@gmail.com",
+                    to = "prof@kw.ac.kr",
+                    subject = "한글 제목 SMTP 테스트",
+                    body = "본문",
+                    replyTo = "bot+0123456789abcdef0123456789abcdef@gmail.com",
+                    messageId = "<test-fail@gmail.com>"
+                )
+            )
+        }
+        assertNotNull(ex.message)
     }
 }

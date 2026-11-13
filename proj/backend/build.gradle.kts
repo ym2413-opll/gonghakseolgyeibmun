@@ -52,6 +52,9 @@ dependencies {
     // Logging
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
 
+    // Jakarta Mail (IMAP inbound reply polling)
+    implementation("org.eclipse.angus:jakarta.mail:2.0.3")
+
     // Testing
     testImplementation("io.ktor:ktor-server-tests-jvm:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
@@ -60,6 +63,7 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     systemProperty("gonghak.uploadDir", layout.buildDirectory.dir("test-uploads/attachments").get().asFile.absolutePath)
+    systemProperty("gonghak.disableDotEnv", "true")
 }
 
 tasks.register<Exec>("convertCourses") {
