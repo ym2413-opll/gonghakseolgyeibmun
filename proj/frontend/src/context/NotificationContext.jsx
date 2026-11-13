@@ -73,6 +73,11 @@ export function NotificationProvider({ children }) {
   }, [profSettings?.dndEnabled, profSettings?.dndStartTime, profSettings?.dndEndTime]);
 
   const loadNotifications = useCallback(async (triggerBrowser = false) => {
+    if (!currentUser?.id) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
     try {
       const list = await api.getNotifications(currentUser.id);
       const safeList = Array.isArray(list) ? list : [];
@@ -102,9 +107,10 @@ export function NotificationProvider({ children }) {
       setNotifications([]);
       setUnreadCount(0);
     }
-  }, [currentUser.id, isProfessor, isCurrentlyInDnd]);
+  }, [currentUser?.id, isProfessor, isCurrentlyInDnd]);
 
   const loadProfSettings = useCallback(async () => {
+    if (!currentUser?.id) return;
     try {
       const s = await api.getSettings(currentUser.id);
       if (s && typeof s === 'object') {
@@ -120,19 +126,25 @@ export function NotificationProvider({ children }) {
     } catch (err) {
       console.error('Failed to load professor settings', err);
     }
-  }, [currentUser.id]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     // 유저 변경 시 이미 발송한 알림 목록 초기화
     notifiedIdsRef.current = new Set();
+    if (!currentUser?.id) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setProfSettings(DEFAULT_PROF_SETTINGS);
+      return;
+    }
     loadNotifications(false);
     if (isProfessor) {
       loadProfSettings();
     }
-  }, [currentUser.id, isProfessor, loadNotifications, loadProfSettings]);
+  }, [currentUser?.id, isProfessor, loadNotifications, loadProfSettings]);
 
   const markAsRead = async (id) => {
-    await api.markNotificationRead(id);
+    await api.markNotificationRead(id, currentUser?.id);
     setNotifications(prev =>
       prev.map(n => (n.id === id ? { ...n, isRead: true } : n))
     );
@@ -141,7 +153,7 @@ export function NotificationProvider({ children }) {
 
   const markAllAsRead = async () => {
     for (const n of notifications.filter(x => !x.isRead)) {
-      await api.markNotificationRead(n.id);
+      await api.markNotificationRead(n.id, currentUser?.id);
     }
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     setUnreadCount(0);
@@ -150,7 +162,9 @@ export function NotificationProvider({ children }) {
   const updateProfSettings = async (partialSettings) => {
     const updated = { ...profSettings, ...partialSettings };
     setProfSettings(updated);
-    await api.updateSettings(currentUser.id, updated);
+    if (currentUser?.id) {
+      await api.updateSettings(currentUser.id, updated);
+    }
   };
 
   return (

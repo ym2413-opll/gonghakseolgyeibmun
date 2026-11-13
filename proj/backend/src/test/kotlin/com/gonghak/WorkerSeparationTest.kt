@@ -169,5 +169,15 @@ class WorkerSeparationTest {
             UsersTable.select { UsersTable.id eq legacyUserId }.singleOrNull()?.get(UsersTable.createdAt)
         }
         assertNotNull(migratedCreatedAt, "Legacy user created_at NULL should be backfilled on DatabaseFactory.init()")
+
+        // Also verify adding a missing NOT NULL created_at column onto a non-empty table succeeds
+        transaction {
+            exec("ALTER TABLE users DROP COLUMN created_at")
+        }
+        DatabaseFactory.init()
+        val reAddedCreatedAt = transaction {
+            UsersTable.select { UsersTable.id eq legacyUserId }.singleOrNull()?.get(UsersTable.createdAt)
+        }
+        assertNotNull(reAddedCreatedAt, "Missing NOT NULL created_at column should be added with DEFAULT CURRENT_TIMESTAMP")
     }
 }

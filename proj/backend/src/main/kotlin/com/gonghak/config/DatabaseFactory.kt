@@ -48,7 +48,7 @@ object DatabaseFactory {
             SchemaUtils.create(*tables)
         }
 
-        // 2. Backfill legacy nullable timestamps so PostgreSQL NOT NULL alterations never fail
+        // 2. Backfill legacy nullable timestamps only when the column already exists
         val timestampTables = listOf(
             "users", "departments", "questions", "answers",
             "notifications", "attachments", "email_logs"
@@ -56,7 +56,15 @@ object DatabaseFactory {
         for (tableName in timestampTables) {
             runCatching {
                 transaction {
-                    exec("UPDATE $tableName SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+                    var hasCreatedAt = false
+                    exec(
+                        "SELECT 1 FROM information_schema.columns WHERE LOWER(table_name) = '$tableName' AND LOWER(column_name) = 'created_at'"
+                    ) { rs ->
+                        if (rs.next()) hasCreatedAt = true
+                    }
+                    if (hasCreatedAt) {
+                        exec("UPDATE $tableName SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+                    }
                 }
             }
         }
@@ -69,7 +77,16 @@ object DatabaseFactory {
             }
         }.getOrElse { emptyList() }
 
-        for (stmt in ddlStatements) {
+        for (rawStmt in ddlStatements) {
+            val stmt = if (
+                rawStmt.contains(" ADD ", ignoreCase = true) &&
+                rawStmt.contains("TIMESTAMP NOT NULL", ignoreCase = true) &&
+                !rawStmt.contains(" DEFAULT ", ignoreCase = true)
+            ) {
+                "$rawStmt DEFAULT CURRENT_TIMESTAMP"
+            } else {
+                rawStmt
+            }
             runCatching {
                 transaction { exec(stmt) }
             }.onFailure {
