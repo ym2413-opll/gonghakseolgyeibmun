@@ -19,7 +19,7 @@ import {
 
 const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const { settings, updateAllSettings } = useTheme();
-  const { currentUser, allCourses, refreshCurrentUser } = useAuth();
+  const { currentUser, allCourses, updateUserCourses } = useAuth();
 
   const [dndEnabled, setDndEnabled] = useState(true);
   const [dndStartTime, setDndStartTime] = useState('22:00');
@@ -90,7 +90,7 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
       return;
     }
     try {
-      await api.updateUserCourses(selectedCourseIds);
+      await updateUserCourses(selectedCourseIds);
       await updateAllSettings({
         dndEnabled,
         dndStartTime,
@@ -100,7 +100,6 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
         notificationEmail: notificationEmail.trim(),
         activeCategories
       });
-      await refreshCurrentUser();
       if (onCoursesUpdated) await onCoursesUpdated();
       setSavedToast(true);
       setTimeout(() => {

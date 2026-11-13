@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
 import CoursePicker from './CoursePicker';
 import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save } from 'lucide-react';
 
@@ -15,7 +14,7 @@ const FONT_SIZE_OPTIONS = [
 
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const { theme, fontSize, updateTheme, updateFontSize } = useTheme();
-  const { currentUser, isStudent, isProfessor, allCourses, refreshCurrentUser } = useAuth();
+  const { currentUser, isStudent, isProfessor, allCourses, updateUserCourses } = useAuth();
 
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
   const [courseSaving, setCourseSaving] = useState(false);
@@ -27,8 +26,13 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
       ? currentUser.courses.map((c) => c.id).filter(Boolean)
       : [];
     setSelectedCourseIds(initialIds);
-    setCourseStatus({ type: '', text: '' });
   }, [isOpen, currentUser?.courses]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setCourseStatus({ type: '', text: '' });
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -47,8 +51,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
     setCourseSaving(true);
     setCourseStatus({ type: '', text: '' });
     try {
-      await api.updateUserCourses(selectedCourseIds);
-      await refreshCurrentUser();
+      await updateUserCourses(selectedCourseIds);
       if (onCoursesUpdated) await onCoursesUpdated();
       setCourseStatus({
         type: 'success',

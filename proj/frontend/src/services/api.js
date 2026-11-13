@@ -45,9 +45,11 @@ function safeSetStorage(key, value) {
 }
 
 function getAuthHeaders() {
-  const token = localStorage.getItem(STORAGE_KEY_TOKEN) || '';
+  const token = (localStorage.getItem(STORAGE_KEY_TOKEN) || '').trim();
   const headers = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (token && token !== 'null' && token !== 'undefined') {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   return headers;
 }
 
@@ -773,7 +775,14 @@ export const api = {
               return updatedUser;
             }
             const refreshed = await this.getUser(getCurrentUserId());
-            if (refreshed) return refreshed;
+            if (refreshed?.id) {
+              const merged = normalizeUserObject(
+                { ...refreshed, courses: updatedCourses },
+                updatedCourses
+              );
+              this.saveSession(merged);
+              return merged;
+            }
           } else if (typeof body.data === 'object' && body.data.id) {
             const updatedCourses = Array.isArray(body.data.courses)
               ? body.data.courses.map(mapCourseDto)
@@ -946,6 +955,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 1500);
         const res = await fetch(`${API_BASE_URL}/settings?userId=${uid}`, {
           headers: getAuthHeaders(uid),
+          credentials: 'include',
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -987,6 +997,7 @@ export const api = {
             'Content-Type': 'application/json',
             ...getAuthHeaders(uid)
           },
+          credentials: 'include',
           body: JSON.stringify({ userId: uid, ...newSettings }),
           signal: controller.signal
         });
@@ -1017,7 +1028,8 @@ export const api = {
     if (USE_REMOTE_BACKEND && uid) {
       try {
         const res = await fetch(`${API_BASE_URL}/notifications/emails`, {
-          headers: getAuthHeaders(uid)
+          headers: getAuthHeaders(uid),
+          credentials: 'include'
         });
         if (res.ok) {
           const body = await res.json();
@@ -1042,6 +1054,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 1800);
         const res = await fetch(`${API_BASE_URL}/questions`, {
           headers: getAuthHeaders(uid),
+          credentials: 'include',
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -1076,6 +1089,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 1800);
         const res = await fetch(`${API_BASE_URL}/questions/${questionId}`, {
           headers: getAuthHeaders(uid),
+          credentials: 'include',
           signal: controller.signal
         });
         clearTimeout(timeoutId);

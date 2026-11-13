@@ -81,6 +81,18 @@ export const AuthProvider = ({ children }) => {
     return result.user;
   };
 
+  const updateUserCourses = useCallback(async (courseIds) => {
+    const updatedUser = await api.updateUserCourses(courseIds);
+    if (updatedUser && updatedUser.id) {
+      setCurrentUser((prev) => {
+        const merged = { ...(prev || {}), ...updatedUser };
+        api.saveSession(merged);
+        return merged;
+      });
+    }
+    return updatedUser;
+  }, []);
+
   const logout = () => {
     void api.logout();
     setCurrentUser(null);
@@ -109,7 +121,8 @@ export const AuthProvider = ({ children }) => {
         register,
         logout,
         refreshCatalog,
-        refreshCurrentUser
+        refreshCurrentUser,
+        updateUserCourses
       }}
     >
       {children}

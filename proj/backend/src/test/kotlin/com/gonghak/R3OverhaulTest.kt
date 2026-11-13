@@ -672,6 +672,8 @@ class R3OverhaulTest {
 
         val profUpdateRes = client.put("/api/courses/my") {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+            header(HttpHeaders.Origin, "https://cistus.example.com")
+            header("Sec-Fetch-Site", "same-origin")
             contentType(ContentType.Application.Json)
             setBody(UpdateUserCoursesRequest(courseIds = listOf(allCourse.id)))
         }
@@ -679,5 +681,22 @@ class R3OverhaulTest {
         val profCourses = profUpdateRes.body<ApiResponse<List<CourseDto>>>().data!!
         assertEquals(listOf(allCourse.id), profCourses.map { it.id })
         assertTrue(profCourses.first().professors.any { it.id == adminReg.user.id })
+
+        // 6. Verify session remains valid via /api/auth/me and /api/courses after course updates
+        val stuMeAfter = client.get("/api/auth/me") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }
+        assertEquals(HttpStatusCode.OK, stuMeAfter.status)
+        val stuMeUser = stuMeAfter.body<ApiResponse<UserDto>>().data!!
+        assertEquals(stuAuth.user.id, stuMeUser.id)
+        assertEquals(setOf(deptCourse.id, allCourse.id), stuMeUser.courses.map { it.id }.toSet())
+
+        val profMeAfter = client.get("/api/auth/me") {
+            header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
+        }
+        assertEquals(HttpStatusCode.OK, profMeAfter.status)
+        val profMeUser = profMeAfter.body<ApiResponse<UserDto>>().data!!
+        assertEquals(adminReg.user.id, profMeUser.id)
+        assertEquals(listOf(allCourse.id), profMeUser.courses.map { it.id })
     }
 }

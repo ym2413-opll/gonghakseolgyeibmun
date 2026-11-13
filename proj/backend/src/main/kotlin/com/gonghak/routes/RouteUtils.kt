@@ -104,9 +104,13 @@ fun ApplicationCall.getVerifiedTokenClaims(): PasswordSecurity.VerifiedAuthToken
     } else {
         null
     }
-    val rawToken = bearerToken ?: request.cookies[AUTH_COOKIE_NAME]?.trim()?.takeIf { it.isNotEmpty() }
+    val bearerClaims = bearerToken?.let { PasswordSecurity.verifyAuthTokenClaims(it) }
+    if (bearerClaims != null) {
+        return bearerClaims
+    }
+    val cookieToken = request.cookies[AUTH_COOKIE_NAME]?.trim()?.takeIf { it.isNotEmpty() }
         ?: return null
-    return PasswordSecurity.verifyAuthTokenClaims(rawToken)
+    return PasswordSecurity.verifyAuthTokenClaims(cookieToken)
 }
 
 fun ApplicationCall.getVerifiedTokenUserId(): UUID? = getVerifiedTokenClaims()?.userId
