@@ -10,6 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [allCourses, setAllCourses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [authModalMode, setAuthModalMode] = useState('prompt'); // 'prompt' | 'login' | 'register'
+  const [showHelpOnboarding, setShowHelpOnboarding] = useState(false);
 
   const refreshCatalog = useCallback(async () => {
     try {
@@ -118,8 +119,13 @@ export const AuthProvider = ({ children }) => {
   const register = async (payload) => {
     const result = await api.register(payload);
     setCurrentUser(result.user);
+    setShowHelpOnboarding(true);
     await refreshCatalog();
     return result.user;
+  };
+
+  const dismissHelpOnboarding = () => {
+    setShowHelpOnboarding(false);
   };
 
   const updateUserCourses = useCallback(async (courseIds) => {
@@ -159,6 +165,8 @@ export const AuthProvider = ({ children }) => {
         allCourses,
         authModalMode,
         setAuthModalMode,
+        showHelpOnboarding,
+        dismissHelpOnboarding,
         login,
         register,
         logout,

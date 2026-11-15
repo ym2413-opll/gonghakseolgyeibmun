@@ -6,6 +6,7 @@ import { useAuth } from './AuthContext';
 const ThemeContext = createContext(null);
 
 const VALID_THEMES = ['light', 'dark', 'green', 'green-dark'];
+const VALID_HELP_LEVELS = ['NONE', 'SOME', 'ALL'];
 
 export const ThemeProvider = ({ children }) => {
   const { currentUser } = useAuth();
@@ -15,6 +16,13 @@ export const ThemeProvider = ({ children }) => {
   });
   const [fontSize, setFontSize] = useState(() => {
     return localStorage.getItem('prof_qa_font_size') || 'md';
+  });
+  const [helpLevel, setHelpLevel] = useState(() => {
+    const saved = (localStorage.getItem('prof_qa_help_level') || 'SOME').toUpperCase();
+    return VALID_HELP_LEVELS.includes(saved) ? saved : 'SOME';
+  });
+  const [exhibitionMode, setExhibitionMode] = useState(() => {
+    return localStorage.getItem('prof_qa_exhibition_mode') === 'true';
   });
   const [settings, setSettings] = useState(null);
 
@@ -37,6 +45,23 @@ export const ThemeProvider = ({ children }) => {
         if (userSettings.fontSize) {
           setFontSize(userSettings.fontSize);
           localStorage.setItem('prof_qa_font_size', userSettings.fontSize);
+        }
+        if (userSettings.helpLevel) {
+          const upperHelp = String(userSettings.helpLevel).toUpperCase();
+          if (VALID_HELP_LEVELS.includes(upperHelp)) {
+            setHelpLevel(upperHelp);
+            localStorage.setItem('prof_qa_help_level', upperHelp);
+          }
+        }
+        if (typeof userSettings.exhibitionMode === 'boolean') {
+          const hasLocalPref = localStorage.getItem('prof_qa_exhibition_mode') !== null;
+          if (userSettings.exhibitionMode) {
+            setExhibitionMode(true);
+            localStorage.setItem('prof_qa_exhibition_mode', 'true');
+          } else if (!hasLocalPref) {
+            setExhibitionMode(false);
+            localStorage.setItem('prof_qa_exhibition_mode', 'false');
+          }
         }
       }
     }
@@ -92,6 +117,27 @@ export const ThemeProvider = ({ children }) => {
     }
   };
 
+  const updateHelpLevel = async (newLevel) => {
+    const upper = String(newLevel || 'SOME').toUpperCase();
+    const normalized = VALID_HELP_LEVELS.includes(upper) ? upper : 'SOME';
+    setHelpLevel(normalized);
+    localStorage.setItem('prof_qa_help_level', normalized);
+    if (currentUser?.id) {
+      const updated = await api.updateSettings(currentUser.id, { helpLevel: normalized });
+      setSettings(updated);
+    }
+  };
+
+  const updateExhibitionMode = async (enabled) => {
+    const normalized = Boolean(enabled);
+    setExhibitionMode(normalized);
+    localStorage.setItem('prof_qa_exhibition_mode', String(normalized));
+    if (currentUser?.id) {
+      const updated = await api.updateSettings(currentUser.id, { exhibitionMode: normalized });
+      setSettings(updated);
+    }
+  };
+
   const updateAllSettings = async (partialSettings) => {
     if (partialSettings.theme && VALID_THEMES.includes(partialSettings.theme)) {
       setTheme(partialSettings.theme);
@@ -100,6 +146,17 @@ export const ThemeProvider = ({ children }) => {
     if (partialSettings.fontSize) {
       setFontSize(partialSettings.fontSize);
       localStorage.setItem('prof_qa_font_size', partialSettings.fontSize);
+    }
+    if (partialSettings.helpLevel) {
+      const upper = String(partialSettings.helpLevel).toUpperCase();
+      if (VALID_HELP_LEVELS.includes(upper)) {
+        setHelpLevel(upper);
+        localStorage.setItem('prof_qa_help_level', upper);
+      }
+    }
+    if (typeof partialSettings.exhibitionMode === 'boolean') {
+      setExhibitionMode(partialSettings.exhibitionMode);
+      localStorage.setItem('prof_qa_exhibition_mode', String(partialSettings.exhibitionMode));
     }
     if (currentUser?.id) {
       const updated = await api.updateSettings(currentUser.id, partialSettings);
@@ -118,12 +175,16 @@ export const ThemeProvider = ({ children }) => {
         isDark,
         isGreen,
         fontSize,
+        helpLevel,
+        exhibitionMode,
         settings,
         toggleColorScheme,
         toggleBrightness,
         toggleTheme,
         updateTheme,
         updateFontSize,
+        updateHelpLevel,
+        updateExhibitionMode,
         updateAllSettings
       }}
     >

@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
 import QuestionCard from './QuestionCard';
+import HelpBubble from '../common/HelpBubble';
 import {
   Search,
   Plus,
@@ -81,11 +82,25 @@ const QuestionList = ({
             <h2 className="forum-board-title">질문 게시판</h2>
           </div>
         </div>
-        <button type="button" className="btn btn-primary btn-new-topic" onClick={onOpenNewQuestion}>
-          <Plus size={18} />
-          <span>새 질문 작성</span>
-        </button>
+        <HelpBubble
+          tier="SOME"
+          mode="floating"
+          placement="bottom-end"
+          text="새 질문을 작성해요."
+        >
+          <button type="button" className="btn btn-primary btn-new-topic" onClick={onOpenNewQuestion}>
+            <Plus size={18} />
+            <span>새 질문 작성</span>
+          </button>
+        </HelpBubble>
       </div>
+
+      <HelpBubble
+        tier="SOME"
+        mode="inline"
+        text="수강 중인 과목별 질문을 모아봐요."
+        className="mb-help-bubble"
+      />
 
       {/* 과목 탭 필터 */}
       <div className="course-tabs-bar">

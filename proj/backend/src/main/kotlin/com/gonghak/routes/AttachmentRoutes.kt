@@ -20,10 +20,19 @@ fun Route.attachmentRoutes(
     attachmentService: AttachmentService,
     userService: UserService = UserService()
 ) {
+    val uploadRateLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000L)
+
     route("/api/attachments") {
         // 1. 파일 업로드 (인증 필수, 보안 검사 및 이미지 압축)
         post("/upload") {
             val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!uploadRateLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "파일 업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+                )
+                return@post
+            }
             val uploaderId = UUID.fromString(user.id)
 
             var uploadedDto: com.gonghak.dto.AttachmentDto? = null

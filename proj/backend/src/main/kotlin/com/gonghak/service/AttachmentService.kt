@@ -15,6 +15,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 import java.time.Instant
@@ -127,7 +128,7 @@ class AttachmentService(
                 }
             }
 
-            val targetPath = Paths.get(uploadDirPath, safeSavedName)
+            val targetPath = resolveSafeStoragePath(safeSavedName)
             Files.write(
                 targetPath,
                 processedBytes,
@@ -139,7 +140,7 @@ class AttachmentService(
             Triple(processedBytes, compressedFlag, ratio)
         }
 
-        val resolvedMimeType = declaredContentType ?: getMimeTypeByExtension(extension)
+        val resolvedMimeType = getMimeTypeByExtension(extension)
 
         // 7. DB 기록
         val created = dbQuery(workerManager.attachmentDispatcher) {
@@ -390,8 +391,8 @@ class AttachmentService(
             }
         } else if (!isAdmin) {
             val qRow = QuestionsTable.select { QuestionsTable.id eq linkedQuestionId }.singleOrNull()
-            if (qRow != null && qRow[QuestionsTable.isHidden]) {
-                throw IllegalStateException("관리자에 의해 가려진 게시물의 첨부파일에 접근할 수 없습니다.")
+            if (qRow == null || qRow[QuestionsTable.isHidden] || qRow[QuestionsTable.isDeletedByAuthor]) {
+                throw IllegalStateException("관리자에 의해 가려졌거나 삭제된 게시물의 첨부파일에 접근할 수 없습니다.")
             }
         }
 
@@ -407,10 +408,19 @@ class AttachmentService(
         rowToAttachmentFilePair(row)
     }
 
+    private fun resolveSafeStoragePath(fileName: String): Path {
+        val baseDir = Paths.get(uploadDirPath).toAbsolutePath().normalize()
+        val resolved = baseDir.resolve(fileName).normalize()
+        if (!resolved.startsWith(baseDir) || resolved == baseDir) {
+            throw IllegalArgumentException("유효하지 않은 파일 저장 경로입니다.")
+        }
+        return resolved
+    }
+
     private fun rowToAttachmentFilePair(row: ResultRow): Pair<AttachmentDto, File> {
         val idStr = row[AttachmentsTable.id].value.toString()
         val savedName = row[AttachmentsTable.savedName]
-        val file = File(uploadDirPath, savedName)
+        val file = resolveSafeStoragePath(savedName).toFile()
 
         val dto = AttachmentDto(
             id = idStr,
@@ -457,7 +467,7 @@ class AttachmentService(
         if (savedNames.isEmpty()) return
         withContext(workerManager.attachmentDispatcher) {
             savedNames.forEach { savedName ->
-                runCatching { Files.deleteIfExists(Paths.get(uploadDirPath, savedName)) }
+                runCatching { Files.deleteIfExists(resolveSafeStoragePath(savedName)) }
             }
         }
     }

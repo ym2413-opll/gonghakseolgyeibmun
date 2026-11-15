@@ -17,7 +17,7 @@ const STORAGE_KEY_NOTIFS = 'prof_qa_notifications_v3';
 const STORAGE_KEY_USERS = 'prof_qa_registered_users_v3';
 const STORAGE_KEY_SESSION = 'prof_qa_session_user_v3';
 const STORAGE_KEY_TOKEN = 'prof_qa_auth_token_v3';
-const STORAGE_KEY_DEPARTMENTS = 'prof_qa_departments_v3';
+const STORAGE_KEY_DEPARTMENTS = 'prof_qa_departments_v4';
 const STORAGE_KEY_COURSES = 'prof_qa_courses_v3';
 const STORAGE_KEY_EMAIL_LOGS = 'prof_qa_email_logs_v3';
 
@@ -214,6 +214,66 @@ export const api = {
     }
   },
 
+  async getNextStudentId({ year = 2026, department = '', isForeign = false, random = false } = {}) {
+    const safeYear = Math.min(2099, Math.max(1900, Number(year) || 2026));
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const params = new URLSearchParams({
+          year: String(safeYear),
+          department: department || '',
+          isForeign: String(Boolean(isForeign)),
+          random: String(Boolean(random))
+        });
+        const res = await fetch(`${API_BASE_URL}/auth/next-student-id?${params.toString()}`, {
+          credentials: 'include'
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body?.data) {
+          return body.data;
+        }
+      } catch (e) {
+        console.warn('[API] Remote getNextStudentId fallback:', e);
+      }
+    }
+
+    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
+    const deptObj = depts.find(d => d.name === department) || INITIAL_DEPARTMENTS.find(d => d.name === department);
+    const deptCode = /^[1-9](?:0[1-9]|[1-9]\d)$/.test(String(deptObj?.code || '')) ? String(deptObj.code) : '101';
+    const prefix = `${safeYear}${deptCode}`;
+    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
+    const serials = localUsers
+      .map(u => String(u.identifier || ''))
+      .filter(id => id.length === 10 && id.startsWith(prefix))
+      .map(id => Number(id.slice(7, 10)))
+      .filter(n => !Number.isNaN(n));
+    let nextNum;
+    if (random) {
+      const start = isForeign ? 501 : 1;
+      const end = isForeign ? 999 : 500;
+      const usedSet = new Set(serials);
+      const candidates = [];
+      for (let i = start; i <= end; i += 1) {
+        if (!usedSet.has(i)) candidates.push(i);
+      }
+      if (candidates.length === 0) {
+        throw new Error('사용 가능한 학번 순번이 남아있지 않습니다.');
+      }
+      nextNum = candidates[Math.floor(Math.random() * candidates.length)];
+    } else {
+      nextNum = isForeign
+        ? Math.max(500, ...serials.filter(n => n >= 501 && n <= 999)) + 1
+        : Math.max(0, ...serials.filter(n => n >= 1 && n <= 500)) + 1;
+    }
+    const serial = String(nextNum).padStart(3, '0');
+    return {
+      studentId: `${prefix}${serial}`,
+      year: safeYear,
+      departmentCode: deptCode,
+      serial,
+      isForeign: Boolean(isForeign)
+    };
+  },
+
   async logout(options = {}) {
     const headers = getAuthHeaders();
     localStorage.removeItem(STORAGE_KEY_SESSION);
@@ -236,16 +296,17 @@ export const api = {
     const roleUpper = (payload.role || 'STUDENT').toUpperCase();
     const rawUsername =
       roleUpper === 'STUDENT' && (!payload.username || !payload.username.trim())
-        ? payload.identifier || ''
+        ? (payload.identifier && payload.identifier !== 'AUTO' ? payload.identifier : '')
         : payload.username || '';
     const cleanUsername = rawUsername.trim().toLowerCase();
     const cleanName = (payload.name || '').trim();
     const cleanDept = (payload.department || '').trim();
+    const rawIdentifier = (payload.identifier || '').trim();
+    const isAutoId = roleUpper === 'STUDENT' && (!rawIdentifier || rawIdentifier.toUpperCase() === 'AUTO');
 
     if (roleUpper === 'STUDENT') {
-      const cleanSid = (payload.identifier || cleanUsername).trim();
-      if (!/^\d{6,12}$/.test(cleanSid)) {
-        throw new Error('학번은 6~12자리 숫자로 입력해주세요.');
+      if (!isAutoId && !/^(19\d\d|20\d\d)[1-9](?:0[1-9]|[1-9]\d)(?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(rawIdentifier)) {
+        throw new Error('학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
       }
     } else if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUsername)) {
       throw new Error('아이디(ID)는 영문, 숫자, 밑줄(_) 조합 3~30자로 입력해주세요.');
@@ -274,7 +335,9 @@ export const api = {
             role: roleUpper,
             name: cleanName,
             department: cleanDept,
-            identifier: payload.identifier?.trim() || null,
+            identifier: isAutoId ? 'AUTO' : rawIdentifier || null,
+            entryYear: payload.entryYear ? Number(payload.entryYear) : null,
+            isForeign: Boolean(payload.isForeign),
             email: payload.email?.trim() || null,
             courseIds: Array.isArray(payload.courseIds) ? payload.courseIds : [],
             courseNames: Array.isArray(payload.courseNames) ? payload.courseNames : []
@@ -305,12 +368,12 @@ export const api = {
 
     // 로컬 암호화 스토리지 폴백
     const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    if (localUsers.some(u => u.username === cleanUsername || (u.role === 'student' && u.identifier === cleanUsername))) {
+    if (cleanUsername && localUsers.some(u => u.username === cleanUsername || (u.role === 'student' && u.identifier === cleanUsername))) {
       throw new Error(roleUpper === 'STUDENT' ? '이미 가입된 학번입니다.' : '이미 사용 중인 아이디(ID)입니다.');
     }
 
     const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    const deptObj = depts.find(d => d.name === cleanDept);
+    const deptObj = depts.find(d => d.name === cleanDept) || INITIAL_DEPARTMENTS.find(d => d.name === cleanDept);
     const shortDept = deptObj?.shortName || cleanDept.replace(/학과|학부|전공/g, '').slice(0, 3);
 
     let identifier = '';
@@ -318,25 +381,35 @@ export const api = {
     let displayTag = '';
 
     if (roleUpper === 'STUDENT') {
-      const sid = (payload.identifier || '').trim();
-      if (!/^\d{6,12}$/.test(sid)) {
-        throw new Error('학번은 6~12자리 숫자로 입력해주세요. (예: 2026202001)');
+      let sid = rawIdentifier;
+      if (isAutoId) {
+        const preview = await this.getNextStudentId({
+          year: payload.entryYear || 2026,
+          department: cleanDept,
+          isForeign: Boolean(payload.isForeign)
+        });
+        sid = preview.studentId;
+      }
+      if (!/^(19\d\d|20\d\d)[1-9](?:0[1-9]|[1-9]\d)(?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(sid)) {
+        throw new Error('학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
       }
       if (localUsers.some(u => u.role === 'student' && u.identifier === sid)) {
         throw new Error('이미 가입된 학번입니다. 중복 가입이 불가능합니다.');
       }
       identifier = sid;
-      const yearPrefix = sid.length >= 4 ? sid.slice(2, 4) : '26';
+      const yearPrefix = sid.slice(2, 4);
       displayTag = `${yearPrefix}_${shortDept}_${cleanName}`;
     } else {
       const rawEmail = (payload.email || '').trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
-        throw new Error('유효한 이메일 주소를 입력해주세요.');
+      if (rawEmail) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+          throw new Error('유효한 이메일 주소를 입력해주세요.');
+        }
+        if (localUsers.some(u => u.email && u.email.toLowerCase() === rawEmail)) {
+          throw new Error('이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.');
+        }
+        email = rawEmail;
       }
-      if (localUsers.some(u => u.email && u.email.toLowerCase() === rawEmail)) {
-        throw new Error('이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.');
-      }
-      email = rawEmail;
       identifier = `P${Date.now().toString().slice(-6)}`;
       displayTag = `${cleanDept} ${cleanName}`;
     }
@@ -351,7 +424,7 @@ export const api = {
 
     const newUser = {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      username: cleanUsername,
+      username: cleanUsername || identifier,
       passwordHash,
       role: roleUpper === 'PROFESSOR' ? 'professor' : 'student',
       name: cleanName,
@@ -383,11 +456,12 @@ export const api = {
     settingsMap[newUser.id] = {
       theme: 'light',
       fontSize: 'md',
+      helpLevel: 'SOME',
       dndEnabled: false,
       dndStartTime: '22:00',
       dndEndTime: '08:00',
       coProfNotification: true,
-      emailEnabled: true,
+      emailEnabled: Boolean(email),
       notificationEmail: email || '',
       activeCategories: { grade: true, assignment: true, lecture: true }
     };
@@ -698,11 +772,50 @@ export const api = {
     if (depts.some(d => d.name === deptPayload.name?.trim())) {
       throw new Error('이미 등록된 학과명입니다.');
     }
+    const collegeName = (deptPayload.college || '광운대학교').trim();
+    const knownCollegeDigits = {
+      '인공지능융합대학': 1,
+      '전자정보공과대학': 2,
+      '공과대학': 3,
+      '자연과학대학': 4,
+      '인문사회과학대학': 5,
+      '경영대학': 6,
+      '정책법학대학': 7,
+      '참빛인재대학': 8
+    };
+    let assignedCode = (deptPayload.code || '').trim();
+    if (assignedCode) {
+      if (!/^[1-9](?:0[1-9]|[1-9]\d)$/.test(assignedCode)) {
+        throw new Error('학과 고유번호는 (단과대 1~9)(학과 01~99) 형식의 3자리 숫자여야 합니다.');
+      }
+      if (depts.some(d => String(d.code) === assignedCode)) {
+        throw new Error(`이미 사용 중인 학과 고유번호입니다: ${assignedCode}`);
+      }
+    } else {
+      const existingCollegeDept = depts.find(
+        d => d.college === collegeName && /^[1-9](?:0[1-9]|[1-9]\d)$/.test(String(d.code || ''))
+      );
+      const usedDigits = new Set(
+        depts
+          .map(d => String(d.code || ''))
+          .filter(c => /^[1-9]\d{2}$/.test(c))
+          .map(c => Number(c[0]))
+      );
+      const collegeDigit = knownCollegeDigits[collegeName]
+        ?? (existingCollegeDept ? Number(String(existingCollegeDept.code)[0]) : null)
+        ?? ([1, 2, 3, 4, 5, 6, 7, 8, 9].find(n => !usedDigits.has(n)) ?? 9);
+      const maxDeptIdx = depts
+        .map(d => String(d.code || ''))
+        .filter(c => /^[1-9](?:0[1-9]|[1-9]\d)$/.test(c) && Number(c[0]) === collegeDigit)
+        .reduce((max, c) => Math.max(max, Number(c.slice(1))), 0);
+      assignedCode = `${collegeDigit}${String(Math.min(99, maxDeptIdx + 1)).padStart(2, '0')}`;
+    }
     const newDept = {
       id: `dept-${Date.now()}`,
       name: deptPayload.name.trim(),
       shortName: (deptPayload.shortName || deptPayload.name.slice(0, 3)).trim(),
-      code: (deptPayload.code || `D${depts.length + 1}`).trim().toUpperCase()
+      college: collegeName,
+      code: assignedCode
     };
     depts.push(newDept);
     safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts);
@@ -847,6 +960,70 @@ export const api = {
     const nextUsers = users.map(u => (u.id === sessionUser.id ? { ...u, courses: selectedCourses } : u));
     safeSetStorage(STORAGE_KEY_USERS, nextUsers);
     return normalizeUserObject(updatedUser, allCourses);
+  },
+
+  async setQuestionThreadOpen(questionId, isThreadOpen) {
+    if (USE_REMOTE_BACKEND) {
+      const res = await fetch(`${API_BASE_URL}/questions/${questionId}/thread-open`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({ isThreadOpen: Boolean(isThreadOpen) })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.success === false) {
+        throw new Error(body.message || '스레드 상태 변경에 실패했습니다.');
+      }
+      return body.data;
+    }
+
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    const updated = questions.map(q =>
+      q.id === questionId ? { ...q, isThreadOpen: Boolean(isThreadOpen) } : q
+    );
+    safeSetStorage(STORAGE_KEY_QUESTIONS, updated);
+    return updated.find(q => q.id === questionId);
+  },
+
+  async toggleHideAnswerByQuestion(questionId, answerId, isHidden) {
+    if (USE_REMOTE_BACKEND) {
+      const res = await fetch(`${API_BASE_URL}/questions/${questionId}/answers/${answerId}/hide`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({ isHidden: Boolean(isHidden) })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.success === false) {
+        throw new Error(body.message || '답변 가리기 처리에 실패했습니다.');
+      }
+      return body.data;
+    }
+
+    return this.toggleHideAnswer(answerId, isHidden, questionId);
+  },
+
+  async deleteAnswerByQuestion(questionId, answerId) {
+    if (USE_REMOTE_BACKEND) {
+      const res = await fetch(`${API_BASE_URL}/questions/${questionId}/answers/${answerId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.success === false) {
+        throw new Error(body.message || '답변 삭제에 실패했습니다.');
+      }
+      return true;
+    }
+
+    return this.deleteAnswer(answerId, questionId);
   },
 
   async toggleHideQuestion(questionId, isHidden) {
@@ -1016,7 +1193,9 @@ export const api = {
         if (res.ok) {
           const body = await res.json();
           const data = body?.data || body;
-          if (data && typeof data === 'object') return data;
+          if (data && typeof data === 'object') {
+            return { exhibitionMode: false, ...data };
+          }
         }
       } catch (e) {
         console.warn('[API] Remote getSettings failed, using local fallback', e);
@@ -1028,6 +1207,8 @@ export const api = {
     return {
       theme: 'light',
       fontSize: 'md',
+      helpLevel: 'SOME',
+      exhibitionMode: false,
       dndEnabled: false,
       dndStartTime: '22:00',
       dndEndTime: '08:00',
@@ -1057,13 +1238,14 @@ export const api = {
         });
         clearTimeout(timeoutId);
         if (res.ok) {
-          const body = await res.json();
-          if (body?.data) {
+          const body = await res.json().catch(() => ({}));
+          const data = body?.data || body;
+          if (data && typeof data === 'object' && body?.success !== false) {
             const current = this.getCurrentSessionUser();
             if (current && newSettings.notificationEmail !== undefined) {
               this.saveSession({ ...current, email: newSettings.notificationEmail });
             }
-            return body.data;
+            return data;
           }
         }
       } catch (e) {
@@ -1438,27 +1620,34 @@ export const api = {
     }
 
     const sessionUser = this.getCurrentSessionUser();
-    if (!sessionUser || sessionUser.role !== 'professor') {
-      throw new Error('교수 계정만 답변을 등록할 수 있습니다.');
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    const targetQ = questions.find(q => q.id === questionId);
+    if (!targetQ) throw new Error('질문을 찾을 수 없습니다.');
+
+    if (!sessionUser || (!sessionUser.isAdmin && sessionUser.role !== 'professor' && !targetQ.isThreadOpen)) {
+      throw new Error('답변을 등록할 권한이 없습니다.');
     }
     if (sessionUser?.answerBanUntil && new Date(sessionUser.answerBanUntil) > new Date()) {
       throw new Error(`현재 답변 작성 제한 상태입니다. (해제 일시: ${sessionUser.answerBanUntil})`);
     }
 
-    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
-    const targetQ = questions.find(q => q.id === questionId);
-    if (!targetQ) throw new Error('질문을 찾을 수 없습니다.');
-
+    const nextSeq = Math.max(targetQ.lastSequenceNumber || 1, 1) + 1;
     const newAnswer = {
       id: `ans-${Date.now()}`,
       createdAt: new Date().toISOString(),
       isHidden: false,
+      sequenceNumber: nextSeq,
+      isAdminAuthor: Boolean(sessionUser.isAdmin),
+      authorTitle: sessionUser.isAdmin ? '관리자' : sessionUser.role === 'student' ? '학생 답변' : '담당교수',
       ...answerData
     };
 
     if (!Array.isArray(targetQ.answers)) targetQ.answers = [];
+    targetQ.lastSequenceNumber = nextSeq;
     targetQ.answers.push(newAnswer);
-    targetQ.status = 'ANSWERED';
+    if (sessionUser.role === 'professor' || sessionUser.isAdmin) {
+      targetQ.status = 'ANSWERED';
+    }
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
     return newAnswer;
   },

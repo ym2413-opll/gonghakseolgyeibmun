@@ -55,7 +55,7 @@ class R3OverhaulTest {
             password = "password1234",
             name = "이민수",
             department = "소프트웨어학과",
-            identifier = "20269901"
+            identifier = "2026101901"
         )
         val stuRegRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
@@ -78,7 +78,7 @@ class R3OverhaulTest {
         // 3. Duplicate Username should fail
         val dupUsernameRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
-            setBody(stuRegReq.copy(identifier = "20269902"))
+            setBody(stuRegReq.copy(identifier = "2026101902"))
         }
         assertEquals(HttpStatusCode.BadRequest, dupUsernameRes.status)
 
@@ -208,7 +208,7 @@ class R3OverhaulTest {
                     password = "stupass123",
                     name = "김익명",
                     department = "AI로봇융합학과",
-                    identifier = "20268888",
+                    identifier = "AUTO",
                     courseIds = listOf(createdCourse.id)
                 )
             )
@@ -248,7 +248,7 @@ class R3OverhaulTest {
                     password = "stupass123",
                     name = "박타인",
                     department = "AI로봇융합학과",
-                    identifier = "20267777",
+                    identifier = "AUTO",
                     courseIds = listOf(createdCourse.id)
                 )
             )
@@ -264,7 +264,7 @@ class R3OverhaulTest {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
         }.body<ApiResponse<QuestionDetailDto>>().data!!
         assertEquals("김익명", detailForAdmin.realStudentName)
-        assertEquals("20268888", detailForAdmin.realStudentIdentifier)
+        assertEquals(stuAuth.user.identifier, detailForAdmin.realStudentIdentifier)
 
         // 7. Test Hiding Question & Answer by Admin
         val hideQRes = client.patch("/api/admin/questions/${createdQ.id}/hide") {
@@ -387,19 +387,19 @@ class R3OverhaulTest {
                     password = "password1234",
                     name = "최학번",
                     department = "소프트웨어학과",
-                    identifier = "20265544"
+                    identifier = "2026101444"
                 )
             )
         }
         assertEquals(HttpStatusCode.Created, regRes.status)
         val auth = regRes.body<ApiResponse<AuthResponse>>().data!!
-        assertEquals("20265544", auth.user.username)
-        assertEquals("20265544", auth.user.identifier)
+        assertEquals("2026101444", auth.user.username)
+        assertEquals("2026101444", auth.user.identifier)
 
         // 2. Login using Student ID
         val loginByIdRes = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username = "20265544", password = "password1234"))
+            setBody(LoginRequest(username = "2026101444", password = "password1234"))
         }
         assertEquals(HttpStatusCode.OK, loginByIdRes.status)
 
@@ -413,7 +413,7 @@ class R3OverhaulTest {
                     password = "password1234",
                     name = "김레거시",
                     department = "소프트웨어학과",
-                    identifier = "20265545"
+                    identifier = "2026101445"
                 )
             )
         }
@@ -421,7 +421,7 @@ class R3OverhaulTest {
 
         val loginByLegacyIdentifierRes = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username = "20265545", password = "password1234"))
+            setBody(LoginRequest(username = "2026101445", password = "password1234"))
         }
         assertEquals(HttpStatusCode.OK, loginByLegacyIdentifierRes.status)
 
@@ -439,7 +439,7 @@ class R3OverhaulTest {
             install(ContentNegotiation) { json(json) }
         }
 
-        // 1. Legacy ID + 학번 student sharing identifier with a seeded demo student ("20261101")
+        // 1. Legacy ID + 학번 student sharing identifier with a seeded demo student ("2026101101")
         val regDemoCollideRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(
@@ -449,7 +449,7 @@ class R3OverhaulTest {
                     password = "password1234",
                     name = "김데모충돌",
                     department = "소프트웨어학과",
-                    identifier = "20261101"
+                    identifier = "2026101101"
                 )
             )
         }
@@ -464,39 +464,54 @@ class R3OverhaulTest {
         assertEquals(HttpStatusCode.OK, byUsername.status)
         assertEquals(regDemoCollide.user.id, byUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
 
-        // Login via 학번 (must ignore demo user 11111111-...-1101 and authenticate the real account)
+        // Login via 학번 (must ignore demo user and authenticate the real account)
         val byStudentId = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username = "20261101", password = "password1234"))
+            setBody(LoginRequest(username = "2026101101", password = "password1234"))
         }
         assertEquals(HttpStatusCode.OK, byStudentId.status)
         assertEquals(regDemoCollide.user.id, byStudentId.body<ApiResponse<AuthResponse>>().data?.user?.id)
 
-        // 2. Legacy student whose alphanumeric identifier contains uppercase letters (frontend lowercases input)
-        val regAlphaIdRes = client.post("/api/auth/register") {
+        // 2. Non-10-digit alphanumeric identifier MUST be rejected under R4; valid 10-digit identifier with mixed-case username works case-insensitively
+        val invalidAlphaRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(
                 RegisterRequest(
                     role = UserRole.STUDENT,
-                    username = "legacy_alpha_stu",
+                    username = "invalid_alpha_stu",
                     password = "password1234",
-                    name = "박영문학번",
+                    name = "잘못된학번",
                     department = "컴퓨터공학과",
                     identifier = "KW2026A01"
                 )
             )
         }
-        assertEquals(HttpStatusCode.Created, regAlphaIdRes.status)
-        val regAlpha = regAlphaIdRes.body<ApiResponse<AuthResponse>>().data!!
+        assertEquals(HttpStatusCode.BadRequest, invalidAlphaRes.status)
 
-        val byLowercaseAlphaSid = client.post("/api/auth/login") {
+        val regAlphaRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "KW2026A01",
+                    password = "password1234",
+                    name = "박대소문자아이디",
+                    department = "컴퓨터공학과",
+                    identifier = "2026102001"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, regAlphaRes.status)
+        val regAlpha = regAlphaRes.body<ApiResponse<AuthResponse>>().data!!
+
+        val byLowercaseUsername = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(LoginRequest(username = "kw2026a01", password = "password1234"))
         }
-        assertEquals(HttpStatusCode.OK, byLowercaseAlphaSid.status)
-        assertEquals(regAlpha.user.id, byLowercaseAlphaSid.body<ApiResponse<AuthResponse>>().data?.user?.id)
+        assertEquals(HttpStatusCode.OK, byLowercaseUsername.status)
+        assertEquals(regAlpha.user.id, byLowercaseUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
 
-        // 3. Cross-user overlap: User1 has legacy username + 학번 "20266188", while User2 has username "20266188"
+        // 3. Cross-user overlap: User1 has legacy username + 학번 "2026101188", while User2 has username "2026101188"
         val user1 = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(
@@ -506,7 +521,7 @@ class R3OverhaulTest {
                     password = "pass_user1",
                     name = "구계정학생",
                     department = "소프트웨어학과",
-                    identifier = "20266188"
+                    identifier = "2026101188"
                 )
             )
         }.body<ApiResponse<AuthResponse>>().data!!
@@ -516,25 +531,25 @@ class R3OverhaulTest {
             setBody(
                 RegisterRequest(
                     role = UserRole.STUDENT,
-                    username = "20266188",
+                    username = "2026101188",
                     password = "pass_user2",
                     name = "동명아이디",
                     department = "소프트웨어학과",
-                    identifier = "20266199"
+                    identifier = "2026101199"
                 )
             )
         }.body<ApiResponse<AuthResponse>>().data!!
 
         val loginOverlapUser1BySid = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username = "20266188", password = "pass_user1"))
+            setBody(LoginRequest(username = "2026101188", password = "pass_user1"))
         }
         assertEquals(HttpStatusCode.OK, loginOverlapUser1BySid.status)
         assertEquals(user1.user.id, loginOverlapUser1BySid.body<ApiResponse<AuthResponse>>().data?.user?.id)
 
         val loginOverlapUser2ByUsername = client.post("/api/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username = "20266188", password = "pass_user2"))
+            setBody(LoginRequest(username = "2026101188", password = "pass_user2"))
         }
         assertEquals(HttpStatusCode.OK, loginOverlapUser2ByUsername.status)
         assertEquals(user2.user.id, loginOverlapUser2ByUsername.body<ApiResponse<AuthResponse>>().data?.user?.id)
@@ -633,11 +648,11 @@ class R3OverhaulTest {
             setBody(
                 RegisterRequest(
                     role = UserRole.STUDENT,
-                    username = "20269911",
+                    username = "2026101911",
                     password = "stupass123",
                     name = "수강선택학생",
                     department = "소프트웨어학과",
-                    identifier = "20269911",
+                    identifier = "2026101911",
                     courseIds = listOf(collegeCourse.id)
                 )
             )
@@ -871,7 +886,7 @@ class R3OverhaulTest {
                     password = "stupass123",
                     name = "김타인",
                     department = "컴퓨터정보공학부",
-                    identifier = "20265555",
+                    identifier = "AUTO",
                     courseIds = listOf(allCourse.id)
                 )
             )
@@ -940,5 +955,320 @@ class R3OverhaulTest {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
         }.body<ApiResponse<List<NotificationDto>>>().data!!
         assertTrue(profNotifications.any { it.type == "QUESTION_DELETED" && it.referenceId == validStuQ.id })
+    }
+
+    @Test
+    fun testR4OverhaulFeatures() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // 0. Register Admin and create a dedicated course for R4 tests
+        val adminProfAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "r4_admin_user",
+                    password = "adminpass123",
+                    name = "R4관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("r4_admin_user", grant = true)
+
+        val r4Course = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "R4스레드설계세미나",
+                    code = "R4-101",
+                    semester = "2026-2",
+                    scopeType = "ALL"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+
+        // 1. Professor registration without email -> succeeds and disables email notifications by default
+        val noEmailProfRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "prof_r4_noemail",
+                    password = "profpass1234",
+                    name = "이메일없음교수",
+                    department = "소프트웨어학과",
+                    email = null,
+                    courseIds = listOf(r4Course.id)
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, noEmailProfRes.status)
+        val noEmailProfAuth = noEmailProfRes.body<ApiResponse<AuthResponse>>().data!!
+        assertNull(noEmailProfAuth.user.email)
+
+        val profSettingsRes = client.get("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+        }.body<UnifiedSettingDto>()
+        assertFalse(profSettingsRes.emailEnabled)
+        assertNull(profSettingsRes.notificationEmail)
+
+        // 2. Department code rules (college 1..9 + dept 01..99) & 10-digit student ID allocation
+        val deptList = client.get("/api/departments")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<DepartmentDto>>>().data!!
+        val deptCodeRegex = Regex("^[1-9](?:0[1-9]|[1-9]\\d)$")
+        assertTrue(deptList.isNotEmpty() && deptList.all { deptCodeRegex.matches(it.code) })
+        assertTrue(deptList.any { it.code == "101" })
+        assertTrue(deptList.any { it.code == "201" })
+        assertTrue(deptList.any { it.code == "301" })
+        assertTrue(deptList.any { it.code == "601" })
+        assertEquals("201", deptList.first { it.name == "전자공학과" }.code)
+
+        val nextDomesticPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=false")
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertEquals("2029201001", nextDomesticPreview.studentId)
+
+        val nextForeignPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=true")
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertEquals("2029201501", nextForeignPreview.studentId)
+
+        val domStuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "stupass1234",
+                    name = "김일반",
+                    department = "전자공학과",
+                    entryYear = 2029,
+                    isForeign = false,
+                    identifier = "AUTO",
+                    courseIds = listOf(r4Course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        assertEquals("2029201001", domStuAuth.user.identifier)
+
+        val forStuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "stupass1234",
+                    name = "이외국",
+                    department = "전자공학과",
+                    entryYear = 2029,
+                    isForeign = true,
+                    identifier = "AUTO",
+                    courseIds = listOf(r4Course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        assertEquals("2029201501", forStuAuth.user.identifier)
+
+        // Random generation skips already-used serials and respects domestic (001~500) / foreign (501~999) ranges
+        val randomDomesticPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=false&random=true")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertTrue(randomDomesticPreview.studentId.startsWith("2029201"))
+        assertTrue(randomDomesticPreview.studentId != "2029201001")
+        assertTrue(randomDomesticPreview.studentId.takeLast(3).toInt() in 1..500)
+
+        val randomForeignPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=true&random=true")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertTrue(randomForeignPreview.studentId.startsWith("2029201"))
+        assertTrue(randomForeignPreview.studentId != "2029201501")
+        assertTrue(randomForeignPreview.studentId.takeLast(3).toInt() in 501..999)
+
+        // Format-only department code validation: valid (1..9)(01..99) format accepted even if different from selected dept's code
+        val crossDeptFormatRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "cross_dept_format_stu",
+                    password = "stupass1234",
+                    name = "형식허용학생",
+                    department = "전자공학과",
+                    identifier = "2029101001"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, crossDeptFormatRes.status)
+
+        // Invalid college digit (0) or invalid dept index (00) rejected by format validation
+        val invalidCollegeDigitRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "bad_college_digit_stu",
+                    password = "stupass1234",
+                    name = "잘못된단과대",
+                    department = "전자공학과",
+                    identifier = "2029001001"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, invalidCollegeDigitRes.status)
+
+        val invalidDeptIdxRes = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "bad_dept_idx_stu",
+                    password = "stupass1234",
+                    name = "잘못된학과번호",
+                    department = "전자공학과",
+                    identifier = "2029100001"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, invalidDeptIdxRes.status)
+
+        // 3. Admin mode + thread open/close + immutable sequence numbers
+        val qRes = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = r4Course.id,
+                    profId = noEmailProfAuth.user.id,
+                    category = QuestionCategory.ASSIGNMENT,
+                    title = "R4 스레드/순번/관리자 테스트 질문",
+                    rawContent = "스레드 열림 및 순번 테스트입니다. #1 [사진 1]"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        assertFalse(qRes.isThreadOpen)
+        assertEquals(1, qRes.lastSequenceNumber)
+
+        // While closed, peer student cannot answer
+        val closedPeerAttempt = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${forStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "닫힘 상태에서 다른 학생 답변 시도"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, closedPeerAttempt.status)
+
+        // Even while closed, admin can post in ANY thread (becomes #2)
+        val adminAns = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "관리자 안내 글입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(2, adminAns.sequenceNumber)
+        assertTrue(adminAns.isAdminAuthor)
+        assertEquals("관리자", adminAns.authorTitle)
+
+        // Assigned professor toggles thread to Open (열림)
+        val openedQ = client.patch("/api/questions/${qRes.id}/thread-open") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        assertTrue(openedQ.isThreadOpen)
+
+        // Non-assigned user (peer student) CANNOT toggle thread open/closed
+        val nonProfToggle = client.patch("/api/questions/${qRes.id}/thread-open") {
+            header(HttpHeaders.Authorization, "Bearer ${forStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = false))
+        }
+        assertEquals(HttpStatusCode.Forbidden, nonProfToggle.status)
+
+        // Peer student answers twice (#3 and #4) while thread is open
+        val peerAns3 = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${forStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "다른 학생 답변 1 (#3)"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(3, peerAns3.sequenceNumber)
+        assertEquals("학생 답변", peerAns3.authorTitle)
+
+        val peerAns4 = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${forStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "다른 학생 답변 2 (#4)"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(4, peerAns4.sequenceNumber)
+
+        // Assigned professor hides #4 and deletes #3 -> #4 retains sequenceNumber == 4, next answer gets #5!
+        val hidePeer4Res = client.patch("/api/questions/${qRes.id}/answers/${peerAns4.id}/hide") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleHideRequest(isHidden = true))
+        }
+        assertEquals(HttpStatusCode.OK, hidePeer4Res.status)
+
+        val delPeer3Res = client.delete("/api/questions/${qRes.id}/answers/${peerAns3.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+        }
+        assertEquals(HttpStatusCode.OK, delPeer3Res.status)
+
+        val detailAfterDelete = client.get("/api/questions/${qRes.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(4, detailAfterDelete.lastSequenceNumber)
+        assertEquals(listOf(2, 4), detailAfterDelete.answers.map { it.sequenceNumber })
+
+        val profAns5 = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "담당교수 공식 답변 (#5)"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(5, profAns5.sequenceNumber)
+
+        // Assigned professor CANNOT hide non-student (admin) answer #2
+        val hideAdminAttempt = client.patch("/api/questions/${qRes.id}/answers/${adminAns.id}/hide") {
+            header(HttpHeaders.Authorization, "Bearer ${noEmailProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleHideRequest(isHidden = true))
+        }
+        assertEquals(HttpStatusCode.Forbidden, hideAdminAttempt.status)
+
+        // 4. Help level (NONE, SOME, ALL) & exhibitionMode settings persistence
+        val initialSettings = client.get("/api/user/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+        }.body<ApiResponse<UserSettingDto>>().data!!
+        assertFalse(initialSettings.exhibitionMode)
+
+        val updatedHelp = client.put("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUnifiedSettingRequest(helpLevel = "ALL", exhibitionMode = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<UnifiedSettingDto>()
+        assertEquals("ALL", updatedHelp.helpLevel)
+        assertTrue(updatedHelp.exhibitionMode)
+
+        val fetchedHelp = client.get("/api/user/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+        }.body<ApiResponse<UserSettingDto>>().data!!
+        assertEquals("ALL", fetchedHelp.helpLevel)
+        assertTrue(fetchedHelp.exhibitionMode)
+
+        val fetchedUnified = client.get("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<UnifiedSettingDto>()
+        assertTrue(fetchedUnified.exhibitionMode)
     }
 }

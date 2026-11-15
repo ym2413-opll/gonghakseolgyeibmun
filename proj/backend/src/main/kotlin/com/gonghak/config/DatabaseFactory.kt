@@ -10,10 +10,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
@@ -115,7 +117,13 @@ object DatabaseFactory {
         // Allow enrollments without an assigned professor yet (admin-created courses before professor assignment)
         listOf(
             "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id DROP NOT NULL",
-            "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id SET NULL"
+            "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id SET NULL",
+            "ALTER TABLE departments ADD COLUMN IF NOT EXISTS code VARCHAR(3) DEFAULT '101'",
+            "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS help_level VARCHAR(20) DEFAULT 'SOME'",
+            "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS exhibition_mode BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS is_thread_open BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS last_sequence_number INTEGER DEFAULT 1",
+            "ALTER TABLE answers ADD COLUMN IF NOT EXISTS sequence_number INTEGER DEFAULT 2"
         ).forEach { alterStmt ->
             runCatching {
                 transaction { exec(alterStmt) }
@@ -127,6 +135,7 @@ object DatabaseFactory {
             seedDefaultDepartments()
             seedConvertedCoursesData()
             seedDemoData()
+            backfillQuestionSequences()
         }
     }
 
@@ -180,32 +189,99 @@ object DatabaseFactory {
         block: suspend () -> T
     ): T = newSuspendedTransaction(dispatcher) { block() }
 
+    private val knownCollegeDigits = mapOf(
+        "인공지능융합대학" to 1,
+        "전자정보공과대학" to 2,
+        "공과대학" to 3,
+        "자연과학대학" to 4,
+        "인문사회과학대학" to 5,
+        "경영대학" to 6,
+        "정책법학대학" to 7,
+        "참빛인재대학" to 8
+    )
+
+    private val validDeptCodeRegex = Regex("^[1-9](?:0[1-9]|[1-9]\\d)$")
+
+    internal fun allocateDepartmentCodeForCollege(collegeName: String): String {
+        val cleanCollege = collegeName.trim().ifBlank { "광운대학교" }
+        val allRows = DepartmentsTable.selectAll().toList()
+
+        val collegeDigit = knownCollegeDigits[cleanCollege]
+            ?: allRows.firstOrNull {
+                it[DepartmentsTable.college] == cleanCollege &&
+                    validDeptCodeRegex.matches(it[DepartmentsTable.code])
+            }?.let { it[DepartmentsTable.code][0].digitToInt() }
+            ?: run {
+                val usedDigits = knownCollegeDigits.values.toMutableSet()
+                allRows.forEach { r ->
+                    val c = r[DepartmentsTable.code]
+                    if (validDeptCodeRegex.matches(c)) {
+                        usedDigits.add(c[0].digitToInt())
+                    }
+                }
+                (1..9).firstOrNull { it !in usedDigits } ?: 9
+            }
+
+        val usedIndices = allRows.mapNotNull { row ->
+            val c = row[DepartmentsTable.code]
+            if (validDeptCodeRegex.matches(c) && c[0].digitToInt() == collegeDigit) {
+                c.substring(1, 3).toIntOrNull()
+            } else {
+                null
+            }
+        }
+        val nextIdx = ((usedIndices.maxOrNull() ?: 0) + 1).coerceIn(1, 99)
+        return String.format("%d%02d", collegeDigit, nextIdx)
+    }
+
     private fun seedDefaultDepartments() {
         val initialDepartments = listOf(
-            "소프트웨어학과" to "인공지능융합대학",
-            "컴퓨터공학과" to "인공지능융합대학",
-            "정보융합학부" to "인공지능융합대학",
-            "로봇학부" to "인공지능융합대학",
-            "전자공학과" to "전자정보공과대학",
-            "전자통신공학과" to "전자정보공과대학",
-            "전자융합공학과" to "전자정보공과대학",
-            "전기공학과" to "전자정보공과대학",
-            "반도체시스템공학부" to "전자정보공과대학",
-            "화학공학과" to "공과대학",
-            "건축공학과" to "공과대학",
-            "수학교육과" to "자연과학대학",
-            "미디어커뮤니케이션학부" to "인문사회과학대학",
-            "경영학부" to "경영대학"
+            Triple("101", "소프트웨어학과", "인공지능융합대학"),
+            Triple("102", "컴퓨터공학과", "인공지능융합대학"),
+            Triple("103", "정보융합학부", "인공지능융합대학"),
+            Triple("104", "로봇학부", "인공지능융합대학"),
+            Triple("201", "전자공학과", "전자정보공과대학"),
+            Triple("202", "전자통신공학과", "전자정보공과대학"),
+            Triple("203", "전자융합공학과", "전자정보공과대학"),
+            Triple("204", "전기공학과", "전자정보공과대학"),
+            Triple("205", "반도체시스템공학부", "전자정보공과대학"),
+            Triple("301", "화학공학과", "공과대학"),
+            Triple("302", "건축공학과", "공과대학"),
+            Triple("401", "수학교육과", "자연과학대학"),
+            Triple("501", "미디어커뮤니케이션학부", "인문사회과학대학"),
+            Triple("601", "경영학부", "경영대학")
         )
-        initialDepartments.forEach { (deptName, collegeName) ->
-            if (DepartmentsTable.select { DepartmentsTable.name eq deptName }.count() == 0L) {
+        initialDepartments.forEach { (deptCode, deptName, collegeName) ->
+            val existing = DepartmentsTable.select { DepartmentsTable.name eq deptName }.singleOrNull()
+            if (existing == null) {
                 DepartmentsTable.insert {
                     it[id] = UUID.randomUUID()
                     it[name] = deptName
+                    it[code] = deptCode
                     it[college] = collegeName
+                }
+            } else {
+                val curCode = existing[DepartmentsTable.code].trim()
+                if (!validDeptCodeRegex.matches(curCode) || curCode != deptCode) {
+                    DepartmentsTable.update({ DepartmentsTable.id eq existing[DepartmentsTable.id] }) {
+                        it[code] = deptCode
+                        it[college] = collegeName
+                    }
                 }
             }
         }
+
+        // Upgrade any remaining legacy 0xx department codes in existing DB rows to (collegeDigit)(deptIndex)
+        DepartmentsTable.selectAll()
+            .orderBy(DepartmentsTable.createdAt to SortOrder.ASC, DepartmentsTable.name to SortOrder.ASC)
+            .toList()
+            .filter { !validDeptCodeRegex.matches(it[DepartmentsTable.code].trim()) }
+            .forEach { legacyRow ->
+                val newCode = allocateDepartmentCodeForCollege(legacyRow[DepartmentsTable.college])
+                DepartmentsTable.update({ DepartmentsTable.id eq legacyRow[DepartmentsTable.id] }) {
+                    it[code] = newCode
+                }
+            }
     }
 
     private fun seedConvertedCoursesData() {
@@ -254,10 +330,13 @@ object DatabaseFactory {
                 val cleanDept = c.department.trim()
                 if (cleanDept.isNotBlank() && cleanDept != "공통") {
                     if (DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.count() == 0L) {
+                        val collegeName = c.college.ifBlank { "광운대학교" }
+                        val assignedCode = allocateDepartmentCodeForCollege(collegeName)
                         DepartmentsTable.insert {
                             it[id] = UUID.randomUUID()
                             it[name] = cleanDept
-                            it[college] = c.college.ifBlank { "광운대학교" }
+                            it[code] = assignedCode
+                            it[college] = collegeName
                         }
                     }
                 }
@@ -315,7 +394,7 @@ object DatabaseFactory {
             it[id] = student1Id
             it[name] = "서영민"
             it[role] = UserRole.STUDENT.name
-            it[identifier] = "20261101"
+            it[identifier] = "2026101001"
             it[department] = "소프트웨어학과"
             it[displayTag] = "26_소프트_서영민"
             it[isDemo] = true
@@ -324,7 +403,7 @@ object DatabaseFactory {
             it[id] = student2Id
             it[name] = "김민지"
             it[role] = UserRole.STUDENT.name
-            it[identifier] = "20251102"
+            it[identifier] = "2026101002"
             it[department] = "소프트웨어학과"
             it[displayTag] = "25_소프트_김민지"
             it[isDemo] = true
@@ -333,7 +412,7 @@ object DatabaseFactory {
             it[id] = student3Id
             it[name] = "박준형"
             it[role] = UserRole.STUDENT.name
-            it[identifier] = "20241103"
+            it[identifier] = "2026102501"
             it[department] = "컴퓨터공학과"
             it[displayTag] = "24_컴공_박준형"
             it[isDemo] = true
@@ -465,6 +544,8 @@ object DatabaseFactory {
                 it[userId] = uId
                 it[themeMode] = "light"
                 it[fontSize] = "md"
+                it[helpLevel] = "SOME"
+                it[exhibitionMode] = false
             }
         }
 
@@ -497,6 +578,8 @@ object DatabaseFactory {
             it[refinedContent] = q1Refined
             it[isAnonymous] = true
             it[isHidden] = false
+            it[isThreadOpen] = false
+            it[lastSequenceNumber] = 2
             it[status] = QuestionStatus.ANSWERED.name
             it[createdAt] = Instant.now().minusSeconds(86400)
         }
@@ -504,6 +587,7 @@ object DatabaseFactory {
         AnswersTable.insert {
             it[questionId] = q1Id
             it[professorId] = prof1Id
+            it[sequenceNumber] = 2
             it[content] = "좋은 질문입니다. 실무 프로젝트에서는 라우팅을 도메인별(예: AuthRoutes, CourseRoutes)로 확장 함수로 분리하여 Application.module에서 호출하도록 구성하는 것이 유지보수와 협업에 훨씬 유리합니다."
             it[isAssignedProfessor] = true
             it[isHidden] = false
@@ -526,10 +610,46 @@ object DatabaseFactory {
             it[refinedContent] = q2Refined
             it[isAnonymous] = false
             it[isHidden] = false
+            it[isThreadOpen] = false
+            it[lastSequenceNumber] = 1
             it[status] = QuestionStatus.OPEN.name
             it[createdAt] = Instant.now().minusSeconds(3600)
         }
 
         logger.info("Base data seeding completed successfully.")
+    }
+
+    private fun backfillQuestionSequences() {
+        val questionRows = QuestionsTable.selectAll().toList()
+        questionRows.forEach { q ->
+            val qId = q[QuestionsTable.id].value
+            val answers = AnswersTable.select { AnswersTable.questionId eq qId }
+                .orderBy(AnswersTable.createdAt to SortOrder.ASC)
+                .toList()
+            if (answers.isEmpty()) {
+                if (q[QuestionsTable.lastSequenceNumber] < 1) {
+                    QuestionsTable.update({ QuestionsTable.id eq qId }) {
+                        it[lastSequenceNumber] = 1
+                    }
+                }
+                return@forEach
+            }
+            val currentLast = q[QuestionsTable.lastSequenceNumber]
+            val distinctSeqs = answers.map { it[AnswersTable.sequenceNumber] }.distinct()
+            if (currentLast < answers.size + 1 || distinctSeqs.size != answers.size || answers.any { it[AnswersTable.sequenceNumber] < 2 }) {
+                answers.forEachIndexed { idx, ans ->
+                    val seq = idx + 2
+                    if (ans[AnswersTable.sequenceNumber] != seq) {
+                        AnswersTable.update({ AnswersTable.id eq ans[AnswersTable.id] }) {
+                            it[sequenceNumber] = seq
+                        }
+                    }
+                }
+                val newLast = answers.size + 1
+                QuestionsTable.update({ QuestionsTable.id eq qId }) {
+                    it[lastSequenceNumber] = maxOf(currentLast, newLast)
+                }
+            }
+        }
     }
 }

@@ -68,8 +68,12 @@ fun Route.notificationRoutes(
             val user = call.requireProfessorOrAdmin(userService) ?: return@put
             val userId = UUID.fromString(user.id)
             val request = call.receive<UpdateProfessorNotificationSettingRequest>()
-            val updated = notificationService.updateProfessorNotificationSetting(userId, request)
-            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            try {
+                val updated = notificationService.updateProfessorNotificationSetting(userId, request)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            }
         }
     }
 }

@@ -5,12 +5,14 @@ import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import AiRefineModal from '../student/AiRefineModal';
+import HelpBubble from '../common/HelpBubble';
 import {
   Send,
   Shield,
   Award,
   Users,
   Lock,
+  Unlock,
   Clock,
   BookOpen,
   MessageSquare,
@@ -31,11 +33,127 @@ import {
   PenTool
 } from 'lucide-react';
 
+function getImageAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.filter(
+    (att) =>
+      att &&
+      (att.isImage ||
+        (att.mimeType && att.mimeType.startsWith('image/')) ||
+        /\.(png|jpe?g|gif|webp)$/i.test(att.originalName || att.fileName || att.name || ''))
+  );
+}
+
+function renderInlineTokens(line, imageAtts, validSeqSet, onJumpToSeq, lineKey) {
+  const tokenRegex = /(\[사진\s*\d+\]|#\d+(?!\d))/g;
+  const parts = [];
+  const inlineFigures = [];
+  let lastIdx = 0;
+  let match;
+  let partIdx = 0;
+
+  while ((match = tokenRegex.exec(line)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(
+        <React.Fragment key={`${lineKey}-t-${partIdx++}`}>
+          {line.slice(lastIdx, match.index)}
+        </React.Fragment>
+      );
+    }
+
+    const token = match[0];
+    const photoMatch = token.match(/^\[사진\s*(\d+)\]$/);
+    if (photoMatch) {
+      const k = Number(photoMatch[1]);
+      const targetAtt = k >= 1 && k <= imageAtts.length ? imageAtts[k - 1] : null;
+      const rawUrl = targetAtt ? targetAtt.previewUrl || targetAtt.url || targetAtt.downloadUrl : '';
+      if (targetAtt && isSafeAttachmentUrl(rawUrl)) {
+        parts.push(
+          <span key={`${lineKey}-p-${partIdx++}`} className="inline-photo-token">
+            [사진 {k}]
+          </span>
+        );
+        inlineFigures.push({
+          key: `${lineKey}-fig-${k}-${partIdx}`,
+          k,
+          url: rawUrl,
+          name: targetAtt.originalName || targetAtt.fileName || `사진 ${k}`
+        });
+      } else {
+        parts.push(<React.Fragment key={`${lineKey}-pt-${partIdx++}`}>{token}</React.Fragment>);
+      }
+    } else if (token.startsWith('#')) {
+      const seqNum = Number(token.slice(1));
+      if (validSeqSet.has(seqNum)) {
+        parts.push(
+          <button
+            type="button"
+            key={`${lineKey}-seq-${partIdx++}`}
+            className="seq-anchor-link"
+            onClick={() => onJumpToSeq(seqNum)}
+            title={`#${seqNum} 포스트로 이동`}
+          >
+            #{seqNum}
+          </button>
+        );
+      } else {
+        parts.push(<React.Fragment key={`${lineKey}-st-${partIdx++}`}>{token}</React.Fragment>);
+      }
+    }
+
+    lastIdx = tokenRegex.lastIndex;
+  }
+
+  if (lastIdx < line.length) {
+    parts.push(<React.Fragment key={`${lineKey}-end`}>{line.slice(lastIdx)}</React.Fragment>);
+  }
+
+  return { parts, inlineFigures };
+}
+
+function renderFormattedPostContent(text, attachments, validSeqSet, onJumpToSeq) {
+  const imageAtts = getImageAttachments(attachments);
+  const lines = String(text || '').split('\n');
+
+  return lines.map((line, lineIdx) => {
+    if (!line) {
+      return (
+        <div key={`line-${lineIdx}`} className="forum-post-line">
+          {'\u00A0'}
+        </div>
+      );
+    }
+
+    const { parts, inlineFigures } = renderInlineTokens(
+      line,
+      imageAtts,
+      validSeqSet,
+      onJumpToSeq,
+      `l-${lineIdx}`
+    );
+
+    return (
+      <React.Fragment key={`line-${lineIdx}`}>
+        <div className="forum-post-line">{parts}</div>
+        {inlineFigures.map((fig) => (
+          <figure key={fig.key} className="inline-photo-figure">
+            <img src={fig.url} alt={fig.name} loading="lazy" />
+            <figcaption>
+              [사진 {fig.k}] {fig.name}
+            </figcaption>
+          </figure>
+        ))}
+      </React.Fragment>
+    );
+  });
+}
+
 const QuestionDetail = ({
   question,
   onAddAnswer,
   onAddFollowUp,
   onUpdateQuestion,
+  onToggleThreadOpen,
   onToggleHideQuestion,
   onToggleHideAnswer,
   onDeleteQuestion,
@@ -52,6 +170,7 @@ const QuestionDetail = ({
   const [expandedFollowUpOriginals, setExpandedFollowUpOriginals] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [highlightedSeq, setHighlightedSeq] = useState(null);
 
   // 질문 수정 상태
   const [isEditing, setIsEditing] = useState(false);
@@ -73,6 +192,26 @@ const QuestionDetail = ({
   const categoryKey = (question.category || 'lecture').toLowerCase();
   const category = CATEGORY_DEFINITIONS[categoryKey] || CATEGORY_DEFINITIONS.lecture;
   const answers = Array.isArray(question.answers) ? question.answers : [];
+  const isThreadOpen = Boolean(question.isThreadOpen);
+
+  const validSeqSet = new Set([1]);
+  let maxSeq = Number(question.lastSequenceNumber || 1);
+  answers.forEach((ans, idx) => {
+    const seq = Number(ans.sequenceNumber || idx + 2);
+    validSeqSet.add(seq);
+    if (seq > maxSeq) maxSeq = seq;
+  });
+  const nextSequenceNumber = maxSeq + 1;
+
+  const handleJumpToSeq = (seqNum) => {
+    const target = document.getElementById(`post-seq-${seqNum}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedSeq(seqNum);
+    setTimeout(() => {
+      setHighlightedSeq((prev) => (prev === seqNum ? null : prev));
+    }, 1800);
+  };
 
   const isPrimaryProf =
     isProfessor &&
@@ -97,41 +236,57 @@ const QuestionDetail = ({
     question.isAnsweredByAssignedProfessor ||
     answers.some((a) => a.isPrimaryProf || a.isAssignedProfessor);
 
+  const isAuthorStudent =
+    currentUser?.role === 'student' && currentUser?.id === question.studentId;
+
   let canAnswer = false;
   let answerLockReason = '';
 
-  if (isProfessor) {
-    if (question.isDeleted) {
-      canAnswer = false;
-      answerLockReason = '질문 작성자가 질문을 삭제하여 답변을 등록할 수 없습니다.';
-    } else if (question.canAnswer !== undefined) {
-      canAnswer = question.canAnswer;
-    } else if (isPrimaryProf) {
-      canAnswer = true;
-    } else if (isSameCourseOtherProf) {
-      if (categoryKey !== 'lecture') {
-        canAnswer = false;
-        answerLockReason = `'${category.name}' 카테고리는 배정된 담당 교수님(${
-          question.profName || question.assignedProfessorName
-        })만 답변할 수 있습니다.`;
-      } else if (hasPrimaryProfAnswered) {
-        canAnswer = false;
-        answerLockReason = `담당 교수님(${
-          question.profName || question.assignedProfessorName
-        })께서 이미 답변을 완료하셨으므로 추가 공동 답변이 마감되었습니다.`;
-      } else {
-        canAnswer = true;
-      }
-    } else {
-      canAnswer = false;
-      answerLockReason = '본인이 담당하는 교과목의 토픽에만 답변할 수 있습니다.';
+  if (question.isDeleted) {
+    canAnswer = false;
+    answerLockReason = '삭제된 질문입니다.';
+  } else if (isAdmin) {
+    canAnswer = true;
+  } else if (typeof question.canAnswer === 'boolean') {
+    canAnswer = question.canAnswer;
+    if (!canAnswer && isSameCourseOtherProf) {
+      answerLockReason = !isThreadOpen
+        ? '닫힌 스레드입니다.'
+        : hasPrimaryProfAnswered
+          ? '담당교수 답변이 완료되었습니다.'
+          : '공동 답변 권한이 없습니다.';
+    } else if (!canAnswer && isProfessor) {
+      answerLockReason = '담당 과목만 답변할 수 있습니다.';
     }
+  } else if (isPrimaryProf) {
+    canAnswer = true;
+  } else if (isSameCourseOtherProf) {
+    if (!isThreadOpen) {
+      canAnswer = false;
+      answerLockReason = '닫힌 스레드입니다.';
+    } else if (hasPrimaryProfAnswered) {
+      canAnswer = false;
+      answerLockReason = '담당교수 답변이 완료되었습니다.';
+    } else {
+      canAnswer = true;
+    }
+  } else if (currentUser?.role === 'student' && !isAuthorStudent) {
+    canAnswer = isThreadOpen;
+    if (!isThreadOpen) {
+      answerLockReason = '닫힌 스레드입니다.';
+    }
+  } else if (isProfessor) {
+    canAnswer = false;
+    answerLockReason = '담당 과목만 답변할 수 있습니다.';
   }
 
-  const isAuthorStudent =
-    currentUser?.role === 'student' && currentUser?.id === question.studentId;
+  const canToggleThread = (isAdmin || isPrimaryProf) && !question.isDeleted && Boolean(onToggleThreadOpen);
+
   const profAnswers = answers.filter(
-    (a) => String(a.authorRole || 'PROFESSOR').toUpperCase() !== 'STUDENT'
+    (a) =>
+      String(a.authorRole || 'PROFESSOR').toUpperCase() !== 'STUDENT' &&
+      !a.isAdminAuthor &&
+      a.authorTitle !== '관리자'
   );
   const isSolved = isQuestionSolved(question);
   const canEditQuestion = isAuthorStudent && !question.isDeleted && answers.length === 0;
@@ -192,19 +347,22 @@ const QuestionDetail = ({
     setIsSubmitting(true);
     try {
       const latestUser = await refreshCurrentUser();
-      if (!latestUser || latestUser.role !== 'professor' || latestUser.id !== currentUser?.id) {
-        setErrorMsg(
-          latestUser?.role === 'student'
-            ? '학생 계정으로 변경되어 답변을 작성할 수 없습니다.'
-            : '로그인 상태가 변경되었습니다. 계정을 확인한 뒤 다시 시도해 주세요.'
-        );
+      if (!latestUser || latestUser.id !== currentUser?.id) {
+        setErrorMsg('로그인 상태가 변경되었습니다. 계정을 확인한 뒤 다시 시도해 주세요.');
         return;
       }
+      const resolvedTitle = isAdmin
+        ? '관리자'
+        : isPrimaryProf
+          ? '담당교수'
+          : isSameCourseOtherProf
+            ? '공동답변 교수'
+            : '학생 답변';
       await onAddAnswer(question.id, {
         authorId: currentUser.id,
         authorName: currentUser.name,
-        authorTitle: isPrimaryProf ? '담당교수' : '동일과목 교수 (공동답변)',
-        isPrimaryProf,
+        authorTitle: resolvedTitle,
+        isPrimaryProf: !isAdmin && isPrimaryProf,
         content: answerText.trim()
       });
       setAnswerText('');
@@ -264,6 +422,33 @@ const QuestionDetail = ({
         )}
 
         <div className="forum-thread-actions-right">
+          {canToggleThread && (
+            <HelpBubble
+              tier="SOME"
+              mode="floating"
+              placement="bottom-end"
+              text="스레드 열림/닫힘을 전환해요. 열림 상태면 공동교수·타 학생도 답변할 수 있어요."
+            >
+              <button
+                type="button"
+                className={`btn btn-sm thread-open-toggle-btn ${
+                  isThreadOpen ? 'is-open' : 'is-closed'
+                }`}
+                onClick={() => onToggleThreadOpen(question.id, !isThreadOpen)}
+              >
+                {isThreadOpen ? (
+                  <>
+                    <Unlock size={14} /> 열림
+                  </>
+                ) : (
+                  <>
+                    <Lock size={14} /> 질문자, 담당교수 외 닫힘
+                  </>
+                )}
+              </button>
+            </HelpBubble>
+          )}
+
           {isAdmin && onToggleHideQuestion && (
             <button
               type="button"
@@ -314,6 +499,24 @@ const QuestionDetail = ({
           <span className="prof-pill">
             담당: {question.profName || question.assignedProfessorName || '담당교수'}
           </span>
+          <span
+            className={`thread-lock-badge ${isThreadOpen ? 'is-open' : 'is-closed'}`}
+            title={
+              isThreadOpen
+                ? '열림 상태: 같은 과목 교수(담당교수 답변 전) 및 다른 학생도 답변에 참여할 수 있습니다.'
+                : '질문자, 담당교수 외 닫힘 상태입니다.'
+            }
+          >
+            {isThreadOpen ? (
+              <>
+                <Unlock size={12} /> 열림
+              </>
+            ) : (
+              <>
+                <Lock size={12} /> 질문자, 담당교수 외 닫힘
+              </>
+            )}
+          </span>
           {question.isDeleted ? (
             <span className="status-pill danger">
               <Trash2 size={13} /> 질문자 삭제됨
@@ -353,20 +556,42 @@ const QuestionDetail = ({
       )}
 
       {/* 서양식 포럼 크로놀로지컬 포스트 스트림 (#1 OP -> #2, #3 Replies) */}
+      <HelpBubble
+        tier="SOME"
+        mode="inline"
+        text="#번호를 눌러 해당 글로 이동해요. 열림 상태면 다른 학생도 답변할 수 있어요."
+        className="mb-help-bubble"
+      />
+
       <div className="forum-post-stream">
         {/* Post #1: Topic Starter (OP) */}
         <article
+          id="post-seq-1"
           className={`forum-post-card op-post ${
-            question.isHidden ? 'post-hidden-state' : ''
+            question.isAdminAuthor ? 'admin-post-card' : ''
+          } ${question.isHidden ? 'post-hidden-state' : ''} ${
+            highlightedSeq === 1 ? 'post-seq-highlighted' : ''
           }`}
         >
           <aside className="forum-post-sidebar">
-            <div className="forum-post-avatar student">
-              {question.isAnonymous ? '익' : (authorDisplay || '수').charAt(0)}
+            <div
+              className={`forum-post-avatar ${
+                question.isAdminAuthor ? 'admin' : 'student'
+              }`}
+            >
+              {question.isAnonymous
+                ? '익'
+                : (authorDisplay || (question.isAdminAuthor ? '관' : '수')).charAt(0)}
             </div>
             <div className="forum-post-author-meta">
               <div className="forum-post-author-name">{authorDisplay}</div>
-              <span className="forum-role-tag op">TOPIC STARTER (OP)</span>
+              {question.isAdminAuthor ? (
+                <span className="forum-role-tag admin">
+                  <ShieldCheck size={12} /> 관리자
+                </span>
+              ) : (
+                <span className="forum-role-tag op">TOPIC STARTER (OP)</span>
+              )}
               {question.isAnonymous && (
                 <span className="anon-badge">
                   <Shield size={11} /> 익명 보호됨
@@ -392,7 +617,14 @@ const QuestionDetail = ({
                   : '-'}
                 {question.isEdited && <em className="edited-tag"> (수정됨)</em>}
               </span>
-              <span className="post-index-badge">#1 · OP</span>
+              <button
+                type="button"
+                className="post-index-badge post-seq-badge"
+                onClick={() => handleJumpToSeq(1)}
+                title="#1 원문 글"
+              >
+                #1 · OP
+              </button>
             </div>
 
             {isEditing ? (
@@ -447,76 +679,86 @@ const QuestionDetail = ({
             ) : (
               <>
                 <div className="forum-post-text">
-                  {mainContent.split('\n').map((line, idx) => (
-                    <p key={idx}>{line || '\u00A0'}</p>
-                  ))}
+                  {renderFormattedPostContent(
+                    mainContent,
+                    question.attachments,
+                    validSeqSet,
+                    handleJumpToSeq
+                  )}
                 </div>
 
                 {/* 첨부파일 영역 */}
                 {Array.isArray(question.attachments) &&
-                  question.attachments.length > 0 && (
-                    <div className="question-attachments-section">
-                      <div className="attachments-header">
-                        <Paperclip size={15} />
-                        <span>첨부파일 ({question.attachments.length}개)</span>
-                        <span className="security-verified-pill">
-                          <ShieldCheck size={12} /> 보안 검증 완료
-                        </span>
-                      </div>
-                      <div className="attachments-grid">
-                        {question.attachments.map((att) => (
-                          <div key={att.id} className="attachment-card">
-                            {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
-                              <div className="attachment-image-preview">
-                                <img
-                                  src={att.previewUrl || att.url}
-                                  alt={att.originalName}
-                                  loading="lazy"
-                                />
-                              </div>
-                            ) : null}
-                            <div className="attachment-card-body">
-                              <div className="attachment-icon-wrap">
-                                {att.isImage ? (
-                                  <ImageIcon size={18} />
-                                ) : (
-                                  <FileText size={18} />
-                                )}
-                              </div>
-                              <div className="attachment-meta">
-                                <span
-                                  className="attachment-filename"
-                                  title={att.originalName}
-                                >
-                                  {att.originalName}
-                                </span>
-                                <div className="attachment-submeta">
-                                  <span>{formatFileSize(att.fileSize)}</span>
-                                  {att.isCompressed && att.compressionRatio > 0 && (
-                                    <span className="compression-pill">
-                                      압축 -{att.compressionRatio}%
+                  question.attachments.length > 0 && (() => {
+                    let photoOrder = 0;
+                    return (
+                      <div className="question-attachments-section">
+                        <div className="attachments-header">
+                          <Paperclip size={15} />
+                          <span>첨부파일 ({question.attachments.length}개)</span>
+                          <span className="security-verified-pill">
+                            <ShieldCheck size={12} /> 보안 검증 완료
+                          </span>
+                        </div>
+                        <div className="attachments-grid">
+                          {question.attachments.map((att) => {
+                            const photoNum = att.isImage ? ++photoOrder : null;
+                            return (
+                              <div key={att.id} className="attachment-card">
+                                {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
+                                  <div className="attachment-image-preview">
+                                    <img
+                                      src={att.previewUrl || att.url}
+                                      alt={att.originalName}
+                                      loading="lazy"
+                                    />
+                                  </div>
+                                ) : null}
+                                <div className="attachment-card-body">
+                                  <div className="attachment-icon-wrap">
+                                    {att.isImage ? (
+                                      <ImageIcon size={18} />
+                                    ) : (
+                                      <FileText size={18} />
+                                    )}
+                                  </div>
+                                  <div className="attachment-meta">
+                                    <span
+                                      className="attachment-filename"
+                                      title={att.originalName}
+                                    >
+                                      {photoNum ? `[사진 ${photoNum}] ` : ''}
+                                      {att.originalName}
                                     </span>
+                                    <div className="attachment-submeta">
+                                      <span>{formatFileSize(att.fileSize)}</span>
+                                      {att.isCompressed && att.compressionRatio > 0 && (
+                                        <span className="compression-pill">
+                                          압축 -{att.compressionRatio}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSafeAttachmentUrl(att.downloadUrl || att.url) && (
+                                    <a
+                                      href={att.downloadUrl || att.url}
+                                      download={att.originalName}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="btn-icon attachment-download-btn"
+                                      title="파일 다운로드"
+                                    >
+                                      <Download size={16} />
+                                    </a>
                                   )}
                                 </div>
                               </div>
-                              {isSafeAttachmentUrl(att.downloadUrl || att.url) && (
-                                <a
-                                  href={att.downloadUrl || att.url}
-                                  download={att.originalName}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="btn-icon attachment-download-btn"
-                                  title="파일 다운로드"
-                                >
-                                  <Download size={16} />
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                 {/* AI 다듬기 전 원문 보기 (교수 계정에서는 노출하지 않음) */}
                 {!isProfessor &&
@@ -556,31 +798,50 @@ const QuestionDetail = ({
           </div>
         ) : (
           answers.map((ans, index) => {
-            const isStudentFollowUp =
-              String(ans.authorRole || '').toUpperCase() === 'STUDENT';
+            const seq = Number(ans.sequenceNumber || index + 2);
+            const isAdminPost = Boolean(ans.isAdminAuthor) || ans.authorTitle === '관리자';
+            const isStudentPost =
+              !isAdminPost && String(ans.authorRole || '').toUpperCase() === 'STUDENT';
+            const isQuestionOpFollowUp =
+              isStudentPost &&
+              (Boolean(ans.isQuestionAuthor) ||
+                ans.authorTitle === '질문자 추가 질문' ||
+                ans.authorId === question.studentId);
+            const isPeerStudentReply = isStudentPost && !isQuestionOpFollowUp;
+            const isAssigned =
+              !isAdminPost && !isStudentPost && (ans.isPrimaryProf || ans.isAssignedProfessor);
             const postAuthorName =
               ans.authorName ||
               ans.professorName ||
-              (isStudentFollowUp ? '수강생' : '교수');
-            const isAssigned = !isStudentFollowUp && (ans.isPrimaryProf || ans.isAssignedProfessor);
+              (isAdminPost ? '관리자' : isStudentPost ? '수강생' : '교수');
+            const canModerateAns =
+              Boolean(ans.canModerate) ||
+              isAdmin ||
+              (isPrimaryProf && isPeerStudentReply && !isAdminPost);
+
             return (
               <article
+                id={`post-seq-${seq}`}
                 key={ans.id}
                 className={`forum-post-card reply-post ${
-                  isStudentFollowUp
-                    ? 'student-followup-post'
-                    : isAssigned
-                      ? 'primary-prof-post'
-                      : 'co-prof-post'
-                } ${ans.isHidden ? 'post-hidden-state' : ''}`}
+                  isAdminPost
+                    ? 'admin-post-card'
+                    : isStudentPost
+                      ? 'student-followup-post'
+                      : isAssigned
+                        ? 'primary-prof-post'
+                        : 'co-prof-post'
+                } ${ans.isHidden ? 'post-hidden-state' : ''} ${
+                  highlightedSeq === seq ? 'post-seq-highlighted' : ''
+                }`}
               >
                 <aside className="forum-post-sidebar">
                   <div
                     className={`forum-post-avatar ${
-                      isStudentFollowUp ? 'student' : 'professor'
+                      isAdminPost ? 'admin' : isStudentPost ? 'student' : 'professor'
                     }`}
                   >
-                    {isStudentFollowUp && question.isAnonymous && !isAuthorStudent && !isAdmin
+                    {isStudentPost && question.isAnonymous && !isAuthorStudent && !isAdmin
                       ? '익'
                       : postAuthorName.charAt(0)}
                   </div>
@@ -588,16 +849,28 @@ const QuestionDetail = ({
                     <div className="forum-post-author-name">{postAuthorName}</div>
                     <span
                       className={`forum-role-tag ${
-                        isStudentFollowUp
-                          ? 'op'
-                          : isAssigned
-                            ? 'solution'
-                            : 'coprof'
+                        isAdminPost
+                          ? 'admin'
+                          : isQuestionOpFollowUp
+                            ? 'op'
+                            : isPeerStudentReply
+                              ? 'student-reply'
+                              : isAssigned
+                                ? 'solution'
+                                : 'coprof'
                       }`}
                     >
-                      {isStudentFollowUp ? (
+                      {isAdminPost ? (
+                        <>
+                          <ShieldCheck size={12} /> 관리자
+                        </>
+                      ) : isQuestionOpFollowUp ? (
                         <>
                           <MessageSquare size={12} /> 추가 질문
+                        </>
+                      ) : isPeerStudentReply ? (
+                        <>
+                          <Users size={12} /> 학생 답변
                         </>
                       ) : isAssigned ? (
                         <>
@@ -627,7 +900,7 @@ const QuestionDetail = ({
                     </span>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {isAdmin && onToggleHideAnswer && (
+                      {canModerateAns && onToggleHideAnswer && (
                         <button
                           type="button"
                           className="btn-admin-inline-hide"
@@ -644,7 +917,7 @@ const QuestionDetail = ({
                           )}
                         </button>
                       )}
-                      {isAdmin && onDeleteAnswer && (
+                      {canModerateAns && onDeleteAnswer && (
                         <button
                           type="button"
                           className="btn-admin-inline-delete"
@@ -653,14 +926,24 @@ const QuestionDetail = ({
                           <Trash2 size={12} /> 삭제
                         </button>
                       )}
-                      <span className="post-index-badge">#{index + 2}</span>
+                      <button
+                        type="button"
+                        className="post-index-badge post-seq-badge"
+                        onClick={() => handleJumpToSeq(seq)}
+                        title={`#${seq} 포스트로 이동`}
+                      >
+                        #{seq}
+                      </button>
                     </div>
                   </div>
 
                   <div className="forum-post-text">
-                    {(ans.content || '').split('\n').map((line, idx) => (
-                      <p key={idx}>{line || '\u00A0'}</p>
-                    ))}
+                    {renderFormattedPostContent(
+                      ans.content || '',
+                      ans.attachments?.length ? ans.attachments : question.attachments,
+                      validSeqSet,
+                      handleJumpToSeq
+                    )}
                   </div>
 
                   {(() => {
@@ -668,7 +951,7 @@ const QuestionDetail = ({
                     const followUpCurrent = (ans.content || '').trim();
                     const hasFollowUpOriginalDraft =
                       !isProfessor &&
-                      isStudentFollowUp &&
+                      isQuestionOpFollowUp &&
                       !question.isDeleted &&
                       Boolean(followUpOrig) &&
                       followUpOrig !== followUpCurrent;
@@ -717,10 +1000,17 @@ const QuestionDetail = ({
             </div>
           )}
 
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="#번호로 이전 글을 인용하거나 [사진 1] 태그로 이미지를 넣어요."
+            className="mb-help-bubble"
+          />
+
           <form onSubmit={handleFollowUpSubmit} className="answer-form">
             <div className="answer-form-header followup-form-header">
               <span className="editor-role-indicator">
-                <MessageSquare size={15} className="text-primary" /> 교수님 답변에 이어 추가 질문(Post #{answers.length + 2}) 작성
+                <MessageSquare size={15} className="text-primary" /> 추가 질문 (#{nextSequenceNumber})
               </span>
               <button
                 type="button"
@@ -734,7 +1024,7 @@ const QuestionDetail = ({
             <textarea
               className={`answer-textarea ${hasFollowUpAiRefined ? 'has-refined-border' : ''}`}
               rows={3}
-              placeholder="답변 내용 중 더 궁금한 점이나 후속 질문을 구체적으로 작성해주세요..."
+              placeholder="추가 질문을 입력하세요."
               value={followUpText}
               onChange={(e) => {
                 setFollowUpText(e.target.value);
@@ -742,6 +1032,25 @@ const QuestionDetail = ({
               }}
               required
             />
+            {getImageAttachments(question.attachments).length > 0 && (
+              <div className="composer-photo-quickbar">
+                <span className="composer-quick-label">사진 삽입:</span>
+                {getImageAttachments(question.attachments).map((att, imgIdx) => (
+                  <button
+                    type="button"
+                    key={att.id || imgIdx}
+                    className="photo-insert-btn"
+                    onClick={() =>
+                      setFollowUpText((prev) =>
+                        prev ? `${prev} [사진 ${imgIdx + 1}]` : `[사진 ${imgIdx + 1}]`
+                      )
+                    }
+                  >
+                    [사진 {imgIdx + 1}] 삽입
+                  </button>
+                ))}
+              </div>
+            )}
             {hasFollowUpAiRefined && (
               <div className="refined-status-hint" style={{ marginTop: 6 }}>
                 <CheckCircle2 size={14} />
@@ -750,7 +1059,7 @@ const QuestionDetail = ({
             )}
             <div className="answer-form-footer">
               <span className="answer-hint">
-                추가 질문 등록 시 담당 교수님께 알림이 전송되며 답변 대기 상태로 전환됩니다.
+                등록 시 담당교수에게 알림이 전송됩니다.
               </span>
               <button
                 type="submit"
@@ -785,8 +1094,8 @@ const QuestionDetail = ({
         </div>
       )}
 
-      {/* 교수 전용 하단 스레드 답변 작성 컴포저 */}
-      {isProfessor && (
+      {/* 스레드 답변 작성 컴포저 (교수 · 관리자 · 열림 스레드 타 학생) */}
+      {(isProfessor || isAdmin || (!isAuthorStudent && (canAnswer || isThreadOpen))) && (
         <div className="answer-editor-section">
           {errorMsg && (
             <div className="auth-gate-alert error" style={{ marginBottom: 12 }}>
@@ -797,15 +1106,29 @@ const QuestionDetail = ({
 
           {canAnswer ? (
             <form onSubmit={handleAnswerSubmit} className="answer-form">
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="#번호로 이전 글을 인용하거나 [사진 1] 태그로 이미지를 넣어요."
+                className="mb-help-bubble"
+              />
               <div className="answer-form-header">
                 <span className="editor-role-indicator">
-                  {isPrimaryProf ? (
+                  {isAdmin ? (
                     <>
-                      <Award size={15} className="text-primary" /> 담당 교수로서 스레드 답변(Post #{answers.length + 2}) 작성
+                      <ShieldCheck size={15} className="text-primary" /> 관리자 답변 (#{nextSequenceNumber})
+                    </>
+                  ) : isPrimaryProf ? (
+                    <>
+                      <Award size={15} className="text-primary" /> 담당교수 답변 (#{nextSequenceNumber})
+                    </>
+                  ) : isSameCourseOtherProf ? (
+                    <>
+                      <Users size={15} className="text-primary" /> 공동답변 (#{nextSequenceNumber})
                     </>
                   ) : (
                     <>
-                      <Users size={15} className="text-primary" /> 같은 과목 교수로서 공동 답변(Post #{answers.length + 2}) 작성
+                      <Users size={15} className="text-primary" /> 학생 답변 (#{nextSequenceNumber})
                     </>
                   )}
                 </span>
@@ -813,14 +1136,35 @@ const QuestionDetail = ({
               <textarea
                 className="answer-textarea"
                 rows={4}
-                placeholder="학생의 질문 토픽에 대한 명쾌한 학술 답변을 작성해주세요..."
+                placeholder="답변을 입력하세요."
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
                 required
               />
+              {getImageAttachments(question.attachments).length > 0 && (
+                <div className="composer-photo-quickbar">
+                  <span className="composer-quick-label">사진 삽입:</span>
+                  {getImageAttachments(question.attachments).map((att, imgIdx) => (
+                    <button
+                      type="button"
+                      key={att.id || imgIdx}
+                      className="photo-insert-btn"
+                      onClick={() =>
+                        setAnswerText((prev) =>
+                          prev ? `${prev} [사진 ${imgIdx + 1}]` : `[사진 ${imgIdx + 1}]`
+                        )
+                      }
+                    >
+                      [사진 {imgIdx + 1}] 삽입
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="answer-form-footer">
                 <span className="answer-hint">
-                  답변 등록 시 질문 학생에게 즉시 알림이 전송됩니다.
+                  {isAdmin
+                    ? '관리자 배지와 함께 등록됩니다.'
+                    : '등록 시 질문자에게 알림이 전송됩니다.'}
                 </span>
                 <button
                   type="submit"
@@ -828,7 +1172,7 @@ const QuestionDetail = ({
                   disabled={!answerText.trim() || isSubmitting}
                 >
                   <Send size={16} />
-                  {isSubmitting ? '등록 중...' : '스레드 답변 등록'}
+                  {isSubmitting ? '등록 중...' : '답변 등록'}
                 </button>
               </div>
             </form>

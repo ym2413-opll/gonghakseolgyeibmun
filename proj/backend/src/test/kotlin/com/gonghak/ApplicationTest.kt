@@ -197,7 +197,7 @@ class ApplicationTest {
         }
         assertEquals(HttpStatusCode.Forbidden, otherAnsRes.status)
 
-        // 2. Lecture Category: other professor CAN answer if assigned professor hasn't answered yet
+        // 2. Lecture Category: closed by default; other professor blocked until assigned professor opens thread (열림)
         val lectureReq = CreateQuestionRequest(
             courseId = courseId,
             category = QuestionCategory.LECTURE,
@@ -212,9 +212,28 @@ class ApplicationTest {
             setBody(lectureReq)
         }
         assertEquals(HttpStatusCode.Created, createLectureRes.status)
-        val lectureQId = createLectureRes.body<ApiResponse<QuestionDetailDto>>().data!!.id
+        val lectureDetail = createLectureRes.body<ApiResponse<QuestionDetailDto>>().data!!
+        val lectureQId = lectureDetail.id
+        assertFalse(lectureDetail.isThreadOpen)
 
-        // Other professor answers first -> Allowed
+        // Closed by default -> other professor cannot answer yet
+        val closedOtherAnsRes = client.post("/api/questions/$lectureQId/answers") {
+            header(HttpHeaders.Authorization, tokenFor(otherProfId))
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "닫힘 상태에서 공동 답변 시도"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, closedOtherAnsRes.status)
+
+        // Assigned professor toggles thread to Open (열림)
+        val openRes = client.patch("/api/questions/$lectureQId/thread-open") {
+            header(HttpHeaders.Authorization, tokenFor(assignedProfId))
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = true))
+        }
+        assertEquals(HttpStatusCode.OK, openRes.status)
+        assertTrue(openRes.body<ApiResponse<QuestionDetailDto>>().data!!.isThreadOpen)
+
+        // Other professor answers first -> Allowed once thread is open
         val otherAnsLecRes = client.post("/api/questions/$lectureQId/answers") {
             header(HttpHeaders.Authorization, tokenFor(otherProfId))
             contentType(ContentType.Application.Json)

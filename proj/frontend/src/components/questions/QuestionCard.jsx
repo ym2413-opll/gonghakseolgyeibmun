@@ -12,7 +12,10 @@ import {
   EyeOff,
   Eye,
   Paperclip,
-  Trash2
+  Trash2,
+  Lock,
+  Unlock,
+  ShieldCheck
 } from 'lucide-react';
 
 const QuestionCard = ({
@@ -128,6 +131,31 @@ const QuestionCard = ({
           <div className="forum-topic-title-line">
             <span className={`badge ${category.badgeClass}`}>{category.name}</span>
             <span className="forum-course-pill">{question.courseName}</span>
+            {question.isAdminAuthor && (
+              <span className="badge badge-admin">
+                <ShieldCheck size={11} /> 관리자
+              </span>
+            )}
+            {!question.isDeleted && (
+              <span
+                className={question.isThreadOpen ? 'badge-thread-open' : 'badge-thread-closed'}
+                title={
+                  question.isThreadOpen
+                    ? '열림 스레드 (공동교수·타 학생 참여 가능)'
+                    : '질문자, 담당교수 외 닫힘'
+                }
+              >
+                {question.isThreadOpen ? (
+                  <>
+                    <Unlock size={11} /> 열림
+                  </>
+                ) : (
+                  <>
+                    <Lock size={11} /> 닫힘
+                  </>
+                )}
+              </span>
+            )}
             {question.isDeleted && (
               <span className="status-pill danger">
                 <Trash2 size={11} /> 질문자 삭제됨

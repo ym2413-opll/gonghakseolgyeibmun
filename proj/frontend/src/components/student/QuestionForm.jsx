@@ -9,6 +9,7 @@ import { compressImageClient } from '../../utils/imageCompression';
 import { generateSummaryTitle } from '../../utils/textSummary';
 import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
+import HelpBubble from '../common/HelpBubble';
 import {
   Send,
   PenTool,
@@ -32,6 +33,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const { currentUser, isStudent, allCourses, refreshCurrentUser, refreshCatalog } = useAuth();
   const { profSettings } = useNotifications();
   const fileInputRef = useRef(null);
+  const contentTextareaRef = useRef(null);
 
   useEffect(() => {
     refreshCurrentUser();
@@ -229,6 +231,26 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  const handleInsertPhotoTag = (photoNum) => {
+    const tag = `[사진 ${photoNum}]`;
+    const textarea = contentTextareaRef.current;
+    if (!textarea || typeof textarea.selectionStart !== 'number') {
+      setContent((prev) => (prev ? `${prev}\n${tag}` : tag));
+      if (hasAiRefined) setHasAiRefined(false);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd ?? start;
+    const nextValue = `${content.slice(0, start)}${tag}${content.slice(end)}`;
+    setContent(nextValue);
+    if (hasAiRefined) setHasAiRefined(false);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const nextPos = start + tag.length;
+      textarea.setSelectionRange(nextPos, nextPos);
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!content.trim()) {
@@ -331,6 +353,12 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         )}
 
         <form onSubmit={handleSubmit} className="qa-form">
+          <HelpBubble
+            tier="SOME"
+            mode="inline"
+            text="질문할 과목과 카테고리(강의·과제·성적)를 선택해요."
+            className="mb-help-bubble"
+          />
           {/* 1. 과목 선택 */}
           <div className="form-group">
             <label className="form-label">
@@ -426,30 +454,45 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               </div>
 
               <div className="content-toolbar-actions">
-                <button
-                  type="button"
-                  className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
-                  onClick={() => setIsAiModalOpen(true)}
+                <HelpBubble
+                  tier="ALL"
+                  mode="floating"
+                  placement="bottom-end"
+                  text="작성한 질문을 AI로 다듬어요."
                 >
-                  <PenTool size={14} />
-                  <span>{hasAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
-                </button>
-
-                {selectedCategory !== 'grade' && (
                   <button
                     type="button"
-                    className="btn-similar-search"
-                    onClick={() => setIsSimilarModalOpen(true)}
-                    disabled={similarList.length === 0}
+                    className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
+                    onClick={() => setIsAiModalOpen(true)}
                   >
-                    <Search size={14} />
-                    <span>유사 질답 ({similarList.length})</span>
+                    <PenTool size={14} />
+                    <span>{hasAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
                   </button>
+                </HelpBubble>
+
+                {selectedCategory !== 'grade' && (
+                  <HelpBubble
+                    tier="ALL"
+                    mode="floating"
+                    placement="bottom-end"
+                    text="유사한 기존 질문과 답변을 확인해요."
+                  >
+                    <button
+                      type="button"
+                      className="btn-similar-search"
+                      onClick={() => setIsSimilarModalOpen(true)}
+                      disabled={similarList.length === 0}
+                    >
+                      <Search size={14} />
+                      <span>유사 질답 ({similarList.length})</span>
+                    </button>
+                  </HelpBubble>
                 )}
               </div>
             </div>
 
             <textarea
+              ref={contentTextareaRef}
               id="q-content"
               rows={8}
               className={`textarea-content ${hasAiRefined ? 'has-refined-border' : ''}`}
@@ -479,6 +522,12 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 </label>
               </div>
             </div>
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="파일을 첨부하고 [사진 1] 태그로 본문에 넣어요."
+              className="mb-help-bubble"
+            />
 
             {/* 드래그 앤 드롭 업로드 박스 */}
             <div
@@ -524,51 +573,79 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             </div>
 
             {/* 첨부된 파일 목록 */}
-            {attachments.length > 0 && (
-              <div className="attached-files-list">
-                {attachments.map((att, idx) => (
-                  <div key={att.id || idx} className="attached-file-card">
-                    {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
-                      <div className="attached-file-thumb">
-                        <img src={att.previewUrl || att.url} alt={att.originalName} />
-                      </div>
-                    ) : (
-                      <div className="attached-file-icon-box">{renderAttachmentIcon(att)}</div>
-                    )}
+            {attachments.length > 0 && (() => {
+              let photoCounter = 0;
+              return (
+                <div className="attached-files-list">
+                  {attachments.map((att, idx) => {
+                    const photoNum = att.isImage ? ++photoCounter : null;
+                    return (
+                      <div key={att.id || idx} className="attached-file-card">
+                        {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
+                          <div className="attached-file-thumb">
+                            <img src={att.previewUrl || att.url} alt={att.originalName} />
+                          </div>
+                        ) : (
+                          <div className="attached-file-icon-box">{renderAttachmentIcon(att)}</div>
+                        )}
 
-                    <div className="attached-file-info">
-                      <div className="file-name-row">
-                        <span className="file-name" title={att.originalName}>
-                          {att.originalName}
-                        </span>
-                      </div>
+                        <div className="attached-file-info">
+                          <div className="file-name-row">
+                            {photoNum && (
+                              <span className="photo-seq-tag">[사진 {photoNum}]</span>
+                            )}
+                            <span className="file-name" title={att.originalName}>
+                              {att.originalName}
+                            </span>
+                          </div>
 
-                      <div className="file-meta-row">
-                        <span className="file-size-badge normal">
-                          {formatFileSize(att.fileSize)}
-                        </span>
-                      </div>
-                    </div>
+                          <div className="file-meta-row">
+                            <span className="file-size-badge normal">
+                              {formatFileSize(att.fileSize)}
+                            </span>
+                            {photoNum && (
+                              <button
+                                type="button"
+                                className="photo-insert-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleInsertPhotoTag(photoNum);
+                                }}
+                                title={`[사진 ${photoNum}] 삽입`}
+                              >
+                                [사진 {photoNum}] 삽입
+                              </button>
+                            )}
+                          </div>
+                        </div>
 
-                    <button
-                      type="button"
-                      className="btn-remove-attachment"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRemoveAttachment(idx);
-                      }}
-                      title="삭제"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                        <button
+                          type="button"
+                          className="btn-remove-attachment"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveAttachment(idx);
+                          }}
+                          title="삭제"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* 5. 익명 질문 체크박스 */}
           <div className="form-group anonymous-group">
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="익명으로 질문해요. (성적 카테고리는 실명 필수예요)"
+              className="mb-help-bubble"
+            />
             <div className="anon-check-wrapper">
               <label className={`checkbox-label ${selectedCategory === 'grade' ? 'disabled-label' : ''}`}>
                 <input

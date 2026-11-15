@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
+import HelpBubble from './HelpBubble';
 import {
   Bell,
   Settings,
@@ -135,56 +136,71 @@ const Header = ({
 
           {/* 교수 전용 알림·이메일·카테고리 설정 버튼 */}
           {isProfessor && (
-            <button
-              type="button"
-              className="btn btn-outline btn-sm prof-setting-btn"
-              onClick={onOpenProfSettings}
-              title="교수용 질문 알림·이메일 및 카테고리 설정"
+            <HelpBubble
+              tier="ALL"
+              mode="floating"
+              placement="bottom-end"
+              text="방해금지 시간, 이메일·카테고리별 알림을 설정해요."
             >
-              <Sliders size={16} />
-              <span className="hide-mobile">알림·이메일 설정</span>
-              {settings?.dndEnabled && (
-                <span className="dnd-badge">
-                  DND {settings.dndStartTime}~{settings.dndEndTime}
-                </span>
-              )}
-            </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm prof-setting-btn"
+                onClick={onOpenProfSettings}
+                title="교수용 질문 알림·이메일 및 카테고리 설정"
+              >
+                <Sliders size={16} />
+                <span className="hide-mobile">알림·이메일 설정</span>
+                {settings?.dndEnabled && (
+                  <span className="dnd-badge">
+                    DND {settings.dndStartTime}~{settings.dndEndTime}
+                  </span>
+                )}
+              </button>
+            </HelpBubble>
           )}
 
-          {/* 분리된 아이콘 전용 테마 전환 버튼 (배색: 무채색/초록, 밝기: 라이트/다크) */}
-          <div className="theme-toggle-group" role="group" aria-label="화면 테마 전환">
-            <button
-              type="button"
-              className={`btn-theme-chip ${isGreen ? 'active' : ''}`}
-              onClick={toggleColorScheme}
-              title={colorSchemeTooltip}
-              aria-label={colorSchemeTooltip}
-              aria-pressed={isGreen}
-            >
-              <Leaf size={17} />
-            </button>
-            <button
-              type="button"
-              className={`btn-theme-chip ${isDark ? 'active' : ''}`}
-              onClick={toggleBrightness}
-              title={brightnessTooltip}
-              aria-label={brightnessTooltip}
-              aria-pressed={isDark}
-            >
-              {isDark ? <Moon size={17} /> : <Sun size={17} />}
-            </button>
-          </div>
-
-          {/* 글자 크기 및 테마 상세 설정 모달 버튼 */}
-          <button
-            type="button"
-            className="btn-icon"
-            onClick={onOpenSettings}
-            title="화면 테마 및 글자 크기 설정"
-            aria-label="화면 설정"
+          {/* 분리된 아이콘 전용 테마 전환 버튼 + 화면 설정 모달 버튼 */}
+          <HelpBubble
+            tier="SOME"
+            mode="floating"
+            placement="bottom-end"
+            text="테마, 글자 크기, 과목, 도움말 표시를 설정해요."
           >
-            <Settings size={18} />
-          </button>
+            <div className="header-theme-settings-group">
+              <div className="theme-toggle-group" role="group" aria-label="화면 테마 전환">
+                <button
+                  type="button"
+                  className={`btn-theme-chip ${isGreen ? 'active' : ''}`}
+                  onClick={toggleColorScheme}
+                  title={colorSchemeTooltip}
+                  aria-label={colorSchemeTooltip}
+                  aria-pressed={isGreen}
+                >
+                  <Leaf size={17} />
+                </button>
+                <button
+                  type="button"
+                  className={`btn-theme-chip ${isDark ? 'active' : ''}`}
+                  onClick={toggleBrightness}
+                  title={brightnessTooltip}
+                  aria-label={brightnessTooltip}
+                  aria-pressed={isDark}
+                >
+                  {isDark ? <Moon size={17} /> : <Sun size={17} />}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={onOpenSettings}
+                title="화면 테마, 글자 크기 및 도움말 설정"
+                aria-label="화면 설정"
+              >
+                <Settings size={18} />
+              </button>
+            </div>
+          </HelpBubble>
 
           {/* 로그인 상태일 때만 알림 드롭다운 및 프로필/로그아웃 표시 */}
           {isAuthenticated ? (

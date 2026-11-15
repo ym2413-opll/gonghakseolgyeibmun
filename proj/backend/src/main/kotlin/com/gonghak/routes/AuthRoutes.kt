@@ -14,8 +14,31 @@ fun Route.authRoutes(userService: UserService) {
     val loginIpLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000L)
     val loginAccountLimiter = SlidingWindowRateLimiter(maxRequests = 12, windowMillis = 60_000L)
     val registerIpLimiter = SlidingWindowRateLimiter(maxRequests = 15, windowMillis = 60_000L)
+    val nextIdIpLimiter = SlidingWindowRateLimiter(maxRequests = 60, windowMillis = 60_000L)
 
     route("/api/auth") {
+        // Preview next auto-assigned / random 10-digit student ID: (YYYY)(DDD)(SSS)
+        get("/next-student-id") {
+            val ipKey = call.clientRateLimitKey()
+            if (!nextIdIpLimiter.allow(ipKey)) {
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    ApiResponse<String>(success = false, message = "학번 조회 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+                )
+                return@get
+            }
+            val year = call.request.queryParameters["year"]?.toIntOrNull() ?: 2026
+            val department = call.request.queryParameters["department"].orEmpty()
+            val isForeign = call.request.queryParameters["isForeign"]?.equals("true", ignoreCase = true) == true
+            val random = call.request.queryParameters["random"]?.equals("true", ignoreCase = true) == true
+            try {
+                val res = userService.getNextStudentId(year, department, isForeign, random)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = res))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
         // Register new student or professor account
         post("/register") {
             val ipKey = call.clientRateLimitKey()

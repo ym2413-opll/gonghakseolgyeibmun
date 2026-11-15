@@ -15,10 +15,20 @@ fun Route.userSettingRoutes(
     userService: UserService,
     notificationService: NotificationService
 ) {
-    suspend fun buildUnifiedSettings(userId: java.util.UUID): UnifiedSettingDto {
+    suspend fun buildUnifiedSettings(user: UserDto): UnifiedSettingDto {
+        val userId = UUID.fromString(user.id)
         val userSetting = userService.getUserSetting(userId)
-        val profSetting = notificationService.getProfessorNotificationSetting(userId)
-        val categoriesMap = userService.getProfessorActiveCategoriesMap(userId)
+        val isProfessorOrAdmin = user.role == UserRole.PROFESSOR || user.role == UserRole.ADMIN || user.isAdmin
+        val profSetting = if (isProfessorOrAdmin) {
+            notificationService.getProfessorNotificationSetting(userId)
+        } else {
+            null
+        }
+        val categoriesMap = if (isProfessorOrAdmin) {
+            userService.getProfessorActiveCategoriesMap(userId)
+        } else {
+            emptyMap()
+        }
 
         return UnifiedSettingDto(
             userId = userId.toString(),
@@ -30,12 +40,14 @@ fun Route.userSettingRoutes(
                 "xlarge" -> "xl"
                 else -> if (userSetting.fontSize in listOf("sm", "md", "lg", "xl")) userSetting.fontSize else "md"
             },
-            dndEnabled = profSetting.quietHoursEnabled,
-            dndStartTime = profSetting.quietHoursStart,
-            dndEndTime = profSetting.quietHoursEnd,
-            coProfNotification = profSetting.notifyOtherProfessorQuestions,
-            emailEnabled = profSetting.emailEnabled,
-            notificationEmail = profSetting.notificationEmail,
+            helpLevel = userSetting.helpLevel,
+            exhibitionMode = userSetting.exhibitionMode,
+            dndEnabled = profSetting?.quietHoursEnabled ?: false,
+            dndStartTime = profSetting?.quietHoursStart ?: "22:00",
+            dndEndTime = profSetting?.quietHoursEnd ?: "08:00",
+            coProfNotification = profSetting?.notifyOtherProfessorQuestions ?: false,
+            emailEnabled = profSetting?.emailEnabled ?: false,
+            notificationEmail = profSetting?.notificationEmail,
             activeCategories = categoriesMap
         )
     }
@@ -44,12 +56,16 @@ fun Route.userSettingRoutes(
         val userId = UUID.fromString(user.id)
         val mappedTheme = request.theme ?: request.themeMode
         val mappedFont = request.fontSize
-        if (mappedTheme != null || mappedFont != null) {
+        val mappedHelpLevel = request.helpLevel
+        val mappedExhibition = request.exhibitionMode
+        if (mappedTheme != null || mappedFont != null || mappedHelpLevel != null || mappedExhibition != null) {
             userService.updateUserSetting(
                 userId,
                 UpdateUserSettingRequest(
                     themeMode = mappedTheme,
-                    fontSize = mappedFont
+                    fontSize = mappedFont,
+                    helpLevel = mappedHelpLevel,
+                    exhibitionMode = mappedExhibition
                 )
             )
         }
@@ -81,13 +97,13 @@ fun Route.userSettingRoutes(
             }
         }
 
-        return buildUnifiedSettings(userId)
+        return buildUnifiedSettings(user)
     }
 
     route("/api/settings") {
         get {
             val user = call.requireAuthenticatedUser(userService) ?: return@get
-            call.respond(HttpStatusCode.OK, buildUnifiedSettings(UUID.fromString(user.id)))
+            call.respond(HttpStatusCode.OK, buildUnifiedSettings(user))
         }
 
         post {
@@ -123,8 +139,12 @@ fun Route.userSettingRoutes(
         put {
             val user = call.requireAuthenticatedUser(userService) ?: return@put
             val request = call.receive<UpdateUserSettingRequest>()
-            val updated = userService.updateUserSetting(UUID.fromString(user.id), request)
-            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            try {
+                val updated = userService.updateUserSetting(UUID.fromString(user.id), request)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            }
         }
     }
 
@@ -138,8 +158,12 @@ fun Route.userSettingRoutes(
         put {
             val prof = call.requireProfessorOrAdmin(userService) ?: return@put
             val request = call.receive<UpdateProfessorNotificationSettingRequest>()
-            val updated = notificationService.updateProfessorNotificationSetting(UUID.fromString(prof.id), request)
-            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            try {
+                val updated = notificationService.updateProfessorNotificationSetting(UUID.fromString(prof.id), request)
+                call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            }
         }
     }
 }

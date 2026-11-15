@@ -121,7 +121,7 @@ class SimilarityService {
     }
 
     private fun tokenize(text: String): List<String> {
-        val cleaned = text.lowercase().replace(Regex("[^\\p{L}\\p{Nd}]+"), " ").trim()
+        val cleaned = text.take(4000).lowercase().replace(Regex("[^\\p{L}\\p{Nd}]+"), " ").trim()
         val words = cleaned.split("\\s+".toRegex())
             .filter { it.length >= 2 && it !in stopwords }
 

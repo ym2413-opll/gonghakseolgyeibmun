@@ -190,6 +190,87 @@ fun Route.questionRoutes(
             }
         }
 
+        // Toggle thread open/close state (Assigned Professor or Admin)
+        patch("/{id}/thread-open") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@patch
+            val actorId = UUID.fromString(user.id)
+            val questionId = parseQuestionId(call.parameters["id"])
+            val request = call.receive<ToggleThreadOpenRequest>()
+
+            try {
+                val updated = questionService.setThreadOpen(questionId, actorId, request.isThreadOpen)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        data = updated,
+                        message = if (request.isThreadOpen) "스레드가 '열림' 상태로 전환되었습니다." else "스레드가 '질문자, 담당교수 외 닫힘' 상태로 전환되었습니다."
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
+        // Hide / Unhide an answer in thread (Admin or Assigned Professor for student answers in open thread)
+        patch("/{id}/answers/{answerId}/hide") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@patch
+            val actorId = UUID.fromString(user.id)
+            val questionId = parseQuestionId(call.parameters["id"])
+            val answerId = runCatching { UUID.fromString(call.parameters["answerId"]) }.getOrNull()
+                ?: return@patch call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "유효하지 않은 답변 ID입니다.")
+                )
+            val request = call.receive<ToggleHideRequest>()
+
+            try {
+                val updated = questionService.setAnswerHiddenByModerator(questionId, answerId, actorId, request.isHidden)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        data = updated,
+                        message = if (request.isHidden) "답변이 가리기 처리되었습니다." else "답변 가리기가 해제되었습니다."
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
+        // Delete an answer in thread (Admin or Assigned Professor for student answers in open thread)
+        delete("/{id}/answers/{answerId}") {
+            val user = call.requireAuthenticatedUser(userService) ?: return@delete
+            val actorId = UUID.fromString(user.id)
+            val questionId = parseQuestionId(call.parameters["id"])
+            val answerId = runCatching { UUID.fromString(call.parameters["answerId"]) }.getOrNull()
+                ?: return@delete call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "유효하지 않은 답변 ID입니다.")
+                )
+
+            try {
+                questionService.deleteAnswerByModerator(questionId, answerId, actorId)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        data = true,
+                        message = "답변이 삭제되었습니다."
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.NotFound, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
         // Post student follow-up question in thread
         post("/{id}/followups") {
             val user = call.requireAuthenticatedUser(userService) ?: return@post

@@ -2,16 +2,20 @@
 // 광운대학교 학업 Q&A 센터 포털 사용자, 학과, 교과목, 질문 및 알림 데이터 규격 (R3 Overhaul)
 
 export const INITIAL_DEPARTMENTS = [
-  { id: 'dept-001', name: '소프트웨어학과', shortName: '소프트', code: 'SW' },
-  { id: 'dept-002', name: '컴퓨터공학과', shortName: '컴공', code: 'CE' },
-  { id: 'dept-003', name: '정보융합학부', shortName: '정융', code: 'IC' },
-  { id: 'dept-004', name: '로봇학부', shortName: '로봇', code: 'RO' },
-  { id: 'dept-005', name: '전자공학과', shortName: '전자', code: 'EE' },
-  { id: 'dept-006', name: '전자통신공학과', shortName: '전통', code: 'EC' },
-  { id: 'dept-007', name: '전자융합공학과', shortName: '전융', code: 'EF' },
-  { id: 'dept-008', name: '전기공학과', shortName: '전기', code: 'EL' },
-  { id: 'dept-009', name: '전자재료공학과', shortName: '전재', code: 'EM' },
-  { id: 'dept-010', name: '반도체시스템공학부', shortName: '반도체', code: 'SE' }
+  { id: 'dept-001', name: '소프트웨어학과', shortName: '소프트', code: '101', college: '인공지능융합대학' },
+  { id: 'dept-002', name: '컴퓨터공학과', shortName: '컴공', code: '102', college: '인공지능융합대학' },
+  { id: 'dept-003', name: '정보융합학부', shortName: '정융', code: '103', college: '인공지능융합대학' },
+  { id: 'dept-004', name: '로봇학부', shortName: '로봇', code: '104', college: '인공지능융합대학' },
+  { id: 'dept-005', name: '전자공학과', shortName: '전자', code: '201', college: '전자정보공과대학' },
+  { id: 'dept-006', name: '전자통신공학과', shortName: '전통', code: '202', college: '전자정보공과대학' },
+  { id: 'dept-007', name: '전자융합공학과', shortName: '전융', code: '203', college: '전자정보공과대학' },
+  { id: 'dept-008', name: '전기공학과', shortName: '전기', code: '204', college: '전자정보공과대학' },
+  { id: 'dept-009', name: '반도체시스템공학부', shortName: '반도체', code: '205', college: '전자정보공과대학' },
+  { id: 'dept-010', name: '화학공학과', shortName: '화공', code: '301', college: '공과대학' },
+  { id: 'dept-011', name: '건축공학과', shortName: '건축', code: '302', college: '공과대학' },
+  { id: 'dept-012', name: '수학교육과', shortName: '수교', code: '401', college: '자연과학대학' },
+  { id: 'dept-013', name: '미디어커뮤니케이션학부', shortName: '미컴', code: '501', college: '인문사회과학대학' },
+  { id: 'dept-014', name: '경영학부', shortName: '경영', code: '601', college: '경영대학' }
 ];
 
 export const INITIAL_COURSES = [
@@ -149,9 +153,11 @@ export const INITIAL_QUESTIONS = [
     studentName: '서영민',
     realStudentName: '서영민',
     realStudentTag: '26_소프트_서영민',
-    realStudentIdentifier: '2026202001',
+    realStudentIdentifier: '2026101001',
     isAnonymous: false,
     isHidden: false,
+    isThreadOpen: false,
+    lastSequenceNumber: 2,
     createdAt: '2026-10-04T10:15:00',
     answers: [
       {
@@ -161,6 +167,8 @@ export const INITIAL_QUESTIONS = [
         authorTitle: '담당교수',
         isPrimaryProf: true,
         isHidden: false,
+        sequenceNumber: 2,
+        isAdminAuthor: false,
         content: '좋은 질문입니다. 아두이노 Uno의 경우 3번 핀은 Timer 2(기본 약 490Hz)에 연결되어 있습니다. 만약 Servo 라이브러리를 함께 사용하는 경우 Timer 1을 선점하므로 다른 PWM 핀들과 간섭이 일어날 수 있습니다. 9번/10번 핀 대신 하드웨어 타이머 분주비를 확인해보거나 Timer 2 설정을 직접 조정해보세요. 다음 수업 실습 시간에 직접 회로를 함께 점검해봅시다.',
         createdAt: '2026-10-04T14:30:00'
       }
@@ -185,7 +193,7 @@ export const INITIAL_QUESTIONS = [
     studentName: '수강생',
     realStudentName: '서영민',
     realStudentTag: '26_소프트_서영민',
-    realStudentIdentifier: '2026202001',
+    realStudentIdentifier: '2026101001',
     isAnonymous: true,
     isHidden: false,
     createdAt: '2026-10-05T09:20:00',
@@ -210,7 +218,7 @@ export const INITIAL_QUESTIONS = [
     studentName: '수강생',
     realStudentName: '김민지',
     realStudentTag: '25_소프트_김민지',
-    realStudentIdentifier: '2025202015',
+    realStudentIdentifier: '2025101015',
     isAnonymous: true,
     isHidden: false,
     createdAt: '2026-10-05T11:45:00',
@@ -235,9 +243,11 @@ export const INITIAL_QUESTIONS = [
     studentName: '서영민',
     realStudentName: '서영민',
     realStudentTag: '26_소프트_서영민',
-    realStudentIdentifier: '2026202001',
+    realStudentIdentifier: '2026101001',
     isAnonymous: false,
     isHidden: false,
+    isThreadOpen: false,
+    lastSequenceNumber: 2,
     createdAt: '2026-10-05T16:00:00',
     answers: [
       {
@@ -247,6 +257,8 @@ export const INITIAL_QUESTIONS = [
         authorTitle: '담당교수',
         isPrimaryProf: true,
         isHidden: false,
+        sequenceNumber: 2,
+        isAdminAuthor: false,
         content: '서영민 학생, 3번 문항 채점 기준표를 확인해보면 예외 조건에 대한 페일세이프(Fail-Safe) 상태 루프가 누락되어 부분점수 5점이 감점되었습니다. 목요일 오후 2시 연구실(새빛관 402호)로 방문하면 답안지와 상세 루브릭을 확인시켜 줄 수 있습니다.',
         createdAt: '2026-10-05T18:10:00'
       }
@@ -271,7 +283,7 @@ export const INITIAL_QUESTIONS = [
     studentName: '박준형',
     realStudentName: '박준형',
     realStudentTag: '24_컴공_박준형',
-    realStudentIdentifier: '2024203009',
+    realStudentIdentifier: '2024102009',
     isAnonymous: false,
     isHidden: false,
     createdAt: '2026-10-06T09:00:00',

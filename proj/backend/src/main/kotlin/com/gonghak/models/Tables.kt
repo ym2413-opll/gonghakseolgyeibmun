@@ -24,6 +24,7 @@ object UsersTable : UUIDTable("users") {
 
 object DepartmentsTable : UUIDTable("departments") {
     val name = varchar("name", 100).uniqueIndex()
+    val code = varchar("code", 3).default("101")
     val college = varchar("college", 100).default("")
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
@@ -73,6 +74,8 @@ object UserSettingsTable : UUIDTable("user_settings") {
     val userId = uuid("user_id").references(UsersTable.id).uniqueIndex()
     val themeMode = varchar("theme_mode", 20).default("light") // light, dark, green, system
     val fontSize = varchar("font_size", 20).default("md") // sm, md, lg, xl
+    val helpLevel = varchar("help_level", 20).default("SOME") // NONE, SOME, ALL
+    val exhibitionMode = bool("exhibition_mode").default(false)
 }
 
 object QuestionsTable : UUIDTable("questions") {
@@ -85,6 +88,8 @@ object QuestionsTable : UUIDTable("questions") {
     val refinedContent = text("refined_content")
     val isAnonymous = bool("is_anonymous").default(false)
     val isHidden = bool("is_hidden").default(false)
+    val isThreadOpen = bool("is_thread_open").default(false)
+    val lastSequenceNumber = integer("last_sequence_number").default(1)
     val isDeletedByAuthor = bool("is_deleted_by_author").default(false)
     val deletedAt = timestamp("deleted_at").nullable()
     val vectorData = text("vector_data").default("[]")
@@ -95,6 +100,7 @@ object QuestionsTable : UUIDTable("questions") {
 object AnswersTable : UUIDTable("answers") {
     val questionId = uuid("question_id").references(QuestionsTable.id)
     val professorId = uuid("professor_id").references(UsersTable.id)
+    val sequenceNumber = integer("sequence_number").default(2)
     val rawContent = text("raw_content").default("")
     val content = text("content")
     val isAssignedProfessor = bool("is_assigned_professor").default(false)

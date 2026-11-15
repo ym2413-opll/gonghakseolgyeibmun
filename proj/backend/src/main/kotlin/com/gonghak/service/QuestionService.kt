@@ -59,14 +59,25 @@ class QuestionService(
         val name: String,
         val role: String,
         val displayTag: String,
-        val department: String
+        val department: String,
+        val isAdmin: Boolean = false
     )
+
+    companion object {
+        const val MAX_TITLE_LENGTH = 180
+        const val MAX_CONTENT_LENGTH = 20_000
+    }
+
+    private fun validateContentLength(text: String?, label: String) {
+        if (text != null && text.length > MAX_CONTENT_LENGTH) {
+            throw IllegalArgumentException("${label}은(는) 최대 ${MAX_CONTENT_LENGTH}자까지 입력할 수 있습니다.")
+        }
+    }
 
     private data class SimilarQuestionCandidate(
         val questionId: UUID,
         val title: String,
         val refinedContent: String,
-        val rawContent: String,
         val answerDtos: List<AnswerDto>
     )
     private val banDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
@@ -152,11 +163,17 @@ class QuestionService(
             } else {
                 effectiveRaw
             }
+            validateContentLength(effectiveRaw, "질문 원문")
+            validateContentLength(finalRefinedContent, "질문 본문")
 
             val effectiveTitle = if (!request.title.isNullOrBlank()) {
-                request.title!!
+                val trimmedTitle = request.title!!.trim()
+                if (trimmedTitle.length > MAX_TITLE_LENGTH) {
+                    throw IllegalArgumentException("제목은 최대 ${MAX_TITLE_LENGTH}자까지 입력할 수 있습니다.")
+                }
+                trimmedTitle
             } else {
-                generateSummaryTitle(finalRefinedContent.ifBlank { effectiveRaw })
+                generateSummaryTitle(finalRefinedContent.ifBlank { effectiveRaw }).take(MAX_TITLE_LENGTH)
             }
 
             val qId = UUID.randomUUID()
@@ -173,6 +190,8 @@ class QuestionService(
                 it[refinedContent] = finalRefinedContent
                 it[isAnonymous] = request.isAnonymous
                 it[isHidden] = false
+                it[isThreadOpen] = false
+                it[lastSequenceNumber] = 1
                 it[vectorData] = "[]"
                 it[status] = QuestionStatus.OPEN.name
                 it[createdAt] = now
@@ -275,16 +294,20 @@ class QuestionService(
                 name = uRow[UsersTable.name],
                 role = uRow[UsersTable.role],
                 displayTag = uRow[UsersTable.displayTag],
-                department = uRow[UsersTable.department]
+                department = uRow[UsersTable.department],
+                isAdmin = uRow[UsersTable.isAdmin] || uRow[UsersTable.role] == UserRole.ADMIN.name
             )
         }
 
         query.map { row ->
             val qId = row[QuestionsTable.id].value
             val authorId = row[QuestionsTable.studentId]
+            val authorIsAdmin = allUsersMap[authorId]?.isAdmin ?: false
             val isMyQuestion = (authorId == currentUserId)
             val isAnonymous = row[QuestionsTable.isAnonymous]
             val isQuestionHidden = row[QuestionsTable.isHidden]
+            val isThreadOpen = row[QuestionsTable.isThreadOpen]
+            val lastSequenceNumber = row[QuestionsTable.lastSequenceNumber]
             val isQuestionDeleted = row[QuestionsTable.isDeletedByAuthor]
             val deletedAtStr = row[QuestionsTable.deletedAt]?.toString()
             val courseName = row[CoursesTable.name]
@@ -299,8 +322,9 @@ class QuestionService(
             }
 
             val assignedProfId = row[QuestionsTable.assignedProfessorId]
+            val isAssignedProfViewer = (currentUserId == assignedProfId)
             val rawAnswers = AnswersTable.select { AnswersTable.questionId eq qId }
-                .orderBy(AnswersTable.createdAt to SortOrder.ASC)
+                .orderBy(AnswersTable.sequenceNumber to SortOrder.ASC, AnswersTable.createdAt to SortOrder.ASC)
                 .toList()
 
             val rawContent = row[QuestionsTable.rawContent]
@@ -320,7 +344,7 @@ class QuestionService(
                 else -> actualContent
             }
             val displayOrigContent = when {
-                isQuestionDeleted || isProfessor || maskedForHidden -> ""
+                isQuestionDeleted || isProfessor || maskedForHidden || (!isMyQuestion && !isAdmin) -> ""
                 else -> rawContent
             }
 
@@ -335,25 +359,32 @@ class QuestionService(
                 buildAnswerDto(
                     answerId = aRow[AnswersTable.id].value,
                     questionId = qId,
+                    questionStudentId = authorId,
                     authorUuid = aAuthorId,
                     authorSummary = authorSummary,
                     rawContent = aRow[AnswersTable.content],
                     originalDraftContent = aRow[AnswersTable.rawContent],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
                     isAnsHidden = aRow[AnswersTable.isHidden],
+                    sequenceNumber = aRow[AnswersTable.sequenceNumber],
                     createdAt = aRow[AnswersTable.createdAt].toString(),
                     courseName = courseName,
                     isQuestionAnonymous = isAnonymous,
+                    currentUserId = currentUserId,
                     isMyQuestion = isMyQuestion,
                     isAdminViewer = isAdmin,
+                    isProfessorViewer = isProfessor,
+                    isAssignedProfViewer = isAssignedProfViewer,
+                    isThreadOpen = isThreadOpen,
                     isQuestionDeleted = isQuestionDeleted,
+                    isQuestionHidden = isQuestionHidden,
                     hideOriginalDraft = isProfessor
                 )
             }
 
-            val profAnswers = answerDtos.filter { it.authorRole == UserRole.PROFESSOR.name }
+            val profAnswers = answerDtos.filter { it.authorRole == UserRole.PROFESSOR.name || it.isAdminAuthor }
             val hasAnswers = profAnswers.isNotEmpty()
-            val isAnsweredByAssignedProfessor = profAnswers.any { it.isAssignedProfessor }
+            val isAnsweredByAssignedProfessor = answerDtos.any { it.authorRole == UserRole.PROFESSOR.name && it.isAssignedProfessor }
 
             val visibleAttachments = if (maskedForHidden || isQuestionDeleted) {
                 emptyList()
@@ -399,6 +430,9 @@ class QuestionService(
                 isAnonymous = isAnonymous,
                 isMyQuestion = isMyQuestion,
                 isHidden = isQuestionHidden,
+                isThreadOpen = isThreadOpen,
+                lastSequenceNumber = lastSequenceNumber,
+                isAdminAuthor = authorIsAdmin,
                 isDeleted = isQuestionDeleted,
                 deletedAt = deletedAtStr,
                 canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
@@ -432,6 +466,8 @@ class QuestionService(
         val isMyQuestion = (qRow[QuestionsTable.studentId] == currentUserId)
         val isAnonymous = qRow[QuestionsTable.isAnonymous]
         val isQuestionHidden = qRow[QuestionsTable.isHidden]
+        val isThreadOpen = qRow[QuestionsTable.isThreadOpen]
+        val lastSequenceNumber = qRow[QuestionsTable.lastSequenceNumber]
         val isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor]
         val deletedAtStr = qRow[QuestionsTable.deletedAt]?.toString()
 
@@ -443,6 +479,9 @@ class QuestionService(
         val authorTag = author?.get(UsersTable.displayTag) ?: "수강생"
         val authorName = author?.get(UsersTable.name) ?: "학생"
         val authorIdentifier = author?.get(UsersTable.identifier) ?: ""
+        val authorIsAdmin = author?.let { it[UsersTable.isAdmin] || it[UsersTable.role] == UserRole.ADMIN.name } ?: false
+        val assignedProfId = qRow[QuestionsTable.assignedProfessorId]
+        val isAssignedProfViewer = (currentUserId == assignedProfId)
         val assignedProfName = assignedProf?.get(UsersTable.name) ?: "담당교수"
 
         val authorDisplayName = when {
@@ -454,43 +493,53 @@ class QuestionService(
         // Answers & Follow-up questions
         val answersList = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
             .select { AnswersTable.questionId eq questionId }
-            .orderBy(AnswersTable.createdAt to SortOrder.ASC)
+            .orderBy(AnswersTable.sequenceNumber to SortOrder.ASC, AnswersTable.createdAt to SortOrder.ASC)
             .map { aRow ->
                 buildAnswerDto(
                     answerId = aRow[AnswersTable.id].value,
                     questionId = questionId,
+                    questionStudentId = qRow[QuestionsTable.studentId],
                     authorUuid = aRow[AnswersTable.professorId],
                     authorSummary = AuthorSummary(
                         name = aRow[UsersTable.name],
                         role = aRow[UsersTable.role],
                         displayTag = aRow[UsersTable.displayTag],
-                        department = aRow[UsersTable.department]
+                        department = aRow[UsersTable.department],
+                        isAdmin = aRow[UsersTable.isAdmin] || aRow[UsersTable.role] == UserRole.ADMIN.name
                     ),
                     rawContent = aRow[AnswersTable.content],
                     originalDraftContent = aRow[AnswersTable.rawContent],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
                     isAnsHidden = aRow[AnswersTable.isHidden],
+                    sequenceNumber = aRow[AnswersTable.sequenceNumber],
                     createdAt = aRow[AnswersTable.createdAt].toString(),
                     courseName = courseName,
                     isQuestionAnonymous = isAnonymous,
+                    currentUserId = currentUserId,
                     isMyQuestion = isMyQuestion,
                     isAdminViewer = isAdmin,
+                    isProfessorViewer = isProfessor,
+                    isAssignedProfViewer = isAssignedProfViewer,
+                    isThreadOpen = isThreadOpen,
                     isQuestionDeleted = isQuestionDeleted,
+                    isQuestionHidden = isQuestionHidden,
                     hideOriginalDraft = isProfessor
                 )
             }
 
-        val assignedProfId = qRow[QuestionsTable.assignedProfessorId]
-        val profAnswers = answersList.filter { it.authorRole == UserRole.PROFESSOR.name }
-        val isAnsweredByAssigned = profAnswers.any { it.isAssignedProfessor }
+        val profAnswers = answersList.filter { it.authorRole == UserRole.PROFESSOR.name || it.isAdminAuthor }
+        val isAnsweredByAssigned = answersList.any { it.authorRole == UserRole.PROFESSOR.name && it.isAssignedProfessor }
         val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
 
         val canAnswer = !isQuestionDeleted && calculateCanAnswer(
             currentUserRole = currentUserRole,
+            isAdmin = isAdmin,
             currentUserId = currentUserId,
+            questionStudentId = qRow[QuestionsTable.studentId],
             assignedProfessorId = assignedProfId,
             courseId = qRow[QuestionsTable.courseId],
             category = category,
+            isThreadOpen = isThreadOpen,
             isAnsweredByAssignedProfessor = isAnsweredByAssigned
         )
         val canFollowUp = !isQuestionDeleted &&
@@ -541,7 +590,7 @@ class QuestionService(
             else -> actualContent
         }
         val displayOrigContent = when {
-            isQuestionDeleted || isProfessor || maskedForHidden -> ""
+            isQuestionDeleted || isProfessor || maskedForHidden || (!isMyQuestion && !isAdmin) -> ""
             else -> actualRaw
         }
         val displayRefinedContent = when {
@@ -573,6 +622,9 @@ class QuestionService(
             isAnonymous = isAnonymous,
             isMyQuestion = isMyQuestion,
             isHidden = isQuestionHidden,
+            isThreadOpen = isThreadOpen,
+            lastSequenceNumber = lastSequenceNumber,
+            isAdminAuthor = authorIsAdmin,
             isDeleted = isQuestionDeleted,
             deletedAt = deletedAtStr,
             canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
@@ -598,7 +650,128 @@ class QuestionService(
         getQuestionDetailInternal(questionId, adminUserId)
     }
 
+    suspend fun setThreadOpen(questionId: UUID, actorId: UUID, isThreadOpen: Boolean): QuestionDetailDto = dbQuery {
+        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+            ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+        if (qRow[QuestionsTable.isDeletedByAuthor]) {
+            throw IllegalStateException("작성자에 의해 삭제된 질문의 스레드 상태는 변경할 수 없습니다.")
+        }
+        val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
+            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+        val actorRole = runCatching { UserRole.valueOf(actorUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+        val isActorAdmin = actorUser[UsersTable.isAdmin] || actorRole == UserRole.ADMIN
+        val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
+
+        if (!isAssignedProf && !isActorAdmin) {
+            throw IllegalStateException("담당교수 또는 관리자만 스레드 열림/닫힘 상태를 전환할 수 있습니다.")
+        }
+
+        QuestionsTable.update({ QuestionsTable.id eq questionId }) {
+            it[QuestionsTable.isThreadOpen] = isThreadOpen
+        }
+        getQuestionDetailInternal(questionId, actorId)
+    }
+
+    suspend fun setAnswerHiddenByModerator(
+        questionId: UUID,
+        answerId: UUID,
+        actorId: UUID,
+        isHidden: Boolean
+    ): AnswerDto = dbQuery {
+        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+            ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+        val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
+            .select { (AnswersTable.id eq answerId) and (AnswersTable.questionId eq questionId) }
+            .singleOrNull() ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
+        val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
+            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+
+        val actorRole = runCatching { UserRole.valueOf(actorUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+        val isActorAdmin = actorUser[UsersTable.isAdmin] || actorRole == UserRole.ADMIN
+        val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
+        val answerAuthorRole = aRow[UsersTable.role]
+        val answerAuthorIsAdmin = aRow[UsersTable.isAdmin] || answerAuthorRole == UserRole.ADMIN.name
+        val answerAuthorId = aRow[AnswersTable.professorId]
+        val questionStudentId = qRow[QuestionsTable.studentId]
+
+        val isPeerStudentAnswer = answerAuthorRole == UserRole.STUDENT.name &&
+            !answerAuthorIsAdmin &&
+            answerAuthorId != questionStudentId
+        val allowed = isActorAdmin || (isAssignedProf && isPeerStudentAnswer)
+        if (!allowed) {
+            throw IllegalStateException("답변 가리기 권한이 없습니다.")
+        }
+
+        val courseName = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }
+            .singleOrNull()?.get(CoursesTable.name) ?: "강의"
+
+        AnswersTable.update({ AnswersTable.id eq answerId }) {
+            it[AnswersTable.isHidden] = isHidden
+        }
+
+        buildAnswerDto(
+            answerId = answerId,
+            questionId = questionId,
+            questionStudentId = questionStudentId,
+            authorUuid = answerAuthorId,
+            authorSummary = AuthorSummary(
+                name = aRow[UsersTable.name],
+                role = answerAuthorRole,
+                displayTag = aRow[UsersTable.displayTag],
+                department = aRow[UsersTable.department],
+                isAdmin = answerAuthorIsAdmin
+            ),
+            rawContent = aRow[AnswersTable.content],
+            originalDraftContent = aRow[AnswersTable.rawContent],
+            isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
+            isAnsHidden = isHidden,
+            sequenceNumber = aRow[AnswersTable.sequenceNumber],
+            createdAt = aRow[AnswersTable.createdAt].toString(),
+            courseName = courseName,
+            isQuestionAnonymous = qRow[QuestionsTable.isAnonymous],
+            currentUserId = actorId,
+            isMyQuestion = (questionStudentId == actorId),
+            isAdminViewer = isActorAdmin,
+            isProfessorViewer = (actorRole == UserRole.PROFESSOR),
+            isAssignedProfViewer = isAssignedProf,
+            isThreadOpen = qRow[QuestionsTable.isThreadOpen],
+            isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor],
+            isQuestionHidden = qRow[QuestionsTable.isHidden],
+            hideOriginalDraft = (actorRole == UserRole.PROFESSOR)
+        )
+    }
+
+    suspend fun deleteAnswerByModerator(questionId: UUID, answerId: UUID, actorId: UUID): UUID = dbQuery {
+        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+            ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+        val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
+            .select { (AnswersTable.id eq answerId) and (AnswersTable.questionId eq questionId) }
+            .singleOrNull() ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
+        val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
+            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+
+        val actorRole = runCatching { UserRole.valueOf(actorUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+        val isActorAdmin = actorUser[UsersTable.isAdmin] || actorRole == UserRole.ADMIN
+        val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
+        val answerAuthorRole = aRow[UsersTable.role]
+        val answerAuthorIsAdmin = aRow[UsersTable.isAdmin] || answerAuthorRole == UserRole.ADMIN.name
+
+        val isPeerStudentAnswer = answerAuthorRole == UserRole.STUDENT.name &&
+            !answerAuthorIsAdmin &&
+            aRow[AnswersTable.professorId] != qRow[QuestionsTable.studentId]
+        val allowed = isActorAdmin || (isAssignedProf && isPeerStudentAnswer)
+        if (!allowed) {
+            throw IllegalStateException("답변 삭제 권한이 없습니다.")
+        }
+
+        deleteAnswerInternal(answerId)
+    }
+
     suspend fun setAnswerHidden(answerId: UUID, isHidden: Boolean): AnswerDto = dbQuery {
+        setAnswerHiddenInternal(answerId, isHidden)
+    }
+
+    private fun setAnswerHiddenInternal(answerId: UUID, isHidden: Boolean): AnswerDto {
         val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
             .select { AnswersTable.id eq answerId }
             .singleOrNull() ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
@@ -608,17 +781,21 @@ class QuestionService(
         }
 
         val authorRole = aRow[UsersTable.role]
-        AnswerDto(
+        val isAdminAuthor = aRow[UsersTable.isAdmin] || authorRole == UserRole.ADMIN.name
+        return AnswerDto(
             id = answerId.toString(),
             questionId = aRow[AnswersTable.questionId].toString(),
             professorId = aRow[AnswersTable.professorId].toString(),
             professorName = aRow[UsersTable.name],
             professorDepartment = aRow[UsersTable.department],
             authorRole = authorRole,
+            authorTitle = if (isAdminAuthor) "관리자" else if (authorRole == UserRole.STUDENT.name) "질문자 추가 질문" else if (aRow[AnswersTable.isAssignedProfessor]) "담당교수" else "같은 과목 교수 (공동 답변)",
             content = aRow[AnswersTable.content],
             originalContent = "",
             isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
             isHidden = isHidden,
+            sequenceNumber = aRow[AnswersTable.sequenceNumber],
+            isAdminAuthor = isAdminAuthor,
             createdAt = aRow[AnswersTable.createdAt].toString()
         )
     }
@@ -700,6 +877,10 @@ class QuestionService(
     }
 
     suspend fun deleteAnswer(answerId: UUID): UUID = dbQuery {
+        deleteAnswerInternal(answerId)
+    }
+
+    private fun deleteAnswerInternal(answerId: UUID): UUID {
         val aRow = AnswersTable.select { AnswersTable.id eq answerId }.singleOrNull()
             ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
         val questionId = aRow[AnswersTable.questionId]
@@ -709,15 +890,15 @@ class QuestionService(
 
         val remainingPosts = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
             .select { AnswersTable.questionId eq questionId }
-            .orderBy(AnswersTable.createdAt to SortOrder.ASC)
+            .orderBy(AnswersTable.sequenceNumber to SortOrder.ASC, AnswersTable.createdAt to SortOrder.ASC)
             .toList()
-        val hasProfAnswer = remainingPosts.any { it[UsersTable.role] == UserRole.PROFESSOR.name }
-        val latestIsProf = remainingPosts.lastOrNull()?.get(UsersTable.role) == UserRole.PROFESSOR.name
+        val hasProfAnswer = remainingPosts.any { it[UsersTable.role] == UserRole.PROFESSOR.name || it[UsersTable.isAdmin] }
+        val latestIsProf = remainingPosts.lastOrNull()?.let { it[UsersTable.role] == UserRole.PROFESSOR.name || it[UsersTable.isAdmin] } == true
         val nextStatus = if (hasProfAnswer && latestIsProf) QuestionStatus.ANSWERED else QuestionStatus.OPEN
         QuestionsTable.update({ QuestionsTable.id eq questionId }) {
             it[QuestionsTable.status] = nextStatus.name
         }
-        questionId
+        return questionId
     }
 
     suspend fun updateQuestion(
@@ -732,18 +913,55 @@ class QuestionService(
             if (qRow[QuestionsTable.isDeletedByAuthor]) {
                 throw IllegalStateException("삭제된 질문은 수정할 수 없습니다.")
             }
+            if (qRow[QuestionsTable.isHidden]) {
+                throw IllegalStateException("관리자에 의해 가려진 질문은 수정할 수 없습니다.")
+            }
 
             val authorId = qRow[QuestionsTable.studentId]
             if (authorId != currentUserId) {
                 throw IllegalStateException("질문 작성자만 수정할 수 있습니다.")
             }
 
-            if (request.category == QuestionCategory.GRADE && (request.isAnonymous == true || (request.isAnonymous == null && qRow[QuestionsTable.isAnonymous]))) {
-                throw IllegalArgumentException("성적 카테고리 질문은 익명으로 작성할 수 없습니다.")
+            val authorUser = UsersTable.select { UsersTable.id eq currentUserId }.singleOrNull()
+                ?: throw IllegalStateException("유효한 사용자 계정을 찾을 수 없습니다.")
+            if (authorUser[UsersTable.isWithdrawn]) {
+                throw IllegalStateException("탈퇴 처리된 계정입니다. 질문을 수정할 수 없습니다.")
+            }
+            val banUntil = authorUser[UsersTable.questionBanUntil]
+            if (banUntil != null && banUntil.isAfter(Instant.now())) {
+                val formattedUntil = banDateFormatter.format(banUntil)
+                throw IllegalStateException("관리자에 의해 ${formattedUntil}까지 질문 수정이 제한된 계정입니다.")
             }
 
+            val currentCategory = QuestionCategory.valueOf(qRow[QuestionsTable.category])
+            val effectiveCategory = request.category ?: currentCategory
+            val effectiveAnonymous = request.isAnonymous ?: qRow[QuestionsTable.isAnonymous]
+            if (effectiveCategory == QuestionCategory.GRADE && effectiveAnonymous) {
+                throw IllegalArgumentException("성적 카테고리 질문은 익명으로 작성할 수 없습니다.")
+            }
+            if (request.category != null && request.category != currentCategory) {
+                val categorySetting = ProfessorCategorySettingsTable.select {
+                    (ProfessorCategorySettingsTable.professorId eq qRow[QuestionsTable.assignedProfessorId]) and
+                        (ProfessorCategorySettingsTable.courseId eq qRow[QuestionsTable.courseId]) and
+                        (ProfessorCategorySettingsTable.category eq effectiveCategory.name)
+                }.singleOrNull()
+                if (categorySetting != null && !categorySetting[ProfessorCategorySettingsTable.isEnabled]) {
+                    throw IllegalStateException("담당 교수님에 의해 '${effectiveCategory}' 카테고리 질문 접수가 비활성화되어 있습니다.")
+                }
+            }
+
+            val cleanUpdatedTitle = request.title?.trim()?.takeIf { it.isNotBlank() }?.also { v ->
+                if (v.length > MAX_TITLE_LENGTH) {
+                    throw IllegalArgumentException("제목은 최대 ${MAX_TITLE_LENGTH}자까지 입력할 수 있습니다.")
+                }
+            }
+            validateContentLength(request.rawContent, "질문 원문")
+            validateContentLength(request.originalContent, "질문 원문")
+            validateContentLength(request.refinedContent, "질문 본문")
+            validateContentLength(request.content, "질문 본문")
+
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
-                request.title?.takeIf { it.isNotBlank() }?.let { v -> it[title] = v }
+                cleanUpdatedTitle?.let { v -> it[title] = v }
                 request.category?.let { v -> it[category] = v.name }
                 request.isAnonymous?.let { v -> it[isAnonymous] = v }
                 request.rawContent?.takeIf { it.isNotBlank() }?.let { v -> it[rawContent] = v }
@@ -776,6 +994,7 @@ class QuestionService(
         professorId: UUID,
         request: CreateAnswerRequest
     ): AnswerDto {
+        validateContentLength(request.content, "답변 내용")
         val created = dbQuery {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
@@ -797,37 +1016,50 @@ class QuestionService(
             }
 
             val role = runCatching { UserRole.valueOf(profUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
-            if (role != UserRole.PROFESSOR) {
-                throw IllegalStateException("교수 계정만 답변을 등록할 수 있습니다.")
+            val isActorAdmin = profUser[UsersTable.isAdmin] || role == UserRole.ADMIN
+            if (qRow[QuestionsTable.isHidden] && !isActorAdmin) {
+                throw IllegalStateException("관리자에 의해 가려진 질문에는 답변을 등록할 수 없습니다.")
             }
+            val isThreadOpen = qRow[QuestionsTable.isThreadOpen]
+            val questionStudentId = qRow[QuestionsTable.studentId]
 
             val courseId = qRow[QuestionsTable.courseId]
             val assignedProfId = qRow[QuestionsTable.assignedProfessorId]
             val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
 
-            val existingAnswers = AnswersTable.select { AnswersTable.questionId eq questionId }.toList()
-            val isAssignedProfAnswered = existingAnswers.any { it[AnswersTable.isAssignedProfessor] }
+            val existingAnswers = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
+                .select { AnswersTable.questionId eq questionId }
+                .toList()
+            val isAssignedProfAnswered = existingAnswers.any {
+                it[AnswersTable.isAssignedProfessor] && it[UsersTable.role] == UserRole.PROFESSOR.name
+            }
 
             val canAnswer = calculateCanAnswer(
                 currentUserRole = role,
+                isAdmin = isActorAdmin,
                 currentUserId = professorId,
+                questionStudentId = questionStudentId,
                 assignedProfessorId = assignedProfId,
                 courseId = courseId,
                 category = category,
+                isThreadOpen = isThreadOpen,
                 isAnsweredByAssignedProfessor = isAssignedProfAnswered
             )
 
             if (!canAnswer) {
-                if (isAssignedProfAnswered) {
+                if (role == UserRole.STUDENT && !isThreadOpen) {
+                    throw IllegalStateException("스레드가 닫힘 상태여서 다른 학생은 답변을 작성할 수 없습니다.")
+                } else if (role == UserRole.PROFESSOR && professorId != assignedProfId && !isThreadOpen) {
+                    throw IllegalStateException("스레드가 닫힘(질문자, 담당교수 외 닫힘) 상태여서 공동 교수가 답변할 수 없습니다.")
+                } else if (isAssignedProfAnswered && professorId != assignedProfId) {
                     throw IllegalStateException("질문자의 담당교수가 이미 답변을 완료하여 추가 답변이 제한됩니다.")
-                } else if (category != QuestionCategory.LECTURE && professorId != assignedProfId) {
-                    throw IllegalStateException("'$category' 카테고리는 질문자의 담당 교수만 답변을 등록할 수 있습니다.")
                 } else {
                     throw IllegalStateException("답변 권한이 없습니다.")
                 }
             }
 
-            val isAssigned = (professorId == assignedProfId)
+            val isAssigned = (role == UserRole.PROFESSOR && professorId == assignedProfId)
+            val nextSeq = maxOf(qRow[QuestionsTable.lastSequenceNumber], 1) + 1
             val ansId = UUID.randomUUID()
             val now = Instant.now()
 
@@ -835,6 +1067,7 @@ class QuestionService(
                 it[id] = ansId
                 it[AnswersTable.questionId] = questionId
                 it[AnswersTable.professorId] = professorId
+                it[sequenceNumber] = nextSeq
                 it[content] = request.content
                 it[isAssignedProfessor] = isAssigned
                 it[isHidden] = false
@@ -842,38 +1075,63 @@ class QuestionService(
             }
 
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
-                it[status] = QuestionStatus.ANSWERED.name
+                it[lastSequenceNumber] = nextSeq
+                if (role == UserRole.PROFESSOR || isActorAdmin) {
+                    it[status] = QuestionStatus.ANSWERED.name
+                }
             }
 
             val course = CoursesTable.select { CoursesTable.id eq courseId }.single()
+            val courseName = course[CoursesTable.name]
+            val builtDto = buildAnswerDto(
+                answerId = ansId,
+                questionId = questionId,
+                questionStudentId = questionStudentId,
+                authorUuid = professorId,
+                authorSummary = AuthorSummary(
+                    name = profUser[UsersTable.name],
+                    role = role.name,
+                    displayTag = profUser[UsersTable.displayTag],
+                    department = profUser[UsersTable.department],
+                    isAdmin = isActorAdmin
+                ),
+                rawContent = request.content,
+                originalDraftContent = "",
+                isAssignedProfessor = isAssigned,
+                isAnsHidden = false,
+                sequenceNumber = nextSeq,
+                createdAt = now.toString(),
+                courseName = courseName,
+                isQuestionAnonymous = qRow[QuestionsTable.isAnonymous],
+                currentUserId = professorId,
+                isMyQuestion = (questionStudentId == professorId),
+                isAdminViewer = isActorAdmin,
+                isProfessorViewer = (role == UserRole.PROFESSOR),
+                isAssignedProfViewer = isAssigned,
+                isThreadOpen = isThreadOpen,
+                isQuestionDeleted = false,
+                hideOriginalDraft = (role == UserRole.PROFESSOR)
+            )
 
             CreatedAnswerResult(
-                dto = AnswerDto(
-                    id = ansId.toString(),
-                    questionId = questionId.toString(),
-                    professorId = professorId.toString(),
-                    professorName = profUser[UsersTable.name],
-                    professorDepartment = profUser[UsersTable.department],
-                    content = request.content,
-                    isAssignedProfessor = isAssigned,
-                    isHidden = false,
-                    createdAt = now.toString()
-                ),
-                studentId = qRow[QuestionsTable.studentId],
-                courseName = course[CoursesTable.name],
+                dto = builtDto,
+                studentId = questionStudentId,
+                courseName = courseName,
                 questionTitle = qRow[QuestionsTable.title],
-                professorName = profUser[UsersTable.name]
+                professorName = if (isActorAdmin && role != UserRole.PROFESSOR) "관리자 (${profUser[UsersTable.name]})" else profUser[UsersTable.name]
             )
         }
 
         // Dispatch notification on dedicated notification worker pool outside DB transaction
-        notificationService.notifyNewAnswer(
-            studentId = created.studentId,
-            courseName = created.courseName,
-            questionId = questionId,
-            questionTitle = created.questionTitle,
-            professorName = created.professorName
-        )
+        if (created.studentId != professorId) {
+            notificationService.notifyNewAnswer(
+                studentId = created.studentId,
+                courseName = created.courseName,
+                questionId = questionId,
+                questionTitle = created.questionTitle,
+                professorName = created.professorName
+            )
+        }
 
         return created.dto
     }
@@ -887,6 +1145,7 @@ class QuestionService(
         if (cleanContent.isBlank()) {
             throw IllegalArgumentException("추가 질문 내용을 입력해 주세요.")
         }
+        validateContentLength(cleanContent, "추가 질문 내용")
 
         val created = dbQuery {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
@@ -920,7 +1179,7 @@ class QuestionService(
                 .select {
                     (AnswersTable.questionId eq questionId) and
                         (AnswersTable.isHidden eq false) and
-                        (UsersTable.role eq UserRole.PROFESSOR.name)
+                        ((UsersTable.role eq UserRole.PROFESSOR.name) or (UsersTable.isAdmin eq true))
                 }.count() > 0
             if (!hasProfAnswer) {
                 throw IllegalStateException("교수님의 답변이 등록된 후 추가 질문을 작성할 수 있습니다.")
@@ -930,6 +1189,7 @@ class QuestionService(
             val course = CoursesTable.select { CoursesTable.id eq courseId }.single()
             val courseName = course[CoursesTable.name]
             val followUpId = UUID.randomUUID()
+            val nextSeq = maxOf(qRow[QuestionsTable.lastSequenceNumber], 1) + 1
             val now = Instant.now()
             val originalDraft = request.originalContent?.trim()?.takeIf { it.isNotBlank() } ?: cleanContent
 
@@ -937,6 +1197,7 @@ class QuestionService(
                 it[id] = followUpId
                 it[AnswersTable.questionId] = questionId
                 it[professorId] = studentId
+                it[sequenceNumber] = nextSeq
                 it[rawContent] = originalDraft
                 it[content] = cleanContent
                 it[isAssignedProfessor] = false
@@ -946,6 +1207,7 @@ class QuestionService(
 
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
                 it[status] = QuestionStatus.OPEN.name
+                it[lastSequenceNumber] = nextSeq
             }
 
             val isAnonymous = qRow[QuestionsTable.isAnonymous]
@@ -953,22 +1215,26 @@ class QuestionService(
             val dto = buildAnswerDto(
                 answerId = followUpId,
                 questionId = questionId,
+                questionStudentId = qRow[QuestionsTable.studentId],
                 authorUuid = studentId,
                 authorSummary = AuthorSummary(
                     name = studentUser[UsersTable.name],
                     role = UserRole.STUDENT.name,
                     displayTag = studentUser[UsersTable.displayTag],
-                    department = studentUser[UsersTable.department]
+                    department = studentUser[UsersTable.department],
+                    isAdmin = studentUser[UsersTable.isAdmin]
                 ),
                 rawContent = cleanContent,
                 originalDraftContent = originalDraft,
                 isAssignedProfessor = false,
                 isAnsHidden = false,
+                sequenceNumber = nextSeq,
                 createdAt = now.toString(),
                 courseName = courseName,
                 isQuestionAnonymous = isAnonymous,
+                currentUserId = studentId,
                 isMyQuestion = true,
-                isAdminViewer = false
+                isAdminViewer = studentUser[UsersTable.isAdmin]
             )
 
             CreatedFollowUpResult(
@@ -1048,18 +1314,18 @@ class QuestionService(
                     questionId = qId,
                     title = row[QuestionsTable.title],
                     refinedContent = row[QuestionsTable.refinedContent],
-                    rawContent = row[QuestionsTable.rawContent],
                     answerDtos = answers
                 )
             }
         }
 
         // Run similarity computation and ranking on dedicated similarity worker thread pool
+        val boundedQuery = queryText.take(2000)
         return withContext(workerManager.similarityDispatcher) {
             val results = mutableListOf<SimilarQuestionDto>()
             for (cand in candidates) {
-                val docText = "${cand.title} ${cand.refinedContent} ${cand.rawContent}"
-                val sim = similarityService.computeTextSimilarity(queryText, docText)
+                val docText = "${cand.title} ${cand.refinedContent}"
+                val sim = similarityService.computeTextSimilarity(boundedQuery, docText)
                 val simScore = (sim * 100).toInt()
                 if (simScore < 25) continue
 
@@ -1099,12 +1365,22 @@ class QuestionService(
 
     private fun calculateCanAnswer(
         currentUserRole: UserRole,
+        isAdmin: Boolean,
         currentUserId: UUID,
+        questionStudentId: UUID,
         assignedProfessorId: UUID,
         courseId: UUID,
         category: QuestionCategory,
+        isThreadOpen: Boolean,
         isAnsweredByAssignedProfessor: Boolean
     ): Boolean {
+        if (isAdmin) return true
+
+        if (currentUserRole == UserRole.STUDENT) {
+            // In R4: when thread is open (열림), students other than original question author can answer
+            return isThreadOpen && currentUserId != questionStudentId
+        }
+
         if (currentUserRole != UserRole.PROFESSOR) return false
 
         val teachesCourse = CourseProfessorsTable.select {
@@ -1113,67 +1389,76 @@ class QuestionService(
 
         if (!teachesCourse) return false
 
-        if (isAnsweredByAssignedProfessor && currentUserId != assignedProfessorId) {
-            return false
-        }
+        if (currentUserId == assignedProfessorId) return true
 
-        val isAssignedProf = (currentUserId == assignedProfessorId)
-
-        return when (category) {
-            QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT -> {
-                isAssignedProf
-            }
-            QuestionCategory.LECTURE -> {
-                true
-            }
-        }
+        // Same-course co-professor answering requires thread to be open (열림) and assigned professor not answered yet
+        return isThreadOpen && !isAnsweredByAssignedProfessor
     }
 
     private fun buildAnswerDto(
         answerId: UUID,
         questionId: UUID,
+        questionStudentId: UUID,
         authorUuid: UUID,
         authorSummary: AuthorSummary,
         rawContent: String,
         originalDraftContent: String = "",
         isAssignedProfessor: Boolean,
         isAnsHidden: Boolean,
+        sequenceNumber: Int = 2,
         createdAt: String,
         courseName: String,
         isQuestionAnonymous: Boolean,
+        currentUserId: UUID? = null,
         isMyQuestion: Boolean,
         isAdminViewer: Boolean,
+        isProfessorViewer: Boolean = false,
+        isAssignedProfViewer: Boolean = false,
+        isThreadOpen: Boolean = false,
         isQuestionDeleted: Boolean = false,
+        isQuestionHidden: Boolean = false,
         hideOriginalDraft: Boolean = false
     ): AnswerDto {
-        val isStudentFollowUp = authorSummary.role == UserRole.STUDENT.name
-        val maskedId = if (isStudentFollowUp && isQuestionAnonymous && !isMyQuestion && !isAdminViewer) {
+        val isStudentPost = authorSummary.role == UserRole.STUDENT.name && !authorSummary.isAdmin
+        val isOriginalAuthorFollowUp = isStudentPost && authorUuid == questionStudentId
+        val isPeerStudentAnswer = isStudentPost && authorUuid != questionStudentId
+        val isMyPost = (currentUserId != null && currentUserId == authorUuid)
+
+        val maskedId = if (isStudentPost && !isMyPost && !isAdminViewer && (isPeerStudentAnswer || isQuestionAnonymous)) {
             "anonymous"
         } else {
             authorUuid.toString()
         }
         val displayName = when {
-            !isStudentFollowUp -> authorSummary.name
+            authorSummary.isAdmin && authorSummary.role != UserRole.PROFESSOR.name -> authorSummary.displayTag.ifBlank { authorSummary.name }
+            !isStudentPost -> authorSummary.name
+            isMyPost -> "${authorSummary.displayTag} (나)"
+            isPeerStudentAnswer -> if (isAdminViewer || isProfessorViewer) authorSummary.displayTag else "익명 학생"
             isQuestionAnonymous && !isMyQuestion && !isAdminViewer -> "$courseName 수강생"
-            isMyQuestion -> "${authorSummary.displayTag} (나)"
             else -> authorSummary.displayTag
         }
         val authorTitle = when {
-            isStudentFollowUp -> "질문자 추가 질문"
+            authorSummary.isAdmin -> "관리자"
+            isOriginalAuthorFollowUp -> "질문자 추가 질문"
+            isPeerStudentAnswer -> "학생 답변"
             isAssignedProfessor -> "담당교수"
             else -> "같은 과목 교수 (공동 답변)"
         }
-        val maskedByDeletion = isQuestionDeleted && isStudentFollowUp
+        val canModerate = isAdminViewer || (isAssignedProfViewer && isPeerStudentAnswer)
+        val maskedByDeletion = isQuestionDeleted && isOriginalAuthorFollowUp
+        val maskedByParentHidden = isQuestionHidden && !isAdminViewer && isOriginalAuthorFollowUp
         val safeContent = when {
             maskedByDeletion -> "작성자에 의해 삭제된 내용입니다."
-            isAnsHidden && !isAdminViewer -> if (isStudentFollowUp) "관리자에 의해 가려진 질문입니다." else "관리자에 의해 가려진 답변입니다."
+            maskedByParentHidden || (isAnsHidden && !isAdminViewer) ->
+                if (isOriginalAuthorFollowUp) "관리자에 의해 가려진 질문입니다." else "관리자에 의해 가려진 답변입니다."
             else -> rawContent
         }
         val safeOriginalContent = when {
-            !isStudentFollowUp -> ""
+            !isOriginalAuthorFollowUp -> ""
             hideOriginalDraft -> ""
+            !isMyPost && !isAdminViewer -> ""
             maskedByDeletion -> ""
-            isAnsHidden && !isAdminViewer -> ""
+            maskedByParentHidden || (isAnsHidden && !isAdminViewer) -> ""
             else -> originalDraftContent
         }
 
@@ -1182,16 +1467,19 @@ class QuestionService(
             questionId = questionId.toString(),
             professorId = maskedId,
             professorName = displayName,
-            professorDepartment = if (isStudentFollowUp) "" else authorSummary.department,
+            professorDepartment = if (isStudentPost) "" else authorSummary.department,
             authorId = maskedId,
             authorName = displayName,
             authorRole = authorSummary.role,
             authorTitle = authorTitle,
-            isPrimaryProf = !isStudentFollowUp && isAssignedProfessor,
+            isPrimaryProf = !isStudentPost && isAssignedProfessor,
             content = safeContent,
             originalContent = safeOriginalContent,
-            isAssignedProfessor = !isStudentFollowUp && isAssignedProfessor,
+            isAssignedProfessor = !isStudentPost && isAssignedProfessor,
             isHidden = isAnsHidden,
+            sequenceNumber = sequenceNumber,
+            isAdminAuthor = authorSummary.isAdmin,
+            canModerate = canModerate,
             createdAt = createdAt
         )
     }

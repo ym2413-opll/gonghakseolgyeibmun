@@ -1,6 +1,8 @@
 // src/components/common/AuthGateOverlay.jsx
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
+import { api } from '../../services/api';
 import CoursePicker from './CoursePicker';
 import {
   Lock,
@@ -9,10 +11,12 @@ import {
   GraduationCap,
   BookOpen,
   AlertCircle,
-  ArrowLeft
+  ArrowLeft,
+  RefreshCw
 } from 'lucide-react';
 
 const AuthGateOverlay = () => {
+  const { exhibitionMode } = useTheme();
   const {
     departments,
     allCourses,
@@ -35,8 +39,9 @@ const AuthGateOverlay = () => {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
   const [department, setDepartment] = useState('');
+  const [entryYear, setEntryYear] = useState(2026);
+  const [isForeign, setIsForeign] = useState(false);
   const [studentId, setStudentId] = useState('');
-  const [email, setEmail] = useState('');
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
 
   const [errorMsg, setErrorMsg] = useState('');
@@ -91,8 +96,10 @@ const AuthGateOverlay = () => {
         role,
         name,
         department: effectiveDepartment,
+        entryYear: role === 'STUDENT' ? Number(entryYear) || 2026 : null,
+        isForeign: role === 'STUDENT' ? Boolean(isForeign) : false,
         identifier: role === 'STUDENT' ? cleanSid : null,
-        email: role === 'PROFESSOR' ? email : null,
+        email: null,
         courseIds: selectedCourseIds,
         courseNames: selectedCourses.map((c) => c.name)
       });
@@ -247,15 +254,39 @@ const AuthGateOverlay = () => {
                   <label className="form-label" htmlFor="reg-student-id">
                     학번 *
                   </label>
-                  <input
-                    id="reg-student-id"
-                    type="text"
-                    className="form-input"
-                    placeholder="예: 2026202001"
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    required
-                  />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      id="reg-student-id"
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 2026101001"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      required
+                    />
+                    {exhibitionMode && (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-xs"
+                        style={{ whiteSpace: 'nowrap' }}
+                        onClick={() => {
+                          api.getNextStudentId({
+                            year: entryYear,
+                            department: effectiveDepartment,
+                            isForeign,
+                            random: true
+                          }).then((res) => {
+                            if (res?.studentId) setStudentId(res.studentId);
+                          }).catch((err) => {
+                            if (err?.message) setErrorMsg(err.message);
+                          });
+                        }}
+                      >
+                        <RefreshCw size={14} />
+                        <span>무작위 생성</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="form-group">
@@ -337,26 +368,38 @@ const AuthGateOverlay = () => {
                 >
                   {departments.map((dept) => (
                     <option key={dept.id || dept.name} value={dept.name}>
-                      {dept.name}
+                      {dept.name} ({dept.code || '101'})
                     </option>
                   ))}
                 </select>
               </div>
 
-              {role === 'PROFESSOR' && (
+              {role === 'STUDENT' && (
                 <div className="form-group">
-                  <label className="form-label" htmlFor="reg-email">
-                    이메일 *
+                  <label className="form-label" htmlFor="reg-entry-year">
+                    입학년도 · 구분
                   </label>
-                  <input
-                    id="reg-email"
-                    type="email"
-                    className="form-input"
-                    placeholder="professor@kw.ac.kr"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      id="reg-entry-year"
+                      type="number"
+                      className="form-input"
+                      style={{ width: '92px' }}
+                      min={1990}
+                      max={2099}
+                      value={entryYear}
+                      onChange={(e) => setEntryYear(e.target.value)}
+                      required
+                    />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={isForeign}
+                        onChange={(e) => setIsForeign(e.target.checked)}
+                      />
+                      <span>외국인 학생</span>
+                    </label>
+                  </div>
                 </div>
               )}
             </div>

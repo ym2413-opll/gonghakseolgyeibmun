@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
 import QuestionCard from '../questions/QuestionCard';
+import HelpBubble from '../common/HelpBubble';
 import {
   Inbox,
   Users,
@@ -58,11 +59,11 @@ const ProfessorDashboard = ({
       const isOtherProf =
         q.profId !== currentUser?.id &&
         q.assignedProfessorId !== currentUser?.id;
-      const isLectureCat = (q.category || '').toLowerCase() === 'lecture';
+      const isOpenThread = Boolean(q.isThreadOpen);
       const hasPrimaryAnswer =
         q.isAnsweredByAssignedProfessor ||
         (q.answers || []).some((a) => a.isPrimaryProf || a.isAssignedProfessor);
-      return isMyCourseGroup && isOtherProf && isLectureCat && !hasPrimaryAnswer && !q.isDeleted;
+      return isMyCourseGroup && isOtherProf && isOpenThread && !hasPrimaryAnswer && !q.isDeleted;
     });
 
     const allMyCourseQuestions = questions.filter(
@@ -116,6 +117,12 @@ const ProfessorDashboard = ({
     <div className="forum-board-container prof-dashboard-container">
       {/* 교수 대시보드 요약 카드 */}
       <div className="prof-summary-banner">
+        <HelpBubble
+          tier="SOME"
+          mode="inline"
+          text="담당 질문, 공동 답변 가능 질문, 전체 질문을 분류해 봐요."
+          className="mb-help-bubble"
+        />
         <div className="prof-summary-stats">
           <div
             className={`prof-stat-card ${activeTab === 'MY_ASSIGNED' ? 'active' : ''}`}
@@ -143,10 +150,10 @@ const ProfessorDashboard = ({
               <Users size={20} />
             </div>
             <div>
-              <span className="stat-label">공동 답변 가능 (타 분반 강의)</span>
+              <span className="stat-label">공동 답변 가능 (열림 스레드)</span>
               <div className="stat-value-row">
                 <strong className="stat-value">{coProfAvailableCount}</strong>
-                <span className="stat-sub">동일 과목 미답변 강의 토픽</span>
+                <span className="stat-sub">열림 상태 미답변 토픽</span>
               </div>
             </div>
           </div>
@@ -265,7 +272,7 @@ const ProfessorDashboard = ({
             const isCoProfAnswerable =
               q.profId !== currentUser?.id &&
               q.assignedProfessorId !== currentUser?.id &&
-              (q.category || '').toLowerCase() === 'lecture' &&
+              Boolean(q.isThreadOpen) &&
               !q.isAnsweredByAssignedProfessor &&
               !(q.answers || []).some((a) => a.isPrimaryProf || a.isAssignedProfessor);
 

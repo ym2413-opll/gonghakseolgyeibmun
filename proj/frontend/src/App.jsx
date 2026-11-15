@@ -16,6 +16,7 @@ import ProfessorDashboard from './components/professor/ProfessorDashboard';
 import SettingsModal from './components/common/SettingsModal';
 import NotificationSettingsModal from './components/professor/NotificationSettingsModal';
 import AdminModal from './components/admin/AdminModal';
+import HelpOnboardingModal from './components/common/HelpOnboardingModal';
 import { api } from './services/api';
 import './App.css';
 
@@ -151,6 +152,22 @@ function MainApp() {
     showToast('추가 질문(꼬리질문)이 등록되었습니다.');
   };
 
+  const handleToggleThreadOpen = async (questionId, isThreadOpen) => {
+    try {
+      const updated = await api.setQuestionThreadOpen(questionId, isThreadOpen);
+      const nextOpen = updated?.isThreadOpen ?? isThreadOpen;
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, isThreadOpen: Boolean(nextOpen) } : q))
+      );
+      if (selectedQuestionId === questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast(nextOpen ? '스레드가 열렸습니다.' : '스레드가 닫혔습니다.');
+    } catch (err) {
+      showToast(err.message || '스레드 상태 변경에 실패했습니다.');
+    }
+  };
+
   const handleToggleHideQuestion = async (q) => {
     await api.toggleHideQuestion(q.id, !q.isHidden);
     await fetchQuestions();
@@ -165,7 +182,11 @@ function MainApp() {
   };
 
   const handleToggleHideAnswer = async (ans, questionId) => {
-    await api.toggleHideAnswer(ans.id, !ans.isHidden, questionId);
+    if (questionId) {
+      await api.toggleHideAnswerByQuestion(questionId, ans.id, !ans.isHidden);
+    } else {
+      await api.toggleHideAnswer(ans.id, !ans.isHidden, questionId);
+    }
     await fetchQuestions();
     if (questionId) {
       await fetchSelectedDetail(questionId);
@@ -202,7 +223,11 @@ function MainApp() {
     if (!ans?.id) return;
     if (!window.confirm('이 답변을 영구 삭제하시겠습니까?')) return;
     try {
-      await api.deleteAnswer(ans.id, questionId);
+      if (questionId) {
+        await api.deleteAnswerByQuestion(questionId, ans.id);
+      } else {
+        await api.deleteAnswer(ans.id, questionId);
+      }
       await fetchQuestions();
       if (questionId) {
         await fetchSelectedDetail(questionId);
@@ -283,6 +308,7 @@ function MainApp() {
                     onAddAnswer={handleAddAnswer}
                     onAddFollowUp={handleAddFollowUp}
                     onUpdateQuestion={handleUpdateQuestion}
+                    onToggleThreadOpen={handleToggleThreadOpen}
                     onToggleHideQuestion={handleToggleHideQuestion}
                     onToggleHideAnswer={handleToggleHideAnswer}
                     onDeleteQuestion={handleDeleteQuestion}
@@ -297,6 +323,7 @@ function MainApp() {
                 onAddAnswer={handleAddAnswer}
                 onAddFollowUp={handleAddFollowUp}
                 onUpdateQuestion={handleUpdateQuestion}
+                onToggleThreadOpen={handleToggleThreadOpen}
                 onToggleHideQuestion={handleToggleHideQuestion}
                 onToggleHideAnswer={handleToggleHideAnswer}
                 onDeleteQuestion={handleDeleteQuestion}
@@ -358,6 +385,8 @@ function MainApp() {
         onDataChanged={fetchQuestions}
         onDeleteQuestion={handleDeleteQuestion}
       />
+
+      <HelpOnboardingModal />
     </div>
   );
 }

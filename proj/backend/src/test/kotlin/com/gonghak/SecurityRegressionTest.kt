@@ -115,7 +115,7 @@ class SecurityRegressionTest {
                     password = "password1234",
                     name = "보안학생",
                     department = "소프트웨어학과",
-                    identifier = "2026$suffix"
+                    identifier = "AUTO"
                 )
             )
         }.body<ApiResponse<AuthResponse>>().data!!
@@ -236,7 +236,8 @@ class SecurityRegressionTest {
                     password = "password1234",
                     name = "업로더",
                     department = "소프트웨어학과",
-                    identifier = "2027$suffix"
+                    identifier = "AUTO",
+                    entryYear = 2027
                 )
             )
         }.body<ApiResponse<AuthResponse>>().data!!
@@ -250,7 +251,8 @@ class SecurityRegressionTest {
                     password = "password1234",
                     name = "타인",
                     department = "소프트웨어학과",
-                    identifier = "2028$suffix"
+                    identifier = "AUTO",
+                    entryYear = 2028
                 )
             )
         }.body<ApiResponse<AuthResponse>>().data!!
@@ -396,12 +398,12 @@ class SecurityRegressionTest {
             contentType(ContentType.Application.Json)
             setBody(
                 RegisterRequest(
-                    username = "2026999901",
+                    username = "2026201901",
                     password = "Password!1",
                     role = UserRole.STUDENT,
                     name = "차단테스트",
                     department = "전자공학과",
-                    identifier = "2026999901"
+                    identifier = "2026201901"
                 )
             )
         }
@@ -416,12 +418,12 @@ class SecurityRegressionTest {
             contentType(ContentType.Application.Json)
             setBody(
                 RegisterRequest(
-                    username = "2026999902",
+                    username = "2026201902",
                     password = "Password!1",
                     role = UserRole.STUDENT,
                     name = "프록시학생",
                     department = "전자공학과",
-                    identifier = "2026999902"
+                    identifier = "2026201902"
                 )
             )
         }
@@ -435,15 +437,537 @@ class SecurityRegressionTest {
             contentType(ContentType.Application.Json)
             setBody(
                 RegisterRequest(
-                    username = "2026999903",
+                    username = "2026201903",
                     password = "Password!1",
                     role = UserRole.STUDENT,
                     name = "기본프록시학생",
                     department = "전자공학과",
-                    identifier = "2026999903"
+                    identifier = "2026201903"
                 )
             )
         }
         assertEquals(HttpStatusCode.Created, sameOriginRes.status)
+    }
+
+    @Test
+    fun testR4SecurityHardening() = testApplication {
+        val client = createClient { install(ContentNegotiation) { json(json) } }
+        val suffix = (1000..9999).random()
+
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "sec_r4_admin_$suffix",
+                    password = "Password!1",
+                    name = "보안R4관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        UserService().grantOrRevokeAdminByUsername("sec_r4_admin_$suffix", grant = true)
+
+        val secCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "보안테스트세미나_$suffix",
+                    code = "SEC-$suffix",
+                    semester = "2026-2",
+                    scopeType = "ALL"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+
+        val profAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "sec_r4_prof_$suffix",
+                    password = "Password!1",
+                    name = "보안R4교수",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(secCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val ownerAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "Password!1",
+                    name = "원작성자",
+                    department = "소프트웨어학과",
+                    entryYear = 2029,
+                    identifier = "AUTO",
+                    courseIds = listOf(secCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val attackerAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "Password!1",
+                    name = "타학생",
+                    department = "소프트웨어학과",
+                    entryYear = 2029,
+                    identifier = "AUTO",
+                    courseIds = listOf(secCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        // 1. Create AI-refined question, professor answers, owner posts follow-up with secret raw draft
+        val secretDraftQ = "비밀 원문 질문 초안 $suffix"
+        val secretDraftFollowUp = "비밀 원문 추가 질문 $suffix"
+        val qRes = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = secCourse.id,
+                    profId = profAuth.user.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "보안 하드닝 테스트 질문",
+                    rawContent = secretDraftQ,
+                    refinedContent = "정중하게 다듬어진 질문 본문입니다.",
+                    isAnonymous = true
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "담당교수 공식 답변입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val followUpDto = client.post("/api/questions/${qRes.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateFollowUpRequest(
+                    content = "정중하게 다듬어진 추가 질문입니다.",
+                    originalContent = secretDraftFollowUp,
+                    hasAiRefined = true
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+
+        // Another student MUST NOT receive owner's rawContent/originalContent in list or detail
+        val attackerList = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        val attackerListItem = attackerList.first { it.id == qRes.id }
+        assertEquals("", attackerListItem.originalContent)
+        assertEquals("", attackerListItem.answers.last().originalContent)
+
+        val attackerDetail = client.get("/api/questions/${qRes.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals("", attackerDetail.originalContent)
+        assertEquals("", attackerDetail.rawContent)
+        assertEquals("", attackerDetail.answers.last().originalContent)
+
+        // Owner still sees their own pre-AI drafts
+        val ownerDetail = client.get("/api/questions/${qRes.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(secretDraftQ, ownerDetail.originalContent)
+        assertEquals(secretDraftFollowUp, ownerDetail.answers.last().originalContent)
+
+        // 2. Assigned professor CANNOT hide or delete original author's follow-up, and peer answer moderation masks UUID
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.patch("/api/questions/${qRes.id}/answers/${followUpDto.id}/hide") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(ToggleHideRequest(isHidden = true))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.delete("/api/questions/${qRes.id}/answers/${followUpDto.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            }.status
+        )
+
+        client.patch("/api/questions/${qRes.id}/thread-open") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val peerAns = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "동료 학생의 부적절한 답변"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+
+        val hiddenPeer = client.patch("/api/questions/${qRes.id}/answers/${peerAns.id}/hide") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleHideRequest(isHidden = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals("anonymous", hiddenPeer.professorId)
+        assertEquals("anonymous", hiddenPeer.authorId)
+        assertTrue(hiddenPeer.isHidden)
+
+        // 3. Admin hides question -> non-admin (professor or student) CANNOT post answers to hidden question
+        client.patch("/api/admin/questions/${qRes.id}/hide") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleHideRequest(isHidden = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.post("/api/questions/${qRes.id}/answers") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(CreateAnswerRequest(content = "가려진 질문에 대한 교수 답변 시도"))
+            }.status
+        )
+
+        // 4. Spoofed Content-Type: text/html on .txt upload is ignored; authoritative extension MIME is stored
+        val txtUpload = client.submitFormWithBinaryData(
+            url = "/api/attachments/upload",
+            formData = formData {
+                append("file", "plain text attachment".toByteArray(Charsets.UTF_8), Headers.build {
+                    append(HttpHeaders.ContentType, "text/html")
+                    append(HttpHeaders.ContentDisposition, "filename=\"notes_$suffix.txt\"")
+                })
+            }
+        ) {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<FileUploadResponse>().attachment!!
+        assertEquals("text/plain; charset=UTF-8", txtUpload.mimeType)
+
+        // 5. Oversized / invalid themeMode & fontSize are safely normalized without DB/500 failure
+        val normalizedSettings = client.put("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                UpdateUnifiedSettingRequest(
+                    themeMode = "x".repeat(64),
+                    fontSize = "giant-invalid-font-size"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<UnifiedSettingDto>()
+        assertEquals("light", normalizedSettings.themeMode)
+        assertEquals("md", normalizedSettings.fontSize)
+
+        // 6. SEC-9: Hidden parent question masks original-author follow-ups from non-admin viewers
+        val hiddenProfDetail = client.get("/api/questions/${qRes.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        val maskedFollowUpDetail = hiddenProfDetail.answers.first { it.id == followUpDto.id }
+        assertEquals("관리자에 의해 가려진 질문입니다.", maskedFollowUpDetail.content)
+        assertEquals("", maskedFollowUpDetail.originalContent)
+
+        val hiddenProfList = client.get("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        val maskedFollowUpList = hiddenProfList.first { it.id == qRes.id }.answers.first { it.id == followUpDto.id }
+        assertEquals("관리자에 의해 가려진 질문입니다.", maskedFollowUpList.content)
+        assertEquals("", maskedFollowUpList.originalContent)
+
+        // 7. SEC-8: Hidden question cannot be updated by author
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.put("/api/questions/${qRes.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(title = "가려진 질문 수정 시도"))
+            }.status
+        )
+
+        // 8. SEC-8 / SEC-9 / SEC-11: Update rules, similarity rawContent oracle, bounds, and admin sanction protection
+        val qGrade = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = secCourse.id,
+                    profId = profAuth.user.id,
+                    category = QuestionCategory.GRADE,
+                    title = "성적 문의 $suffix",
+                    rawContent = "성적 비공개 초안",
+                    refinedContent = "정중한 성적 문의 본문입니다.",
+                    isAnonymous = false
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        val qSim = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = secCourse.id,
+                    profId = profAuth.user.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "수업 시간표 문의 $suffix",
+                    rawContent = "비밀키워드오라클$suffix",
+                    refinedContent = "다음 주 보강 일정 확인 부탁드립니다.",
+                    isAnonymous = true
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        val similarRes = client.get("/api/questions/similar") {
+            header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+            parameter("courseId", secCourse.id)
+            parameter("category", "LECTURE")
+            parameter("query", "비밀키워드오라클$suffix")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<SimilarQuestionDto>>>().data!!
+        assertFalse(similarRes.any { it.id == qSim.id })
+
+        // Omitting category on GRADE question must still forbid isAnonymous=true
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/questions/${qGrade.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(isAnonymous = true))
+            }.status
+        )
+
+        // Switching into a disabled category on update is forbidden
+        client.put("/api/courses/${secCourse.id}/categories") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateCategorySettingRequest(category = QuestionCategory.ASSIGNMENT, isEnabled = false))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.put("/api/questions/${qGrade.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(category = QuestionCategory.ASSIGNMENT))
+            }.status
+        )
+
+        // Length bounds enforced (title > 180, content > 20_000)
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/questions/${qGrade.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(title = "t".repeat(181)))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/questions/${qGrade.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(content = "c".repeat(20_001)))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/questions") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    CreateQuestionRequest(
+                        courseId = secCourse.id,
+                        profId = profAuth.user.id,
+                        category = QuestionCategory.LECTURE,
+                        title = "길이 초과 테스트",
+                        content = "c".repeat(20_001)
+                    )
+                )
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/questions/${qSim.id}/answers") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(CreateAnswerRequest(content = "a".repeat(20_001)))
+            }.status
+        )
+
+        // Admin accounts cannot be withdrawn or banned; huge durationDays clamps cleanly without 500
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.post("/api/admin/users/${adminAuth.user.id}/sanction") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UserSanctionRequest(action = "WITHDRAW"))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.post("/api/admin/users/${adminAuth.user.id}/sanction") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UserSanctionRequest(action = "BAN_QUESTION", durationDays = 30))
+            }.status
+        )
+        client.post("/api/admin/users/${ownerAuth.user.id}/sanction") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UserSanctionRequest(action = "BAN_QUESTION", durationDays = 999999))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.put("/api/questions/${qGrade.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${ownerAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateQuestionRequest(title = "정지 중 수정 시도"))
+            }.status
+        )
+        client.post("/api/admin/users/${ownerAuth.user.id}/sanction") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UserSanctionRequest(action = "UNBAN_QUESTION"))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        // 9. SEC-7 / SEC-10: Registration must not pollute global catalogs; email/time/courseId setting hardening
+        val fakeDeptName = "해커신설학과_$suffix"
+        val fakeCourseName = "해커신설강의_$suffix"
+        client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "Password!1",
+                    name = "외부학생",
+                    department = fakeDeptName,
+                    entryYear = 2029,
+                    identifier = "AUTO",
+                    courseNames = listOf(fakeCourseName)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val deptsAfter = client.get("/api/departments")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<DepartmentDto>>>().data!!
+        assertFalse(deptsAfter.any { it.name == fakeDeptName })
+
+        val searchedCourses = client.get("/api/courses/search") {
+            parameter("query", fakeCourseName)
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertFalse(searchedCourses.courses.any { it.name == fakeCourseName })
+
+        val notifOnlyEmail = "notif-only-$suffix@kw.ac.kr"
+        client.put("/api/professor/notification-settings") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateProfessorNotificationSettingRequest(notificationEmail = notifOnlyEmail))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/auth/register") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    RegisterRequest(
+                        role = UserRole.PROFESSOR,
+                        username = "sec_r4_dup_notif_$suffix",
+                        password = "Password!1",
+                        name = "중복교수",
+                        department = "소프트웨어학과",
+                        email = notifOnlyEmail
+                    )
+                )
+            }.status
+        )
+
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/professor/notification-settings") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateProfessorNotificationSettingRequest(quietHoursStart = "25:99"))
+            }.status
+        )
+
+        val unknownCourseId = UUID.randomUUID().toString()
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.get("/api/courses/$unknownCourseId/categories") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/courses/$unknownCourseId/categories") {
+                header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateCategorySettingRequest(category = QuestionCategory.LECTURE, isEnabled = true))
+            }.status
+        )
+
+        val studentSettings = client.get("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<UnifiedSettingDto>()
+        assertTrue(studentSettings.activeCategories.isEmpty())
+
+        // 10. SEC-11: Attachment upload endpoint enforces per-user sliding-window rate limit (30/min)
+        repeat(30) { idx ->
+            client.submitFormWithBinaryData(
+                url = "/api/attachments/upload",
+                formData = formData {
+                    append("file", "rl-$idx".toByteArray(Charsets.UTF_8), Headers.build {
+                        append(HttpHeaders.ContentType, "text/plain")
+                        append(HttpHeaders.ContentDisposition, "filename=\"rl_${suffix}_$idx.txt\"")
+                    })
+                }
+            ) {
+                header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+            }.also { assertEquals(HttpStatusCode.Created, it.status) }
+        }
+        assertEquals(
+            HttpStatusCode.TooManyRequests,
+            client.submitFormWithBinaryData(
+                url = "/api/attachments/upload",
+                formData = formData {
+                    append("file", "rl-over".toByteArray(Charsets.UTF_8), Headers.build {
+                        append(HttpHeaders.ContentType, "text/plain")
+                        append(HttpHeaders.ContentDisposition, "filename=\"rl_${suffix}_over.txt\"")
+                    })
+                }
+            ) {
+                header(HttpHeaders.Authorization, "Bearer ${attackerAuth.token}")
+            }.status
+        )
     }
 }

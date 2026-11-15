@@ -7055,3 +7055,490 @@ html[data-theme="green-dark"] .image-viewer-modal-box {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
 }
+
+
+/* =========================================================
+   R4 Overhaul: Help Onboarding Modal, Speech Bubbles, Thread Open/Close,
+   Immutable Sequence Anchors (#n), Inline Photos ([사진 k]), Admin Post Styling
+   ========================================================= */
+
+.header-theme-settings-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mb-help-bubble {
+  margin-bottom: 10px;
+}
+
+/* 온보딩 도움말 모달 */
+.help-onboarding-backdrop {
+  z-index: 1300;
+}
+
+.help-onboarding-intro {
+  margin: 0 0 16px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.help-onboarding-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-onboarding-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.help-onboarding-option:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+
+.help-onboarding-option.active {
+  border-color: var(--primary-color);
+  background: var(--primary-light);
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.help-onboarding-option-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.help-onboarding-option-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-onboarding-option-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.help-onboarding-option-title {
+  font-weight: 700;
+  font-size: 0.96rem;
+  color: var(--text-primary);
+}
+
+.help-onboarding-option-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+.help-onboarding-option-desc {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* 설정 모달 도움말 수준 선택 */
+.help-level-option-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.exhibition-option-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.help-level-option-desc {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* 말풍선 도움말 (HelpBubble) */
+.help-bubble-host {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-bubble-inline-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-bubble-callout {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: var(--radius-md);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-border);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  box-shadow: var(--shadow-md);
+}
+
+.help-bubble-inline {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.help-bubble-floating {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 95;
+  width: max-content;
+  max-width: min(270px, calc(100vw - 32px));
+}
+
+.help-bubble-floating.placement-bottom::before,
+.help-bubble-floating.placement-bottom-end::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  right: 16px;
+  width: 12px;
+  height: 12px;
+  background: var(--primary-light);
+  border-left: 1px solid var(--primary-border);
+  border-top: 1px solid var(--primary-border);
+  transform: rotate(45deg);
+}
+
+.help-bubble-floating.placement-bottom::before {
+  right: auto;
+  left: 16px;
+}
+
+.help-bubble-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.help-bubble-icon {
+  color: var(--primary-color);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.help-bubble-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.help-bubble-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.help-bubble-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.help-bubble-reopen-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.help-bubble-reopen-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-color);
+  cursor: pointer;
+}
+
+/* 스레드 열림/닫힘 배지 및 전환 버튼 */
+.badge-thread-open,
+.badge-thread-closed,
+.thread-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+}
+
+.badge-thread-open,
+.thread-lock-badge.is-open {
+  background: var(--success-bg);
+  color: var(--success-color);
+  border-color: rgba(21, 128, 61, 0.28);
+}
+
+.badge-thread-closed,
+.thread-lock-badge.is-closed {
+  background: var(--bg-card-subtle);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+}
+
+.thread-open-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.thread-open-toggle-btn.is-open {
+  background: var(--success-bg);
+  color: var(--success-color);
+  border: 1px solid rgba(21, 128, 61, 0.35);
+}
+
+.thread-open-toggle-btn.is-closed {
+  background: var(--bg-card-subtle);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+/* 게시물 순번 (#n) 앵커 링크 및 하이라이트 */
+.post-seq-badge {
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.post-seq-badge:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.post-seq-highlighted {
+  box-shadow: 0 0 0 2px var(--primary-color), var(--shadow-md);
+  transition: box-shadow 0.25s ease;
+}
+
+.seq-anchor-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 0.85em;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: all 0.15s ease;
+}
+
+.seq-anchor-link:hover {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+/* 본문 내 [사진 k] 인라인 렌더링 & 삽입 버튼 */
+.forum-post-line {
+  line-height: 1.65;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.inline-photo-token {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-border);
+}
+
+.inline-photo-figure {
+  margin: 10px 0 14px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  max-width: 100%;
+}
+
+.inline-photo-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 440px;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.inline-photo-figure figcaption {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.photo-seq-tag {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.photo-insert-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary-border);
+  background: var(--bg-card);
+  color: var(--primary-color);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.photo-insert-btn:hover {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+.composer-photo-quickbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  border: 1px dashed var(--border-color);
+}
+
+.composer-quick-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* 관리자 게시글 및 타 학생 답변 전용 스타일 */
+.admin-post-card {
+  border: 1.5px solid rgba(220, 38, 38, 0.35);
+  background: linear-gradient(180deg, rgba(220, 38, 38, 0.04) 0%, var(--bg-card) 100%);
+}
+
+.forum-post-avatar.admin {
+  background: var(--danger-color);
+  color: #ffffff;
+}
+
+.badge-admin,
+.forum-role-tag.admin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--danger-bg);
+  color: var(--danger-color);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  font-weight: 800;
+}
+
+.forum-role-tag.student-reply {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+@media (max-width: 640px) {
+  .help-level-option-list,
+  .exhibition-option-list {
+    grid-template-columns: 1fr;
+  }
+
+  .help-bubble-floating {
+    position: static;
+    margin-top: 6px;
+    max-width: 100%;
+  }
+
+  .help-bubble-floating::before {
+    display: none;
+  }
+}

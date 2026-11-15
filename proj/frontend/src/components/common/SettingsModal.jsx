@@ -12,8 +12,28 @@ const FONT_SIZE_OPTIONS = [
   { id: 'xl', label: '아주 크게', sample: '가나다' }
 ];
 
+const HELP_LEVEL_OPTIONS = [
+  { id: 'NONE', label: '필요 없음', desc: '표시 안 함' },
+  { id: 'SOME', label: '조금', desc: '핵심만' },
+  { id: 'ALL', label: '모두', desc: '전체 표시' }
+];
+
+const EXHIBITION_MODE_OPTIONS = [
+  { id: 'off', value: false, label: '꺼짐', desc: '직접 입력' },
+  { id: 'on', value: true, label: '켜짐', desc: '무작위 생성 표시' }
+];
+
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
-  const { theme, fontSize, updateTheme, updateFontSize } = useTheme();
+  const {
+    theme,
+    fontSize,
+    helpLevel,
+    exhibitionMode,
+    updateTheme,
+    updateFontSize,
+    updateHelpLevel,
+    updateExhibitionMode
+  } = useTheme();
   const { currentUser, isStudent, isProfessor, allCourses, updateUserCourses } = useAuth();
 
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
@@ -149,7 +169,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
           <div className="settings-divider" />
 
-          <div className="settings-section" style={{ marginBottom: 0 }}>
+          <div className="settings-section">
             <h4 className="settings-section-title">글자 크기</h4>
 
             <div className="fontsize-option-list">
@@ -165,6 +185,54 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                     <div className={`fontsize-sample sample-${option.id}`}>{option.sample}</div>
                   </div>
                   {fontSize === option.id && <Check size={16} className="text-primary" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-divider" />
+
+          <div className="settings-section">
+            <h4 className="settings-section-title">도움말</h4>
+
+            <div className="help-level-option-list">
+              {HELP_LEVEL_OPTIONS.map((option) => (
+                <button
+                  type="button"
+                  key={option.id}
+                  className={`fontsize-option-item ${helpLevel === option.id ? 'active' : ''}`}
+                  onClick={() => updateHelpLevel(option.id)}
+                >
+                  <div>
+                    <div className="fontsize-label">{option.label}</div>
+                    <div className="help-level-option-desc">{option.desc}</div>
+                  </div>
+                  {helpLevel === option.id && <Check size={16} className="text-primary" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-divider" />
+
+          <div className="settings-section" style={canManageCourses ? undefined : { marginBottom: 0 }}>
+            <h4 className="settings-section-title">전시 모드</h4>
+            <p className="settings-section-desc">
+              회원가입 시 학번 무작위 생성 버튼을 노출합니다.
+            </p>
+            <div className="exhibition-option-list">
+              {EXHIBITION_MODE_OPTIONS.map((option) => (
+                <button
+                  type="button"
+                  key={option.id}
+                  className={`fontsize-option-item ${exhibitionMode === option.value ? 'active' : ''}`}
+                  onClick={() => updateExhibitionMode(option.value)}
+                >
+                  <div>
+                    <div className="fontsize-label">{option.label}</div>
+                    <div className="help-level-option-desc">{option.desc}</div>
+                  </div>
+                  {exhibitionMode === option.value && <Check size={16} className="text-primary" />}
                 </button>
               ))}
             </div>

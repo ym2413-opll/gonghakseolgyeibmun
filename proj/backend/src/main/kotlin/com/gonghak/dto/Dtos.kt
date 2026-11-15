@@ -44,9 +44,20 @@ data class RegisterRequest(
     val name: String? = null,
     val department: String,
     val identifier: String? = null, // 학생 학번 또는 교번
+    val entryYear: Int? = null,
+    val isForeign: Boolean = false,
     val email: String? = null,      // 교수 이메일
     val courseIds: List<String> = emptyList(),
     val courseNames: List<String> = emptyList()
+)
+
+@Serializable
+data class NextStudentIdResponse(
+    val studentId: String,
+    val year: Int,
+    val departmentCode: String,
+    val serial: String,
+    val isForeign: Boolean = false
 )
 
 @Serializable
@@ -65,13 +76,17 @@ data class AuthResponse(
 data class UserSettingDto(
     val userId: String,
     val themeMode: String, // light, dark, green, system
-    val fontSize: String   // sm, md, lg, xl
+    val fontSize: String,  // sm, md, lg, xl
+    val helpLevel: String = "SOME", // NONE, SOME, ALL
+    val exhibitionMode: Boolean = false
 )
 
 @Serializable
 data class UpdateUserSettingRequest(
     val themeMode: String? = null,
-    val fontSize: String? = null
+    val fontSize: String? = null,
+    val helpLevel: String? = null,
+    val exhibitionMode: Boolean? = null
 )
 
 @Serializable
@@ -101,13 +116,15 @@ data class UnifiedSettingDto(
     val theme: String = "light",
     val themeMode: String = "light",
     val fontSize: String = "md",
+    val helpLevel: String = "SOME",
     val dndEnabled: Boolean = false,
     val dndStartTime: String = "22:00",
     val dndEndTime: String = "08:00",
     val coProfNotification: Boolean = true,
     val emailEnabled: Boolean = true,
     val notificationEmail: String? = null,
-    val activeCategories: Map<String, Boolean> = mapOf("grade" to true, "assignment" to true, "lecture" to true)
+    val activeCategories: Map<String, Boolean> = mapOf("grade" to true, "assignment" to true, "lecture" to true),
+    val exhibitionMode: Boolean = false
 )
 
 @Serializable
@@ -116,13 +133,15 @@ data class UpdateUnifiedSettingRequest(
     val theme: String? = null,
     val themeMode: String? = null,
     val fontSize: String? = null,
+    val helpLevel: String? = null,
     val dndEnabled: Boolean? = null,
     val dndStartTime: String? = null,
     val dndEndTime: String? = null,
     val coProfNotification: Boolean? = null,
     val emailEnabled: Boolean? = null,
     val notificationEmail: String? = null,
-    val activeCategories: Map<String, Boolean>? = null
+    val activeCategories: Map<String, Boolean>? = null,
+    val exhibitionMode: Boolean? = null
 )
 
 @Serializable
@@ -167,6 +186,7 @@ data class CourseDto(
 data class DepartmentDto(
     val id: String,
     val name: String,
+    val code: String = "101",
     val college: String = "",
     val createdAt: String = ""
 )
@@ -174,6 +194,7 @@ data class DepartmentDto(
 @Serializable
 data class CreateDepartmentRequest(
     val name: String,
+    val code: String? = null,
     val college: String = ""
 )
 
@@ -381,7 +402,10 @@ data class AnswerDto(
     val authorRole: String = "PROFESSOR",
     val authorTitle: String = if (authorRole == "STUDENT") "질문자 추가 질문" else if (isAssignedProfessor) "담당교수" else "같은 과목 교수 (공동 답변)",
     val isPrimaryProf: Boolean = isAssignedProfessor,
-    val isHidden: Boolean = false
+    val isHidden: Boolean = false,
+    val sequenceNumber: Int = 2,
+    val isAdminAuthor: Boolean = false,
+    val canModerate: Boolean = false
 )
 
 @Serializable
@@ -410,6 +434,9 @@ data class QuestionListItemDto(
     val realStudentTag: String? = null,
     val realStudentIdentifier: String? = null,
     val isHidden: Boolean = false,
+    val isThreadOpen: Boolean = false,
+    val lastSequenceNumber: Int = 1,
+    val isAdminAuthor: Boolean = false,
     val isDeleted: Boolean = false,
     val deletedAt: String? = null,
     val canDelete: Boolean = false,
@@ -450,10 +477,18 @@ data class QuestionDetailDto(
     val realStudentTag: String? = null,
     val realStudentIdentifier: String? = null,
     val isHidden: Boolean = false,
+    val isThreadOpen: Boolean = false,
+    val lastSequenceNumber: Int = 1,
+    val isAdminAuthor: Boolean = false,
     val isDeleted: Boolean = false,
     val deletedAt: String? = null,
     val canDelete: Boolean = false,
     val attachments: List<AttachmentDto> = emptyList()
+)
+
+@Serializable
+data class ToggleThreadOpenRequest(
+    val isThreadOpen: Boolean
 )
 
 @Serializable

@@ -17,6 +17,15 @@ class NotificationService(
     private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
 ) {
     private val zoneId = ZoneId.of("Asia/Seoul")
+    private val quietHourFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+    private fun validateQuietHourTime(raw: String, fieldLabel: String): String {
+        val trimmed = raw.trim()
+        val parsed = runCatching { LocalTime.parse(trimmed, quietHourFormatter) }.getOrElse {
+            throw IllegalArgumentException("$fieldLabel 형식이 올바르지 않습니다. (예: 22:00)")
+        }
+        return parsed.format(quietHourFormatter)
+    }
 
     suspend fun getProfessorNotificationSetting(professorId: UUID): ProfessorNotificationSettingDto = dbQuery {
         getProfessorNotificationSettingInternal(professorId)
@@ -66,8 +75,24 @@ class NotificationService(
         professorId: UUID,
         request: UpdateProfessorNotificationSettingRequest
     ): ProfessorNotificationSettingDto = dbQuery {
+        val cleanStart = request.quietHoursStart?.let { validateQuietHourTime(it, "방해금지 시작 시각") }
+        val cleanEnd = request.quietHoursEnd?.let { validateQuietHourTime(it, "방해금지 종료 시각") }
         val cleanEmail = request.notificationEmail?.trim()?.let {
             if (it.isBlank()) null else PasswordSecurity.validateEmail(it)
+        }
+
+        if (cleanEmail != null) {
+            val lowerEmail = cleanEmail.lowercase()
+            val usedByOtherUser = UsersTable.select {
+                (UsersTable.id neq professorId) and (UsersTable.email.lowerCase() eq lowerEmail)
+            }.count() > 0
+            val usedByOtherSetting = ProfessorNotificationSettingsTable.select {
+                (ProfessorNotificationSettingsTable.professorId neq professorId) and
+                    (ProfessorNotificationSettingsTable.notificationEmail.lowerCase() eq lowerEmail)
+            }.count() > 0
+            if (usedByOtherUser || usedByOtherSetting) {
+                throw IllegalArgumentException("이미 다른 계정에 등록된 이메일 주소입니다.")
+            }
         }
 
         if (request.notificationEmail != null) {
@@ -82,8 +107,8 @@ class NotificationService(
         if (exists) {
             ProfessorNotificationSettingsTable.update({ ProfessorNotificationSettingsTable.professorId eq professorId }) {
                 request.quietHoursEnabled?.let { v -> it[quietHoursEnabled] = v }
-                request.quietHoursStart?.let { v -> it[quietHoursStart] = v }
-                request.quietHoursEnd?.let { v -> it[quietHoursEnd] = v }
+                cleanStart?.let { v -> it[quietHoursStart] = v }
+                cleanEnd?.let { v -> it[quietHoursEnd] = v }
                 request.notifyOtherProfessorQuestions?.let { v -> it[notifyOtherProfessorQuestions] = v }
                 request.emailEnabled?.let { v -> it[emailEnabled] = v }
                 if (request.notificationEmail != null) {
@@ -94,8 +119,8 @@ class NotificationService(
             ProfessorNotificationSettingsTable.insert {
                 it[ProfessorNotificationSettingsTable.professorId] = professorId
                 it[quietHoursEnabled] = request.quietHoursEnabled ?: false
-                it[quietHoursStart] = request.quietHoursStart ?: "22:00"
-                it[quietHoursEnd] = request.quietHoursEnd ?: "08:00"
+                it[quietHoursStart] = cleanStart ?: "22:00"
+                it[quietHoursEnd] = cleanEnd ?: "08:00"
                 it[notifyOtherProfessorQuestions] = request.notifyOtherProfessorQuestions ?: false
                 it[emailEnabled] = request.emailEnabled ?: true
                 it[notificationEmail] = cleanEmail

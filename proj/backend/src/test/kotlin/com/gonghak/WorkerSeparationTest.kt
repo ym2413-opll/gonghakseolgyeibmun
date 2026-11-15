@@ -198,7 +198,7 @@ class WorkerSeparationTest {
                 password = "password1234",
                 name = "소켓관리대상",
                 department = "소프트웨어학과",
-                identifier = "20267788"
+                identifier = "2026101788"
             )
         )
         assertFalse(reg.user.isAdmin)
@@ -243,7 +243,7 @@ class WorkerSeparationTest {
                             val line = reader.readLine() ?: break
                             if (line == "__END_ADMIN_RESPONSE__") break
                         }
-                        writer.println("admin 20267788")
+                        writer.println("admin 2026101788")
                         val lines = mutableListOf<String>()
                         while (true) {
                             val line = reader.readLine() ?: break
@@ -258,12 +258,12 @@ class WorkerSeparationTest {
                 }
             }
             assertTrue(connected, "Admin loopback socket should accept connection cleanly")
-            assertTrue(responseLines.any { it.contains("성공") && it.contains("20267788") })
+            assertTrue(responseLines.any { it.contains("성공") && it.contains("2026101788") })
 
             val updatedUser = userService.getUserById(UUID.fromString(reg.user.id))
             assertTrue(updatedUser?.isAdmin == true, "Admin flag should be persisted via socket command")
 
-            val revokeOutput = AdminConsoleManager.executeCommand("revoke-admin 20267788", userService)
+            val revokeOutput = AdminConsoleManager.executeCommand("revoke-admin 2026101788", userService)
             assertTrue(revokeOutput.contains("해제"))
             assertFalse(userService.getUserById(UUID.fromString(reg.user.id))?.isAdmin == true)
         } finally {

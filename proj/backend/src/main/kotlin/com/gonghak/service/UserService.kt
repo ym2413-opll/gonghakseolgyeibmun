@@ -1,5 +1,6 @@
 package com.gonghak.service
 
+import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.*
 import com.gonghak.models.*
@@ -36,20 +37,127 @@ class UserService {
         )
     }
 
-    suspend fun registerUser(request: RegisterRequest): AuthResponse = dbQuery {
-        val rawLoginInput = if (request.role == UserRole.STUDENT && request.username.isBlank()) {
-            request.identifier?.trim().orEmpty().also {
-                if (it.isBlank()) throw IllegalArgumentException("학번을 입력해 주세요.")
+    suspend fun getNextStudentId(
+        entryYear: Int,
+        departmentName: String,
+        isForeign: Boolean,
+        random: Boolean = false
+    ): NextStudentIdResponse = dbQuery {
+        val cleanDept = PasswordSecurity.sanitizeInput(departmentName)
+        val deptCode = if (cleanDept.isBlank()) {
+            "101"
+        } else {
+            DepartmentsTable.select { DepartmentsTable.name eq cleanDept }
+                .singleOrNull()?.get(DepartmentsTable.code)?.takeIf { it.isNotBlank() } ?: "101"
+        }
+        allocateNextStudentIdInternal(entryYear, deptCode, isForeign, random)
+    }
+
+    private fun allocateNextStudentIdInternal(
+        entryYear: Int,
+        deptCode: String,
+        isForeign: Boolean,
+        random: Boolean = false
+    ): NextStudentIdResponse {
+        val safeYear = entryYear.coerceIn(1900, 2099)
+        val trimmedDeptCode = deptCode.trim()
+        val safeDeptCode = if (Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(trimmedDeptCode)) trimmedDeptCode else "101"
+        val prefix = String.format("%04d%s", safeYear, safeDeptCode)
+
+        val existingSerials = UsersTable.select {
+            (UsersTable.role eq UserRole.STUDENT.name) and (UsersTable.identifier like "$prefix%")
+        }.mapNotNull { row ->
+            val idStr = row[UsersTable.identifier]
+            if (idStr.length == 10 && idStr.startsWith(prefix)) {
+                idStr.substring(7, 10).toIntOrNull()
+            } else {
+                null
             }
+        }
+
+        val nextSerialNum = if (random) {
+            val range = if (isForeign) (501..999) else (1..500)
+            val existingSet = existingSerials.toSet()
+            val candidates = range.filter { it !in existingSet }
+            if (candidates.isEmpty()) {
+                throw IllegalArgumentException(
+                    if (isForeign) "해당 연도/학과의 외국인 학생 학번 순번(501~999)을 초과했습니다."
+                    else "해당 연도/학과의 일반 학생 학번 순번(001~500)을 초과했습니다."
+                )
+            }
+            candidates.random()
+        } else if (isForeign) {
+            val maxForeign = existingSerials.filter { it in 501..999 }.maxOrNull() ?: 500
+            if (maxForeign >= 999) {
+                throw IllegalArgumentException("해당 연도/학과의 외국인 학생 학번 순번(501~999)을 초과했습니다.")
+            }
+            maxForeign + 1
+        } else {
+            val maxDomestic = existingSerials.filter { it in 1..500 }.maxOrNull() ?: 0
+            if (maxDomestic >= 500) {
+                throw IllegalArgumentException("해당 연도/학과의 일반 학생 학번 순번(001~500)을 초과했습니다.")
+            }
+            maxDomestic + 1
+        }
+
+        val serialStr = String.format("%03d", nextSerialNum)
+        return NextStudentIdResponse(
+            studentId = "$prefix$serialStr",
+            year = safeYear,
+            departmentCode = safeDeptCode,
+            serial = serialStr,
+            isForeign = isForeign
+        )
+    }
+
+    suspend fun registerUser(request: RegisterRequest): AuthResponse = dbQuery {
+        PasswordSecurity.validatePassword(request.password)
+        val cleanDept = PasswordSecurity.sanitizeInput(request.department).take(80)
+        if (cleanDept.isBlank()) {
+            throw IllegalArgumentException("학과를 입력해 주세요.")
+        }
+
+        val role = if (request.role == UserRole.PROFESSOR) UserRole.PROFESSOR else UserRole.STUDENT
+        val passwordHash = PasswordSecurity.hashPassword(request.password)
+        val newUserId = UUID.randomUUID()
+
+        // Resolve 3-digit department code from existing catalog without mutating DepartmentsTable
+        val existingDeptRow = DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.singleOrNull()
+        val deptCode = existingDeptRow?.get(DepartmentsTable.code)?.ifBlank { "101" } ?: "101"
+
+        val resolvedStudentId = if (role == UserRole.STUDENT) {
+            val requestedId = PasswordSecurity.sanitizeInput(request.identifier)
+            if (requestedId.isBlank() || requestedId.equals("AUTO", ignoreCase = true)) {
+                allocateNextStudentIdInternal(
+                    entryYear = request.entryYear ?: 2026,
+                    deptCode = deptCode,
+                    isForeign = request.isForeign
+                ).studentId
+            } else {
+                if (!Regex("^\\d{10}$").matches(requestedId)) {
+                    throw IllegalArgumentException("학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 일반 001~500, 외국인 501~999) 형식의 10자리 숫자여야 합니다.")
+                }
+                val idYear = requestedId.substring(0, 4).toInt()
+                val idDeptCode = requestedId.substring(4, 7)
+                val idSerial = requestedId.substring(7, 10).toInt()
+                if (idYear !in 1900..2099 || !Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(idDeptCode) || idSerial !in 1..999) {
+                    throw IllegalArgumentException("학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 일반 001~500, 외국인 501~999) 형식이어야 합니다.")
+                }
+                if (request.isForeign && idSerial < 501) {
+                    throw IllegalArgumentException("외국인 학생의 학번 순번은 501부터 시작해야 합니다.")
+                }
+                requestedId
+            }
+        } else {
+            null
+        }
+
+        val rawLoginInput = if (role == UserRole.STUDENT && request.username.isBlank()) {
+            resolvedStudentId!!
         } else {
             request.username
         }
         val cleanUsername = PasswordSecurity.validateUsername(rawLoginInput)
-        PasswordSecurity.validatePassword(request.password)
-        val cleanDept = PasswordSecurity.sanitizeInput(request.department)
-        if (cleanDept.isBlank()) {
-            throw IllegalArgumentException("학과를 입력해 주세요.")
-        }
 
         // 1. Check duplicate username (case-insensitive)
         val existingUsername = UsersTable.select {
@@ -59,31 +167,15 @@ class UserService {
             throw IllegalArgumentException("이미 사용 중인 아이디(ID)입니다.")
         }
 
-        val role = if (request.role == UserRole.PROFESSOR) UserRole.PROFESSOR else UserRole.STUDENT
-        val passwordHash = PasswordSecurity.hashPassword(request.password)
-        val newUserId = UUID.randomUUID()
-
         val envAdmins = (System.getenv("ADMIN_USERS") ?: "")
             .split(",")
             .map { it.trim().lowercase() }
             .filter { it.isNotBlank() }
         val isAutoAdmin = cleanUsername.lowercase() in envAdmins
 
-        // Ensure department exists in DepartmentsTable
-        if (DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.count() == 0L) {
-            DepartmentsTable.insert {
-                it[id] = UUID.randomUUID()
-                it[name] = cleanDept
-                it[college] = "광운대학교"
-            }
-        }
-
         if (role == UserRole.STUDENT) {
-            val cleanStudentId = PasswordSecurity.sanitizeInput(request.identifier)
-            val cleanName = PasswordSecurity.sanitizeInput(request.name)
-            if (cleanStudentId.isBlank()) {
-                throw IllegalArgumentException("학번을 입력해 주세요.")
-            }
+            val cleanStudentId = resolvedStudentId!!
+            val cleanName = PasswordSecurity.sanitizeInput(request.name).take(80)
             if (cleanName.isBlank()) {
                 throw IllegalArgumentException("이름을 입력해 주세요.")
             }
@@ -108,11 +200,7 @@ class UserService {
                 throw IllegalArgumentException("동일한 학생 정보로 이미 가입된 계정이 존재합니다.")
             }
 
-            val yearPrefix = if (cleanStudentId.length >= 4 && cleanStudentId.startsWith("20")) {
-                cleanStudentId.substring(2, 4)
-            } else {
-                cleanStudentId.take(2)
-            }
+            val yearPrefix = cleanStudentId.substring(2, 4)
             val shortDept = cleanDept.replace("학과", "").replace("학부", "").replace("전공", "").take(4)
             val displayTag = "${yearPrefix}_${shortDept}_${cleanName}"
 
@@ -144,18 +232,22 @@ class UserService {
                 }
             }
         } else {
-            // PROFESSOR registration
-            val cleanEmail = PasswordSecurity.validateEmail(
-                request.email ?: throw IllegalArgumentException("교수 계정은 이메일을 입력해야 합니다.")
-            )
-            val cleanName = PasswordSecurity.sanitizeInput(request.name).ifBlank { cleanUsername }
+            // PROFESSOR registration (email optional in R4; disables email notifications if omitted)
+            val rawEmail = request.email?.trim().orEmpty()
+            val cleanEmail = if (rawEmail.isNotBlank()) PasswordSecurity.validateEmail(rawEmail) else null
+            val cleanName = PasswordSecurity.sanitizeInput(request.name).take(80).ifBlank { cleanUsername }
 
-            // Duplicate check for professor: email or (department + email)
-            val dupEmail = UsersTable.select {
-                UsersTable.email.lowerCase() eq cleanEmail.lowercase()
-            }.count() > 0
-            if (dupEmail) {
-                throw IllegalArgumentException("이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.")
+            if (cleanEmail != null) {
+                val lowerEmail = cleanEmail.lowercase()
+                val dupUserEmail = UsersTable.select {
+                    UsersTable.email.lowerCase() eq lowerEmail
+                }.count() > 0
+                val dupNotifEmail = ProfessorNotificationSettingsTable.select {
+                    ProfessorNotificationSettingsTable.notificationEmail.lowerCase() eq lowerEmail
+                }.count() > 0
+                if (dupUserEmail || dupNotifEmail) {
+                    throw IllegalArgumentException("이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.")
+                }
             }
 
             val generatedProfId = request.identifier?.trim()?.takeIf { it.isNotBlank() }
@@ -183,7 +275,7 @@ class UserService {
                 it[quietHoursStart] = "22:00"
                 it[quietHoursEnd] = "08:00"
                 it[notifyOtherProfessorQuestions] = true
-                it[emailEnabled] = true
+                it[emailEnabled] = (cleanEmail != null)
                 it[notificationEmail] = cleanEmail
             }
 
@@ -196,6 +288,8 @@ class UserService {
             it[userId] = newUserId
             it[themeMode] = "light"
             it[fontSize] = "md"
+            it[helpLevel] = "SOME"
+            it[exhibitionMode] = false
         }
 
         val createdRow = UsersTable.select { UsersTable.id eq newUserId }.single()
@@ -228,20 +322,6 @@ class UserService {
                 val existing = CoursesTable.select { CoursesTable.name eq cleanName }.firstOrNull()
                 if (existing != null) {
                     result.add(existing[CoursesTable.id].value)
-                } else {
-                    // Dynamically create course if professor typed a new course name during sign-up
-                    val newCourseId = UUID.randomUUID()
-                    CoursesTable.insert {
-                        it[id] = newCourseId
-                        it[name] = cleanName
-                        it[code] = "KW-${(1000..9999).random()}"
-                        it[semester] = "2026-2"
-                        it[college] = "광운대학교"
-                        it[CoursesTable.department] = department
-                        it[completionType] = "전선"
-                        it[credit] = 3
-                    }
-                    result.add(newCourseId)
                 }
             }
         }
@@ -376,16 +456,26 @@ class UserService {
 
         val action = request.action.trim().uppercase()
         val now = Instant.now()
+        val targetIsAdmin = row[UsersTable.isAdmin] ||
+            row[UsersTable.role].equals(UserRole.ADMIN.name, ignoreCase = true)
+        if (targetIsAdmin && action in setOf("WITHDRAW", "BAN_QUESTION", "BAN_ANSWER")) {
+            throw IllegalStateException("관리자 계정은 제재하거나 탈퇴 처리할 수 없습니다.")
+        }
 
         fun calculateBanExpiry(): Instant {
+            val minExpiry = now.plus(1, ChronoUnit.MINUTES)
+            val maxExpiry = now.plus(3650, ChronoUnit.DAYS)
             if (!request.until.isNullOrBlank()) {
-                runCatching { return Instant.parse(request.until) }
+                runCatching {
+                    val parsed = Instant.parse(request.until)
+                    return parsed.coerceIn(minExpiry, maxExpiry)
+                }
             }
             val days = request.durationDays ?: 0
             val hours = request.durationHours ?: 0
             return when {
-                days > 0 -> now.plus(days.toLong(), ChronoUnit.DAYS)
-                hours > 0 -> now.plus(hours.toLong(), ChronoUnit.HOURS)
+                days > 0 -> now.plus(days.coerceIn(1, 3650).toLong(), ChronoUnit.DAYS)
+                hours > 0 -> now.plus(hours.coerceIn(1, 87600).toLong(), ChronoUnit.HOURS)
                 else -> now.plus(7, ChronoUnit.DAYS) // default 7 days
             }
         }
@@ -411,11 +501,12 @@ class UserService {
 
     suspend fun getDepartments(): List<DepartmentDto> = dbQuery {
         val deptRows = DepartmentsTable.selectAll()
-            .orderBy(DepartmentsTable.name to SortOrder.ASC)
+            .orderBy(DepartmentsTable.code to SortOrder.ASC, DepartmentsTable.name to SortOrder.ASC)
             .map {
                 DepartmentDto(
                     id = it[DepartmentsTable.id].value.toString(),
                     name = it[DepartmentsTable.name],
+                    code = it[DepartmentsTable.code],
                     college = it[DepartmentsTable.college],
                     createdAt = it[DepartmentsTable.createdAt].toString()
                 )
@@ -430,6 +521,7 @@ class UserService {
                     if (d.isBlank() || d == "공통") null else DepartmentDto(
                         id = d,
                         name = d,
+                        code = "101",
                         college = row[CoursesTable.college]
                     )
                 }
@@ -452,11 +544,25 @@ class UserService {
             throw IllegalArgumentException("이미 등록된 학과입니다: $cleanName")
         }
 
+        val deptCode = if (!request.code.isNullOrBlank()) {
+            val trimmed = request.code.trim()
+            if (!Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(trimmed)) {
+                throw IllegalArgumentException("학과 고유번호는 (단과대 1~9)(학과 01~99) 형식의 3자리 숫자여야 합니다.")
+            }
+            if (DepartmentsTable.select { DepartmentsTable.code eq trimmed }.count() > 0L) {
+                throw IllegalArgumentException("이미 사용 중인 학과 고유번호입니다: $trimmed")
+            }
+            trimmed
+        } else {
+            DatabaseFactory.allocateDepartmentCodeForCollege(cleanCollege)
+        }
+
         val newId = UUID.randomUUID()
         val now = Instant.now()
         DepartmentsTable.insert {
             it[id] = newId
             it[name] = cleanName
+            it[code] = deptCode
             it[college] = cleanCollege
             it[createdAt] = now
         }
@@ -464,6 +570,7 @@ class UserService {
         DepartmentDto(
             id = newId.toString(),
             name = cleanName,
+            code = deptCode,
             college = cleanCollege,
             createdAt = now.toString()
         )
@@ -517,6 +624,7 @@ class UserService {
             DepartmentsTable.insert {
                 it[id] = UUID.randomUUID()
                 it[name] = finalDept
+                it[code] = DatabaseFactory.allocateDepartmentCodeForCollege(finalCollege)
                 it[college] = finalCollege
             }
         }
@@ -565,13 +673,30 @@ class UserService {
         getUserSettingInternal(userId)
     }
 
+    private fun normalizeHelpLevel(raw: String?): String {
+        val upper = raw?.trim()?.uppercase() ?: return "SOME"
+        return if (upper in listOf("NONE", "SOME", "ALL")) upper else "SOME"
+    }
+
+    private fun normalizeThemeMode(raw: String?): String {
+        val lower = raw?.trim()?.lowercase() ?: return "light"
+        return if (lower in setOf("light", "dark", "green", "green-dark", "system")) lower else "light"
+    }
+
+    private fun normalizeFontSize(raw: String?): String {
+        val lower = raw?.trim()?.lowercase() ?: return "md"
+        return if (lower in setOf("sm", "md", "lg", "xl", "small", "medium", "large", "xlarge")) lower else "md"
+    }
+
     private fun getUserSettingInternal(userId: UUID): UserSettingDto {
         val row = UserSettingsTable.select { UserSettingsTable.userId eq userId }.singleOrNull()
         return if (row != null) {
             UserSettingDto(
                 userId = row[UserSettingsTable.userId].toString(),
                 themeMode = row[UserSettingsTable.themeMode],
-                fontSize = row[UserSettingsTable.fontSize]
+                fontSize = row[UserSettingsTable.fontSize],
+                helpLevel = normalizeHelpLevel(row[UserSettingsTable.helpLevel]),
+                exhibitionMode = row[UserSettingsTable.exhibitionMode]
             )
         } else {
             if (UsersTable.select { UsersTable.id eq userId }.count() > 0) {
@@ -579,12 +704,16 @@ class UserService {
                     it[UserSettingsTable.userId] = userId
                     it[themeMode] = "light"
                     it[fontSize] = "md"
+                    it[helpLevel] = "SOME"
+                    it[exhibitionMode] = false
                 }
             }
             UserSettingDto(
                 userId = userId.toString(),
                 themeMode = "light",
-                fontSize = "md"
+                fontSize = "md",
+                helpLevel = "SOME",
+                exhibitionMode = false
             )
         }
     }
@@ -593,14 +722,18 @@ class UserService {
         val exists = UserSettingsTable.select { UserSettingsTable.userId eq userId }.count() > 0
         if (exists) {
             UserSettingsTable.update({ UserSettingsTable.userId eq userId }) {
-                request.themeMode?.let { v -> it[themeMode] = v }
-                request.fontSize?.let { v -> it[fontSize] = v }
+                request.themeMode?.let { v -> it[themeMode] = normalizeThemeMode(v) }
+                request.fontSize?.let { v -> it[fontSize] = normalizeFontSize(v) }
+                request.helpLevel?.let { v -> it[helpLevel] = normalizeHelpLevel(v) }
+                request.exhibitionMode?.let { v -> it[exhibitionMode] = v }
             }
         } else if (UsersTable.select { UsersTable.id eq userId }.count() > 0) {
             UserSettingsTable.insert {
                 it[UserSettingsTable.userId] = userId
-                it[themeMode] = request.themeMode ?: "light"
-                it[fontSize] = request.fontSize ?: "md"
+                it[themeMode] = normalizeThemeMode(request.themeMode)
+                it[fontSize] = normalizeFontSize(request.fontSize)
+                it[helpLevel] = normalizeHelpLevel(request.helpLevel)
+                it[exhibitionMode] = request.exhibitionMode ?: false
             }
         }
         getUserSettingInternal(userId)
@@ -786,6 +919,10 @@ class UserService {
     }
 
     private fun getProfessorCategoriesInternal(professorId: UUID, courseId: UUID): List<CategorySettingDto> {
+        val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
+        if (!courseExists) {
+            throw IllegalArgumentException("존재하지 않는 강의입니다.")
+        }
         val rows = ProfessorCategorySettingsTable.select {
             (ProfessorCategorySettingsTable.professorId eq professorId) and (ProfessorCategorySettingsTable.courseId eq courseId)
         }.toList()
@@ -815,6 +952,10 @@ class UserService {
         courseId: UUID,
         request: UpdateCategorySettingRequest
     ): List<CategorySettingDto> = dbQuery {
+        val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
+        if (!courseExists) {
+            throw IllegalArgumentException("존재하지 않는 강의입니다.")
+        }
         val existing = ProfessorCategorySettingsTable.select {
             (ProfessorCategorySettingsTable.professorId eq professorId) and
                     (ProfessorCategorySettingsTable.courseId eq courseId) and
@@ -893,11 +1034,13 @@ class UserService {
         val finalCondition = if (conditions.isNotEmpty()) conditions.reduce { acc, op -> acc and op } else null
         val total = if (finalCondition != null) CoursesTable.select(finalCondition).count() else CoursesTable.selectAll().count()
 
-        val offset = ((page - 1).coerceAtLeast(0) * pageSize).toLong()
+        val safePage = page.coerceIn(1, 10_000)
+        val safePageSize = pageSize.coerceIn(1, 2000)
+        val offset = ((safePage - 1).toLong() * safePageSize.toLong())
         val queryObj = if (finalCondition != null) CoursesTable.select(finalCondition) else CoursesTable.selectAll()
         val rows = queryObj
             .orderBy(CoursesTable.name to SortOrder.ASC)
-            .limit(pageSize, offset)
+            .limit(safePageSize, offset)
             .toList()
 
         val courseDtos = rows.map { row ->
@@ -906,8 +1049,8 @@ class UserService {
 
         CourseListResponse(
             total = total,
-            page = page,
-            pageSize = pageSize,
+            page = safePage,
+            pageSize = safePageSize,
             courses = courseDtos
         )
     }
@@ -994,9 +1137,7 @@ class UserService {
         val courseIds = CourseProfessorsTable.select { CourseProfessorsTable.professorId eq professorId }
             .map { it[CourseProfessorsTable.courseId] }
             .distinct()
-            .ifEmpty {
-                CoursesTable.selectAll().map { it[CoursesTable.id].value }
-            }
+        if (courseIds.isEmpty()) return@dbQuery
 
         categoriesMap.forEach { (catKey, isEnabled) ->
             val catEnum = runCatching { QuestionCategory.valueOf(catKey.uppercase()) }.getOrNull() ?: return@forEach
