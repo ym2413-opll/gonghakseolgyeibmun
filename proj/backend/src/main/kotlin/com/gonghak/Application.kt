@@ -1,13 +1,16 @@
 package com.gonghak
 
 import com.gonghak.config.DatabaseFactory
+import com.gonghak.config.EnvConfig
 import com.gonghak.routes.*
 import com.gonghak.service.*
 import io.ktor.http.*
+import io.ktor.serialization.JsonConvertException
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.callloging.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
@@ -17,6 +20,7 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.slf4j.event.Level
 
@@ -43,7 +47,7 @@ fun Application.module() {
     val userService = UserService()
     val uploadDirPath = System.getProperty("gonghak.uploadDir")
         ?: environment.config.propertyOrNull("storage.uploadDir")?.getString()
-        ?: System.getenv("UPLOAD_DIR")?.takeIf { it.isNotBlank() }
+        ?: EnvConfig.get("UPLOAD_DIR")
         ?: "uploads/attachments"
     val attachmentService = AttachmentService(
         uploadDirPath = uploadDirPath,
@@ -60,11 +64,12 @@ fun Application.module() {
     // Start background schedulers (DND notification release, orphan attachment cleanup)
     workerManager.startSchedulers(notificationService, attachmentService)
 
-    // Graceful shutdown hook for worker thread pools, schedulers, and HTTP clients
+    // Graceful shutdown hook for worker thread pools, schedulers, DB pool, and HTTP clients
     environment.monitor.subscribe(ApplicationStopped) {
         AdminConsoleManager.stopConsoleListener()
         workerManager.shutdown()
         aiRefineService.close()
+        DatabaseFactory.close(preserveInMemory = true)
     }
 
     // Start interactive server console + loopback admin socket listener (`admin <id>`)
@@ -100,13 +105,13 @@ fun Application.module() {
 
     install(CORS) {
         val rawOrigins = listOfNotNull(
-            System.getenv("CORS_ALLOWED_ORIGINS"),
-            System.getenv("ALLOWED_ORIGINS"),
-            System.getenv("PUBLIC_ORIGIN"),
-            System.getenv("FRONTEND_ORIGIN"),
-            System.getenv("FRONTEND_URL")
+            EnvConfig.get("CORS_ALLOWED_ORIGINS"),
+            EnvConfig.get("ALLOWED_ORIGINS"),
+            EnvConfig.get("PUBLIC_ORIGIN"),
+            EnvConfig.get("FRONTEND_ORIGIN"),
+            EnvConfig.get("FRONTEND_URL")
         ).joinToString(",")
-        val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
+        val isProd = EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true
         val configuredOrigins = rawOrigins.split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -158,6 +163,30 @@ fun Application.module() {
     }
 
     install(StatusPages) {
+        exception<BadRequestException> { call, _ ->
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    com.gonghak.dto.ErrorResponse(success = false, message = "요청 본문 또는 파라미터 형식이 올바르지 않습니다.")
+                )
+            }
+        }
+        exception<JsonConvertException> { call, _ ->
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    com.gonghak.dto.ErrorResponse(success = false, message = "JSON 요청 형식이 올바르지 않습니다.")
+                )
+            }
+        }
+        exception<SerializationException> { call, _ ->
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    com.gonghak.dto.ErrorResponse(success = false, message = "JSON 데이터 역직렬화에 실패했습니다.")
+                )
+            }
+        }
         exception<IllegalArgumentException> { call, cause ->
             if (!call.response.isCommitted) {
                 call.respond(
@@ -292,6 +321,12 @@ private fun normalizeReverseProxyOrigin(call: ApplicationCall) {
 
     val secFetchSite = call.request.headers["Sec-Fetch-Site"]?.trim()
     val isBrowserSameOrigin = secFetchSite.equals("same-origin", ignoreCase = true)
+    val explicitForwardedProto = call.request.headers["X-Forwarded-Proto"]
+        ?.split(",")
+        ?.firstOrNull()
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() }
 
     val rawHostHeader = call.request.headers["X-Forwarded-Host"]
         ?.split(",")
@@ -305,12 +340,15 @@ private fun normalizeReverseProxyOrigin(call: ApplicationCall) {
         val reqHost = parsed?.host?.lowercase() ?: rawHost.substringBefore(':').lowercase()
         val reqPort = parsed?.port?.takeIf { it > 0 }
         val isLoopbackProxyInternal = reqHost == "127.0.0.1" || reqHost == "localhost" || reqHost == "::1"
+        val protoCompatible = explicitForwardedProto == null || explicitForwardedProto == originScheme
+        val portCompatible = reqPort == originPort || (reqPort == null && explicitForwardedProto == originScheme)
         !isLoopbackProxyInternal &&
             reqHost == originHost &&
-            (reqPort == null || reqPort == originPort)
+            protoCompatible &&
+            portCompatible
     } ?: false
 
-    if (isBrowserSameOrigin || hostMatchedThroughProxy) {
+    if ((isBrowserSameOrigin && (explicitForwardedProto == null || explicitForwardedProto == originScheme)) || hostMatchedThroughProxy) {
         call.mutableOriginConnectionPoint.apply {
             scheme = originScheme
             serverHost = originHost

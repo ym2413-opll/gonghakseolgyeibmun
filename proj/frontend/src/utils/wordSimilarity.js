@@ -36,14 +36,15 @@ function tokenize(text) {
  */
 function getTermVector(tokens, vocabulary) {
   const vector = new Array(vocabulary.length).fill(0);
-  const tokenCount = {};
+  const tokenCount = new Map();
   tokens.forEach(t => {
-    tokenCount[t] = (tokenCount[t] || 0) + 1;
+    tokenCount.set(t, (tokenCount.get(t) || 0) + 1);
   });
-  
+
   vocabulary.forEach((word, index) => {
-    if (tokenCount[word]) {
-      vector[index] = tokenCount[word];
+    const count = tokenCount.get(word);
+    if (count) {
+      vector[index] = count;
     }
   });
   return vector;
@@ -84,7 +85,7 @@ export function calculateSimilarQuestions(queryText, questions, topN = 3) {
   // 전체 어휘집(Vocabulary) 생성
   const vocabSet = new Set(queryTokens);
   questions.forEach(q => {
-    const targetText = `${q.title} ${q.content} ${q.originalContent || ''}`;
+    const targetText = `${q.title} ${q.content}`;
     const targetTokens = tokenize(targetText);
     targetTokens.forEach(t => vocabSet.add(t));
   });
@@ -95,7 +96,7 @@ export function calculateSimilarQuestions(queryText, questions, topN = 3) {
   const scoredQuestions = questions
     .filter(q => q.category !== 'grade') // 명세: '성적' 카테고리는 유사 질답 보기 사용 불가
     .map(q => {
-      const targetText = `${q.title} ${q.content} ${q.originalContent || ''}`;
+      const targetText = `${q.title} ${q.content}`;
       const targetTokens = tokenize(targetText);
       const targetVector = getTermVector(targetTokens, vocabulary);
       const similarity = cosineSimilarity(queryVector, targetVector);

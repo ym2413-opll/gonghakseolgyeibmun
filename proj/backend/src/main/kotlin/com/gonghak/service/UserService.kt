@@ -2,6 +2,7 @@ package com.gonghak.service
 
 import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
+import com.gonghak.config.DatabaseFactory.dbQueryWithRetry
 import com.gonghak.dto.*
 import com.gonghak.models.*
 import org.jetbrains.exposed.sql.*
@@ -368,6 +369,7 @@ class UserService {
         }.toList()
 
         if (candidates.isEmpty()) {
+            PasswordSecurity.dummyVerifyPassword(request.password)
             throw IllegalArgumentException("존재하지 않는 아이디(학번)이거나 비밀번호가 올바르지 않습니다.")
         }
 
@@ -669,7 +671,7 @@ class UserService {
             ?.let { rowToUserDto(it, includeCourses = true) }
     }
 
-    suspend fun getUserSetting(userId: UUID): UserSettingDto = dbQuery {
+    suspend fun getUserSetting(userId: UUID): UserSettingDto = dbQueryWithRetry {
         getUserSettingInternal(userId)
     }
 
@@ -718,7 +720,7 @@ class UserService {
         }
     }
 
-    suspend fun updateUserSetting(userId: UUID, request: UpdateUserSettingRequest): UserSettingDto = dbQuery {
+    suspend fun updateUserSetting(userId: UUID, request: UpdateUserSettingRequest): UserSettingDto = dbQueryWithRetry {
         val exists = UserSettingsTable.select { UserSettingsTable.userId eq userId }.count() > 0
         if (exists) {
             UserSettingsTable.update({ UserSettingsTable.userId eq userId }) {
@@ -951,7 +953,7 @@ class UserService {
         professorId: UUID,
         courseId: UUID,
         request: UpdateCategorySettingRequest
-    ): List<CategorySettingDto> = dbQuery {
+    ): List<CategorySettingDto> = dbQueryWithRetry {
         val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
         if (!courseExists) {
             throw IllegalArgumentException("존재하지 않는 강의입니다.")
@@ -960,7 +962,7 @@ class UserService {
             (ProfessorCategorySettingsTable.professorId eq professorId) and
                     (ProfessorCategorySettingsTable.courseId eq courseId) and
                     (ProfessorCategorySettingsTable.category eq request.category.name)
-        }.singleOrNull()
+        }.firstOrNull()
 
         if (existing != null) {
             ProfessorCategorySettingsTable.update({
@@ -1013,21 +1015,23 @@ class UserService {
         }
 
         if (!query.isNullOrBlank()) {
-            val q = query.trim().lowercase()
-            val matchedProfCourseIds = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
-                .select { UsersTable.name.lowerCase() like "%$q%" }
-                .map { it[CourseProfessorsTable.courseId] }
-                .distinct()
+            val q = query.trim().lowercase().replace("%", "").replace("_", "").trim()
+            if (q.isNotEmpty()) {
+                val matchedProfCourseIds = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+                    .select { UsersTable.name.lowerCase() like "%$q%" }
+                    .map { it[CourseProfessorsTable.courseId] }
+                    .distinct()
 
-            val textCondition = (CoursesTable.name.lowerCase() like "%$q%") or
-                    (CoursesTable.code.lowerCase() like "%$q%") or
-                    (CoursesTable.department.lowerCase() like "%$q%") or
-                    (CoursesTable.college.lowerCase() like "%$q%")
+                val textCondition = (CoursesTable.name.lowerCase() like "%$q%") or
+                        (CoursesTable.code.lowerCase() like "%$q%") or
+                        (CoursesTable.department.lowerCase() like "%$q%") or
+                        (CoursesTable.college.lowerCase() like "%$q%")
 
-            if (matchedProfCourseIds.isNotEmpty()) {
-                conditions.add(textCondition or (CoursesTable.id inList matchedProfCourseIds))
-            } else {
-                conditions.add(textCondition)
+                if (matchedProfCourseIds.isNotEmpty()) {
+                    conditions.add(textCondition or (CoursesTable.id inList matchedProfCourseIds))
+                } else {
+                    conditions.add(textCondition)
+                }
             }
         }
 

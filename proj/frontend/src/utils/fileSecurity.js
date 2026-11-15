@@ -32,13 +32,8 @@ export function getFileExtension(filename) {
  */
 export async function validateFileMagicBytes(file, extension) {
   return new Promise((resolve, reject) => {
-    // 텍스트 파일의 경우 바이트 시그니처는 건너뜀
-    if (extension === 'txt') {
-      return resolve(true);
-    }
-
     const reader = new FileReader();
-    const slice = file.slice(0, 16);
+    const slice = file.slice(0, extension === 'txt' ? 1024 : 16);
 
     reader.onloadend = () => {
       if (!reader.result) {
@@ -46,16 +41,27 @@ export async function validateFileMagicBytes(file, extension) {
       }
 
       const arr = new Uint8Array(reader.result);
-      if (arr.length < 4) {
+      if (extension !== 'txt' && arr.length < 4) {
         return reject(new Error('파일 크기가 너무 작아 유효하지 않습니다.'));
       }
 
-      // 1. 실행 파일 시그니처 (MZ / ELF) 차단
-      if (arr[0] === 0x4d && arr[1] === 0x5a) {
+      // 1. 실행 파일 시그니처 (MZ / ELF) 차단 (txt 포함 모든 확장자 공통 적용)
+      if (arr.length >= 2 && arr[0] === 0x4d && arr[1] === 0x5a) {
         return reject(new Error('실행 파일(EXE/DLL) 형식은 보안상 첨부할 수 없습니다.'));
       }
-      if (arr[0] === 0x7f && arr[1] === 0x45 && arr[2] === 0x4c && arr[3] === 0x46) {
+      if (arr.length >= 4 && arr[0] === 0x7f && arr[1] === 0x45 && arr[2] === 0x4c && arr[3] === 0x46) {
         return reject(new Error('실행 바이너리(ELF) 형식은 보안상 첨부할 수 없습니다.'));
+      }
+
+      if (extension === 'txt') {
+        let nullCount = 0;
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] === 0) nullCount++;
+        }
+        if (nullCount > 2) {
+          return reject(new Error('텍스트 파일 내에 유효하지 않은 바이너리 데이터가 감지되었습니다.'));
+        }
+        return resolve(true);
       }
 
       // 2. 확장자별 매직 바이트 검증

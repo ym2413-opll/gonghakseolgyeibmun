@@ -24,10 +24,32 @@ import java.util.UUID
 
 object DatabaseFactory {
     private val logger = LoggerFactory.getLogger(DatabaseFactory::class.java)
+    private val lifecycleLock = Any()
+
+    @Volatile
+    private var activeDataSource: HikariDataSource? = null
+
+    @Volatile
+    private var activeDatabase: Database? = null
 
     fun init(config: ApplicationConfig? = null) {
-        val pool = createDataSource(config)
-        Database.connect(pool)
+        synchronized(lifecycleLock) {
+            val existingPool = activeDataSource
+            val candidatePool = createDataSource(config)
+            val reuseExisting = existingPool != null &&
+                !existingPool.isClosed &&
+                existingPool.jdbcUrl == candidatePool.jdbcUrl &&
+                existingPool.username == candidatePool.username
+            if (reuseExisting) {
+                runCatching { candidatePool.close() }
+            } else {
+                activeDatabase = Database.connect(candidatePool)
+                activeDataSource = candidatePool
+                if (existingPool != null && !existingPool.isClosed) {
+                    runCatching { existingPool.close() }
+                }
+            }
+        }
 
         val tables = arrayOf(
             UsersTable,
@@ -141,20 +163,20 @@ object DatabaseFactory {
 
     private fun createDataSource(config: ApplicationConfig?): HikariDataSource {
         val dbUrl = config?.propertyOrNull("database.url")?.getString()
-            ?: System.getenv("DB_URL")
+            ?: EnvConfig.get("DB_URL")
 
         val hikariConfig = HikariConfig()
 
         if (!dbUrl.isNullOrBlank()) {
-            val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
+            val isProd = EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true
             val dbDriver = config?.propertyOrNull("database.driver")?.getString()
-                ?: System.getenv("DB_DRIVER")
+                ?: EnvConfig.get("DB_DRIVER")
                 ?: "org.postgresql.Driver"
             val dbUser = config?.propertyOrNull("database.user")?.getString()
-                ?: System.getenv("DB_USER")
+                ?: EnvConfig.get("DB_USER")
                 ?: "postgres"
             val rawPassword = config?.propertyOrNull("database.password")?.getString()
-                ?: System.getenv("DB_PASSWORD")
+                ?: EnvConfig.get("DB_PASSWORD")
             if (isProd && (rawPassword.isNullOrBlank() || rawPassword == "postgres")) {
                 throw IllegalStateException("DB_PASSWORD must be explicitly configured (not default) when PRODUCTION_MODE=true.")
             }
@@ -184,10 +206,57 @@ object DatabaseFactory {
         return HikariDataSource(hikariConfig)
     }
 
+    fun close(preserveInMemory: Boolean = false) {
+        synchronized(lifecycleLock) {
+            val pool = activeDataSource ?: return
+            if (preserveInMemory && pool.jdbcUrl?.startsWith("jdbc:h2:mem:") == true) {
+                return
+            }
+            activeDataSource = null
+            activeDatabase = null
+            if (!pool.isClosed) {
+                runCatching { pool.close() }
+            }
+        }
+    }
+
     suspend fun <T> dbQuery(
         dispatcher: CoroutineDispatcher = Dispatchers.IO,
         block: suspend () -> T
-    ): T = newSuspendedTransaction(dispatcher) { block() }
+    ): T = newSuspendedTransaction(dispatcher, db = activeDatabase) { block() }
+
+    suspend fun <T> dbQueryWithRetry(
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        maxAttempts: Int = 3,
+        block: suspend () -> T
+    ): T {
+        var lastError: Throwable? = null
+        for (attempt in 1..maxAttempts) {
+            try {
+                return newSuspendedTransaction(dispatcher, db = activeDatabase) { block() }
+            } catch (ex: Throwable) {
+                if (attempt == maxAttempts || !isTransientConcurrencyFailure(ex)) {
+                    throw ex
+                }
+                lastError = ex
+            }
+        }
+        throw lastError!!
+    }
+
+    private fun isTransientConcurrencyFailure(ex: Throwable): Boolean {
+        var cur: Throwable? = ex
+        while (cur != null) {
+            if (cur is java.sql.SQLException) {
+                val state = cur.sqlState
+                if (state == "40001" || state == "40P01" || state == "23505" || cur.errorCode == 90131) {
+                    return true
+                }
+            }
+            cur = cur.cause
+        }
+        return false
+    }
 
     private val knownCollegeDigits = mapOf(
         "인공지능융합대학" to 1,

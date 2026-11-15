@@ -44,6 +44,79 @@ function safeSetStorage(key, value) {
   }
 }
 
+async function parseJsonSafe(res) {
+  try {
+    const parsed = await res.json();
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+const AI_ZERO_WIDTH_OR_CONTROL_REGEX =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u034F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
+
+const COMBINED_AI_PLACEHOLDER_REGEX = new RegExp(
+  [
+    String.raw`((?:\{\{\s*(?:PROFESSOR_TITLE|PROFESSOR_NAME|PROFESSOR_GREETING|교수님[ ]*성함|교수님[ ]*호칭|교수[ ]*이름)\s*\}\}|\[\s*(?:PROFESSOR_TITLE|PROFESSOR_NAME|PROFESSOR_GREETING|교수님[ ]*성함|교수님[ ]*호칭|교수[ ]*이름)\s*\])(?:[ ]*(?:교수님?|님))?)`,
+    String.raw`((?:\{\{\s*(?:STUDENT_NAME|학생[ ]*이름)\s*\}\}|\[\s*(?:STUDENT_NAME|학생[ ]*이름)\s*\])[ ]*교수님?)`,
+    String.raw`(\{\{\s*(?:STUDENT_INTRO|STUDENT_INFO|학생[ ]*자기소개|학생[ ]*소개|학생[ ]*정보)\s*\}\}|\[\s*(?:STUDENT_INTRO|STUDENT_INFO|학생[ ]*자기소개|학생[ ]*소개|학생[ ]*정보)\s*\])`,
+    String.raw`(\{\{\s*(?:STUDENT_NAME|학생[ ]*이름)\s*\}\}|\[\s*(?:STUDENT_NAME|학생[ ]*이름)\s*\])`,
+    String.raw`(\{\{\s*(?:STUDENT_ID|STUDENT_IDENTIFIER|학번)\s*\}\}|\[\s*(?:STUDENT_ID|STUDENT_IDENTIFIER|학번)\s*\])`,
+    String.raw`(\{\{\s*(?:STUDENT_DEPT|STUDENT_DEPARTMENT|학과)\s*\}\}|\[\s*(?:STUDENT_DEPT|STUDENT_DEPARTMENT|학과)\s*\])`,
+    String.raw`(\{\{\s*(?:COURSE_NAME|강의명|과목명)\s*\}\}|\[\s*(?:COURSE_NAME|강의명|과목명)\s*\])`,
+    String.raw`(\{\{\s*PII_[A-Z0-9_]+\s*\}\})`
+  ].join('|'),
+  'gi'
+);
+
+function stripAiZeroWidthAndControl(value) {
+  return String(value ?? '').replace(AI_ZERO_WIDTH_OR_CONTROL_REGEX, '');
+}
+
+function replaceAiPlaceholders(
+  text,
+  { profGreeting = '교수님', studentTag = '수강생', studentInfo = {}, courseName = '' } = {}
+) {
+  if (!text) return '';
+  const cleanProf = stripAiZeroWidthAndControl(profGreeting).trim() || '교수님';
+  const cleanTag = stripAiZeroWidthAndControl(studentTag).trim() || '수강생';
+  const studentName = stripAiZeroWidthAndControl(studentInfo?.name || '').trim() || '학생';
+  const studentId = stripAiZeroWidthAndControl(studentInfo?.studentId || studentInfo?.identifier || '').trim();
+  const studentDept = stripAiZeroWidthAndControl(studentInfo?.department || '').trim();
+  const courseDisplay = stripAiZeroWidthAndControl(courseName || '').trim() || '이번 학기 강의';
+
+  // Single-pass simultaneous replacement prevents second-order placeholder expansion
+  return stripAiZeroWidthAndControl(text)
+    .replace(
+      COMBINED_AI_PLACEHOLDER_REGEX,
+      (match, profHit, studentBeforeProfHit, introHit, nameHit, idHit, deptHit, courseHit, piiHit) => {
+        if (profHit || studentBeforeProfHit) return cleanProf;
+        if (introHit) return cleanTag;
+        if (nameHit) return studentName;
+        if (idHit) return studentId;
+        if (deptHit) return studentDept;
+        if (courseHit) return courseDisplay;
+        if (piiHit) return '';
+        return match;
+      }
+    )
+    .replace(/교수님 교수님/g, '교수님')
+    .replace(/교수님님/g, '교수님')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 function getAuthHeaders() {
   const token = (localStorage.getItem(STORAGE_KEY_TOKEN) || '').trim();
   const headers = {};
@@ -322,10 +395,8 @@ export const api = {
     }
 
     if (USE_REMOTE_BACKEND) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(`${API_BASE_URL}/auth/register`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/auth/register`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -341,12 +412,10 @@ export const api = {
             email: payload.email?.trim() || null,
             courseIds: Array.isArray(payload.courseIds) ? payload.courseIds : [],
             courseNames: Array.isArray(payload.courseNames) ? payload.courseNames : []
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+          })
+        }, 5000);
 
-        const body = await res.json().catch(() => ({}));
+        const body = await parseJsonSafe(res);
         if (!res.ok || body.success === false) {
           throw new Error(body.message || '회원가입 처리 중 오류가 발생했습니다.');
         }
@@ -480,19 +549,15 @@ export const api = {
     }
 
     if (USE_REMOTE_BACKEND) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/auth/login`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cleanUsername, password }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+          body: JSON.stringify({ username: cleanUsername, password })
+        }, 5000);
 
-        const body = await res.json().catch(() => ({}));
+        const body = await parseJsonSafe(res);
         if (!res.ok || body.success === false) {
           throw new Error(body.message || '아이디(학번) 또는 비밀번호가 일치하지 않습니다.');
         }
@@ -504,7 +569,6 @@ export const api = {
         this.saveSession(normalized, authData.token);
         return { user: normalized, token: authData.token };
       } catch (e) {
-        clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
           throw new Error('서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
         }
@@ -668,15 +732,21 @@ export const api = {
   async getAdminUsers() {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/users`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/users`, {
+          credentials: 'include',
           headers: getAuthHeaders()
-        });
-        if (res.ok) {
-          const body = await res.json();
-          const list = body?.data || body;
-          if (Array.isArray(list)) return list;
+        }, 5000);
+        const body = await parseJsonSafe(res);
+        if (!res.ok) {
+          const httpErr = new Error(body.message || '관리자 사용자 목록 조회 권한이 없습니다.');
+          httpErr.isHttpError = true;
+          httpErr.status = res.status;
+          throw httpErr;
         }
+        const list = body.data || body;
+        if (Array.isArray(list)) return list;
       } catch (e) {
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote getAdminUsers fallback:', e);
       }
     }
@@ -687,23 +757,25 @@ export const api = {
   async sanctionUser(targetUserId, sanctionPayload) {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/users/${targetUserId}/sanction`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/users/${targetUserId}/sanction`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
           body: JSON.stringify(sanctionPayload)
-        });
-        const body = await res.json().catch(() => ({}));
+        }, 5000);
+        const body = await parseJsonSafe(res);
         if (res.ok && body.data) {
           return body.data;
         }
-        if (!res.ok && body.message) {
-          throw new Error(body.message);
-        }
+        const httpErr = new Error(body.message || '관리자 제재 처리 중 오류가 발생했습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
-        if (e.message && e.message.includes('관리자')) throw e;
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote sanctionUser fallback:', e);
       }
     }
@@ -746,7 +818,7 @@ export const api = {
   async createDepartment(deptPayload) {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/departments`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/departments`, {
           method: 'POST',
           credentials: 'include',
           headers: {
@@ -754,16 +826,17 @@ export const api = {
             ...getAuthHeaders()
           },
           body: JSON.stringify(deptPayload)
-        });
-        const body = await res.json().catch(() => ({}));
+        }, 5000);
+        const body = await parseJsonSafe(res);
         if (res.ok && body.data) {
           return body.data;
         }
-        if (!res.ok && body.message) {
-          throw new Error(body.message);
-        }
+        const httpErr = new Error(body.message || '학과 생성 권한이 없거나 요청이 올바르지 않습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
-        if (e.message && e.message.includes('이미')) throw e;
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote createDepartment fallback:', e);
       }
     }
@@ -1029,18 +1102,25 @@ export const api = {
   async toggleHideQuestion(questionId, isHidden) {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/questions/${questionId}/hide`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/questions/${questionId}/hide`, {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
           body: JSON.stringify({ isHidden })
-        });
+        }, 5000);
+        const body = await parseJsonSafe(res);
         if (res.ok) {
           return true;
         }
+        const httpErr = new Error(body.message || '질문 가리기 권한이 없습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote toggleHideQuestion fallback:', e);
       }
     }
@@ -1057,18 +1137,25 @@ export const api = {
   async toggleHideAnswer(answerId, isHidden, questionId = null) {
     if (USE_REMOTE_BACKEND) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/answers/${answerId}/hide`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/answers/${answerId}/hide`, {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
           body: JSON.stringify({ isHidden })
-        });
+        }, 5000);
+        const body = await parseJsonSafe(res);
         if (res.ok) {
           return true;
         }
+        const httpErr = new Error(body.message || '답변 가리기 권한이 없습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
       } catch (e) {
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote toggleHideAnswer fallback:', e);
       }
     }
@@ -1284,19 +1371,19 @@ export const api = {
   // ============================================================================
   async getQuestions(userId) {
     const uid = getCurrentUserId(userId);
+    if (!uid) return [];
     if (USE_REMOTE_BACKEND && uid) {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1800);
-        const res = await fetch(`${API_BASE_URL}/questions`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/questions`, {
           headers: getAuthHeaders(uid),
-          credentials: 'include',
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+          credentials: 'include'
+        }, 1800);
+        if (res.status === 401 || res.status === 403) {
+          return [];
+        }
         if (res.ok) {
-          const body = await res.json();
-          const remoteList = Array.isArray(body) ? body : body?.data;
+          const body = await parseJsonSafe(res);
+          const remoteList = Array.isArray(body) ? body : body.data;
           if (Array.isArray(remoteList)) return remoteList;
         }
       } catch (e) {
@@ -1305,11 +1392,16 @@ export const api = {
     }
 
     const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser?.id) return [];
     const isAdmin = Boolean(sessionUser?.isAdmin);
     const isProfessor = sessionUser?.role === 'professor';
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
     return (Array.isArray(questions) ? questions : INITIAL_QUESTIONS)
       .filter(q => !(q.isDeleted && !isAdmin && !isProfessor))
+      .filter(q => {
+        if (String(q.category || '').toUpperCase() !== 'GRADE' || isAdmin) return true;
+        return q.studentId === sessionUser.id || q.profId === sessionUser.id || q.assignedProfessorId === sessionUser.id;
+      })
       .map(q => ({
         ...q,
         title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
@@ -1330,19 +1422,19 @@ export const api = {
 
   async getQuestion(questionId, userId) {
     const uid = getCurrentUserId(userId);
+    if (!uid) return null;
     if (USE_REMOTE_BACKEND && uid) {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1800);
-        const res = await fetch(`${API_BASE_URL}/questions/${questionId}`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/questions/${questionId}`, {
           headers: getAuthHeaders(uid),
-          credentials: 'include',
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+          credentials: 'include'
+        }, 1800);
+        if (res.status === 401 || res.status === 403) {
+          return null;
+        }
         if (res.ok) {
-          const body = await res.json();
-          return body?.data || body;
+          const body = await parseJsonSafe(res);
+          return body.data || body;
         }
       } catch (e) {
         console.warn('[API] Remote getQuestion failed, using local storage', e);
@@ -1350,11 +1442,21 @@ export const api = {
     }
 
     const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser?.id) return null;
     const isAdmin = Boolean(sessionUser?.isAdmin);
     const isProfessor = sessionUser?.role === 'professor';
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
     const q = questions.find(item => item.id === questionId);
     if (!q || (q.isDeleted && !isAdmin && !isProfessor)) return null;
+    if (
+      String(q.category || '').toUpperCase() === 'GRADE' &&
+      !isAdmin &&
+      q.studentId !== sessionUser.id &&
+      q.profId !== sessionUser.id &&
+      q.assignedProfessorId !== sessionUser.id
+    ) {
+      return null;
+    }
     return {
       ...q,
       title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
@@ -1790,6 +1892,10 @@ export const api = {
       if (rawProfName.endsWith('교수')) return `${rawProfName}님`;
       return `${rawProfName} 교수님`;
     })();
+    const studentTag = studentInfo.name
+      ? `${studentInfo.department || '학부'} ${studentInfo.studentId || ''} ${studentInfo.name}`.replace(/\s+/g, ' ').trim()
+      : '수강생';
+    const placeholderCtx = { profGreeting, studentTag, studentInfo, courseName };
 
     if (USE_REMOTE_BACKEND) {
       try {
@@ -1820,15 +1926,16 @@ export const api = {
           const body = await res.json();
           const result = body?.data || body;
           if (result && (result.refined || result.refinedContent)) {
+            const rawRefinedTitle =
+              result.refinedTitle ||
+              (rawTitle
+                ? `[${catLabel} 문의] ${rawTitle.replace(/[\[\]!?~]+/g, '').trim()} 관련 질의의 건`
+                : `[${catLabel} 문의] 학업 및 학습 관련 질의의 건`);
             return {
               original: result.original || result.rawContent || rawText,
-              refined: result.refined || result.refinedContent,
+              refined: replaceAiPlaceholders(result.refined || result.refinedContent, placeholderCtx),
               originalTitle: result.originalTitle || rawTitle || '',
-              refinedTitle:
-                result.refinedTitle ||
-                (rawTitle
-                  ? `[${catLabel} 문의] ${rawTitle.replace(/[\[\]!?~]+/g, '').trim()} 관련 질의의 건`
-                  : `[${catLabel} 문의] 학업 및 학습 관련 질의의 건`),
+              refinedTitle: replaceAiPlaceholders(rawRefinedTitle, placeholderCtx),
               politenessScore: result.politenessScore || 98,
               changes: result.changes || [
                 '원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성',
@@ -1849,9 +1956,12 @@ export const api = {
     if (matched) {
       return {
         original: rawText,
-        refined: matched.refinedText,
+        refined: replaceAiPlaceholders(matched.refinedText, placeholderCtx),
         originalTitle: rawTitle || matched.rawTitle || '',
-        refinedTitle: matched.refinedTitle || `[${catLabel} 문의] 학업 질의의 건`,
+        refinedTitle: replaceAiPlaceholders(
+          matched.refinedTitle || `[${catLabel} 문의] 학업 질의의 건`,
+          placeholderCtx
+        ),
         politenessScore: 98,
         changes: [
           '원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성',
@@ -1861,9 +1971,6 @@ export const api = {
       };
     }
 
-    const studentTag = studentInfo.name
-      ? `${studentInfo.department || '학부'} ${studentInfo.studentId || ''} ${studentInfo.name}`.replace(/\s+/g, ' ').trim()
-      : '수강생';
     const courseLabel = courseName ? `${courseName} 강의를` : '이번 학기 강의를';
     const cleanTitle = (rawTitle || '').replace(/[\[\]!?~]+/g, '').trim();
 
@@ -1873,12 +1980,12 @@ export const api = {
 
     if (isFollowUp) {
       refinedTitle = rawTitle || '추가 질문';
-      refinedBody = `${profGreeting}, 정성스러운 답변을 남겨주셔서 진심으로 감사드립니다.\n\n남겨주신 답변 내용을 바탕으로 복습하던 중 추가로 명확히 확인하고 싶은 부분이 있어 조심스럽게 후속 질문을 올립니다.\n\n바쁘신 일정 중에 거듭 여쭈어 송구하오며, 시간 되실 때 가볍게 추가 조언을 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
+      refinedBody = `{{PROFESSOR_TITLE}}, 정성스러운 답변을 남겨주셔서 진심으로 감사드립니다.\n\n남겨주신 답변 내용을 바탕으로 복습하던 중 추가로 명확히 확인하고 싶은 부분이 있어 조심스럽게 후속 질문을 올립니다.\n\n바쁘신 일정 중에 거듭 여쭈어 송구하오며, 시간 되실 때 가볍게 추가 조언을 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
     } else if (category === 'grade' || rawText.includes('성적') || cleanTitle.includes('성적')) {
       refinedTitle = cleanTitle
         ? `[성적 문의] ${cleanTitle} 피드백 및 평가 기준 확인의 건`
         : '[성적 문의] 최종 평가 결과 및 피드백 문의의 건';
-      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 성실히 수강하고 있는 ${studentTag}입니다. 한 학기 동안 열정적인 가르침을 주셔서 감사드립니다.\n\n다름이 아니라 이번 학기 최종 성적 결과와 관련하여, 스스로 부족했던 부분을 점검하고 향후 학습 방향을 보완하고자 조심스럽게 피드백을 여쭙고자 연락을 드립니다.\n\n바쁘신 일정 중 시간 되실 때 확인해 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
+      refinedBody = `안녕하십니까, {{PROFESSOR_TITLE}}.\n${courseLabel} 성실히 수강하고 있는 {{STUDENT_INTRO}}입니다. 한 학기 동안 열정적인 가르침을 주셔서 감사드립니다.\n\n다름이 아니라 이번 학기 최종 성적 결과와 관련하여, 스스로 부족했던 부분을 점검하고 향후 학습 방향을 보완하고자 조심스럽게 피드백을 여쭙고자 연락을 드립니다.\n\n바쁘신 일정 중 시간 되실 때 확인해 주시면 학업에 큰 도움이 될 것 같습니다. 감사합니다.`;
     } else if (
       category === 'assignment' ||
       rawText.includes('과제') ||
@@ -1888,19 +1995,19 @@ export const api = {
       refinedTitle = cleanTitle
         ? `[과제 문의] ${cleanTitle} 관련 일정 및 세부 사항 문의의 건`
         : '[과제 문의] 과제 수행 관련 일정 및 세부 사항 문의의 건';
-      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 성실히 수강하고 있는 ${studentTag}입니다. 평소 깊이 있고 유익한 강의를 이끌어 주셔서 감사드립니다.\n\n현재 안내해 주신 과제를 성실히 수행하는 과정에서 핵심 요구사항 및 일정과 관련하여 명확히 확인하고자 조심스럽게 문의를 남깁니다.\n\n확인해 주시면 성실히 과제를 완수하도록 하겠습니다. 감사합니다.`;
+      refinedBody = `안녕하십니까, {{PROFESSOR_TITLE}}.\n${courseLabel} 성실히 수강하고 있는 {{STUDENT_INTRO}}입니다. 평소 깊이 있고 유익한 강의를 이끌어 주셔서 감사드립니다.\n\n현재 안내해 주신 과제를 성실히 수행하는 과정에서 핵심 요구사항 및 일정과 관련하여 명확히 확인하고자 조심스럽게 문의를 남깁니다.\n\n확인해 주시면 성실히 과제를 완수하도록 하겠습니다. 감사합니다.`;
     } else {
       refinedTitle = cleanTitle
         ? `[강의 문의] ${cleanTitle} 개념 이해 및 학습 질의의 건`
         : '[강의 문의] 강의 내용 개념 이해 및 학습 관련 질의의 건';
-      refinedBody = `안녕하십니까, ${profGreeting}.\n${courseLabel} 수강하고 있는 ${studentTag}입니다. 늘 알차고 유익한 강의를 준비해 주셔서 감사드립니다.\n\n수업 시간에 다루어 주신 강의 내용 및 핵심 개념을 복습하던 중 개념 정리와 원리 이해에 다소 부족한 부분이 있어 교수님의 고견과 조언을 조심스럽게 구하고자 질문을 올립니다.\n\n바쁘신 일정 중 시간 내어 주셔서 감사드립니다.`;
+      refinedBody = `안녕하십니까, {{PROFESSOR_TITLE}}.\n${courseLabel} 수강하고 있는 {{STUDENT_INTRO}}입니다. 늘 알차고 유익한 강의를 준비해 주셔서 감사드립니다.\n\n수업 시간에 다루어 주신 강의 내용 및 핵심 개념을 복습하던 중 개념 정리와 원리 이해에 다소 부족한 부분이 있어 교수님의 고견과 조언을 조심스럽게 구하고자 질문을 올립니다.\n\n바쁘신 일정 중 시간 내어 주셔서 감사드립니다.`;
     }
 
     return {
       original: rawText,
-      refined: refinedBody,
+      refined: replaceAiPlaceholders(refinedBody, placeholderCtx),
       originalTitle: rawTitle || '',
-      refinedTitle,
+      refinedTitle: replaceAiPlaceholders(refinedTitle, placeholderCtx),
       politenessScore: 96,
       changes: [
         '원문 텍스트를 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성',
@@ -1915,16 +2022,16 @@ export const api = {
     if (!uid) return [];
     if (USE_REMOTE_BACKEND) {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1200);
-        const res = await fetch(`${API_BASE_URL}/notifications?userId=${uid}`, {
-          headers: getAuthHeaders(uid),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        const res = await fetchWithTimeout(`${API_BASE_URL}/notifications?userId=${uid}`, {
+          credentials: 'include',
+          headers: getAuthHeaders(uid)
+        }, 1200);
+        if (res.status === 401 || res.status === 403) {
+          return [];
+        }
         if (res.ok) {
-          const body = await res.json();
-          const list = Array.isArray(body) ? body : body?.data;
+          const body = await parseJsonSafe(res);
+          const list = Array.isArray(body) ? body : body.data;
           if (Array.isArray(list)) return list;
         }
       } catch (e) {
@@ -1940,10 +2047,14 @@ export const api = {
     const uid = getCurrentUserId(userId);
     if (USE_REMOTE_BACKEND && uid) {
       try {
-        await fetch(`${API_BASE_URL}/notifications/${notifId}/read`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/notifications/${notifId}/read`, {
           method: 'POST',
+          credentials: 'include',
           headers: getAuthHeaders(uid)
-        });
+        }, 2500);
+        if (res.status === 401 || res.status === 403) {
+          return false;
+        }
       } catch (e) {
         console.warn('[API] Remote markNotificationRead failed, using local storage', e);
       }

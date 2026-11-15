@@ -41,33 +41,37 @@ fun Route.attachmentRoutes(
             try {
                 val multipart = call.receiveMultipart()
                 multipart.forEachPart { part ->
-                    if (part is PartData.FileItem && uploadedDto == null) {
-                        val fileName = part.originalFileName ?: "unnamed"
-                        val contentType = part.contentType?.toString()
-                        val stream = part.streamProvider()
+                    try {
+                        if (part is PartData.FileItem && uploadedDto == null) {
+                            val fileName = part.originalFileName ?: "unnamed"
+                            val contentType = part.contentType?.toString()
 
-                        val buffer = ByteArrayOutputStream()
-                        val chunk = ByteArray(8192)
-                        var bytesRead: Int
-                        var totalRead = 0L
+                            val buffer = ByteArrayOutputStream()
+                            val chunk = ByteArray(8192)
+                            var bytesRead: Int
+                            var totalRead = 0L
 
-                        while (stream.read(chunk).also { bytesRead = it } != -1) {
-                            totalRead += bytesRead
-                            if (totalRead > AttachmentService.MAX_FILE_SIZE_BYTES) {
-                                throw IllegalArgumentException("파일 용량이 15MB를 초과하여 업로드가 중단되었습니다.")
+                            part.streamProvider().use { stream ->
+                                while (stream.read(chunk).also { bytesRead = it } != -1) {
+                                    totalRead += bytesRead
+                                    if (totalRead > AttachmentService.MAX_FILE_SIZE_BYTES) {
+                                        throw IllegalArgumentException("파일 용량이 15MB를 초과하여 업로드가 중단되었습니다.")
+                                    }
+                                    buffer.write(chunk, 0, bytesRead)
+                                }
                             }
-                            buffer.write(chunk, 0, bytesRead)
-                        }
 
-                        val fileBytes = buffer.toByteArray()
-                        uploadedDto = attachmentService.saveAttachment(
-                            uploaderId = uploaderId,
-                            fileName = fileName,
-                            originalBytes = fileBytes,
-                            declaredContentType = contentType
-                        )
+                            val fileBytes = buffer.toByteArray()
+                            uploadedDto = attachmentService.saveAttachment(
+                                uploaderId = uploaderId,
+                                fileName = fileName,
+                                originalBytes = fileBytes,
+                                declaredContentType = contentType
+                            )
+                        }
+                    } finally {
+                        part.dispose()
                     }
-                    part.dispose()
                 }
 
                 if (uploadedDto != null) {

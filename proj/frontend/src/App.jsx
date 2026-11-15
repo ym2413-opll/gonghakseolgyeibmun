@@ -1,7 +1,7 @@
 // src/App.jsx
 // 광운대학교 학업 Q&A 포럼 메인 애플리케이션 (R3 Overhaul: 서양식 포럼 / 3단계 반응형 / 블러 인증 게이트 / 관리 모드)
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { NotificationProvider } from './context/NotificationContext';
@@ -53,37 +53,51 @@ function MainApp() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const toastTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = useCallback((msg) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(msg);
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setToastMessage('');
+      toastTimerRef.current = null;
     }, 3200);
   }, []);
 
   const fetchQuestions = useCallback(async () => {
+    if (!isAuthenticated || !currentUser?.id) {
+      setQuestions([]);
+      return;
+    }
     try {
-      const data = await api.getQuestions(currentUser?.id);
+      const data = await api.getQuestions(currentUser.id);
       setQuestions(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load questions:', err);
       setQuestions([]);
     }
-  }, [currentUser?.id]);
+  }, [isAuthenticated, currentUser?.id]);
 
   const fetchSelectedDetail = useCallback(
     async (qid) => {
-      if (!qid) {
+      if (!isAuthenticated || !currentUser?.id || !qid) {
         setSelectedQuestionDetail(null);
         return;
       }
       try {
-        const detail = await api.getQuestion(qid, currentUser?.id);
+        const detail = await api.getQuestion(qid, currentUser.id);
         setSelectedQuestionDetail(detail);
       } catch (err) {
         console.warn('Failed to load question detail:', err);
       }
     },
-    [currentUser?.id]
+    [isAuthenticated, currentUser?.id]
   );
 
   useEffect(() => {
@@ -91,12 +105,12 @@ function MainApp() {
   }, [fetchQuestions, isAuthenticated, isAdmin]);
 
   useEffect(() => {
-    if (selectedQuestionId) {
+    if (isAuthenticated && selectedQuestionId) {
       fetchSelectedDetail(selectedQuestionId);
     } else {
       setSelectedQuestionDetail(null);
     }
-  }, [selectedQuestionId, fetchSelectedDetail, isAdmin]);
+  }, [isAuthenticated, selectedQuestionId, fetchSelectedDetail, isAdmin]);
 
   // 계정 전환 또는 로그아웃 시 작성 중이던 화면·상세·모달 상태를 초기화하여 권한 혼선 방지
   useEffect(() => {
@@ -169,33 +183,41 @@ function MainApp() {
   };
 
   const handleToggleHideQuestion = async (q) => {
-    await api.toggleHideQuestion(q.id, !q.isHidden);
-    await fetchQuestions();
-    if (selectedQuestionId === q.id) {
-      await fetchSelectedDetail(q.id);
+    try {
+      await api.toggleHideQuestion(q.id, !q.isHidden);
+      await fetchQuestions();
+      if (selectedQuestionId === q.id) {
+        await fetchSelectedDetail(q.id);
+      }
+      showToast(
+        !q.isHidden
+          ? '해당 질문 토픽이 가리기(비표시) 처리되었습니다.'
+          : '질문 토픽 가리기가 해제되었습니다.'
+      );
+    } catch (err) {
+      showToast(err.message || '질문 가리기 상태 변경에 실패했습니다.');
     }
-    showToast(
-      !q.isHidden
-        ? '해당 질문 토픽이 가리기(비표시) 처리되었습니다.'
-        : '질문 토픽 가리기가 해제되었습니다.'
-    );
   };
 
   const handleToggleHideAnswer = async (ans, questionId) => {
-    if (questionId) {
-      await api.toggleHideAnswerByQuestion(questionId, ans.id, !ans.isHidden);
-    } else {
-      await api.toggleHideAnswer(ans.id, !ans.isHidden, questionId);
+    try {
+      if (questionId) {
+        await api.toggleHideAnswerByQuestion(questionId, ans.id, !ans.isHidden);
+      } else {
+        await api.toggleHideAnswer(ans.id, !ans.isHidden, questionId);
+      }
+      await fetchQuestions();
+      if (questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast(
+        !ans.isHidden
+          ? '해당 답변이 가리기(비표시) 처리되었습니다.'
+          : '답변 가리기가 해제되었습니다.'
+      );
+    } catch (err) {
+      showToast(err.message || '답변 가리기 상태 변경에 실패했습니다.');
     }
-    await fetchQuestions();
-    if (questionId) {
-      await fetchSelectedDetail(questionId);
-    }
-    showToast(
-      !ans.isHidden
-        ? '해당 답변이 가리기(비표시) 처리되었습니다.'
-        : '답변 가리기가 해제되었습니다.'
-    );
   };
 
   const handleDeleteQuestion = async (q) => {

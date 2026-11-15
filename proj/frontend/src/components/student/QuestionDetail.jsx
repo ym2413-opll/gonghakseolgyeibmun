@@ -292,6 +292,9 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
               onClose={() => setIsAiModalOpen(false)}
               initialText={editContent}
               category={editCategory}
+              courseName={question.courseName || ''}
+              professorName={question.profName || question.assignedProfessorName || ''}
+              isAnonymous={editIsAnonymous}
               onApplyRefined={handleApplyAiInEdit}
             />
           </div>

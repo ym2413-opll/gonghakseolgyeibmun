@@ -144,26 +144,40 @@ export function NotificationProvider({ children }) {
   }, [currentUser?.id, isProfessor, loadNotifications, loadProfSettings]);
 
   const markAsRead = async (id) => {
-    await api.markNotificationRead(id, currentUser?.id);
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, isRead: true } : n))
-    );
-    setUnreadCount(prev => Math.max(0, prev - 1));
+    try {
+      await api.markNotificationRead(id, currentUser?.id);
+      setNotifications(prev =>
+        prev.map(n => (n.id === id ? { ...n, isRead: true } : n))
+      );
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.warn('Failed to mark notification read:', err);
+    }
   };
 
   const markAllAsRead = async () => {
-    for (const n of notifications.filter(x => !x.isRead)) {
-      await api.markNotificationRead(n.id, currentUser?.id);
+    try {
+      for (const n of notifications.filter(x => !x.isRead)) {
+        await api.markNotificationRead(n.id, currentUser?.id);
+      }
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setUnreadCount(0);
+    } catch (err) {
+      console.warn('Failed to mark all notifications read:', err);
     }
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    setUnreadCount(0);
   };
 
   const updateProfSettings = async (partialSettings) => {
+    const previous = profSettings;
     const updated = { ...profSettings, ...partialSettings };
     setProfSettings(updated);
     if (currentUser?.id) {
-      await api.updateSettings(currentUser.id, updated);
+      try {
+        await api.updateSettings(currentUser.id, updated);
+      } catch (err) {
+        setProfSettings(previous);
+        throw err;
+      }
     }
   };
 

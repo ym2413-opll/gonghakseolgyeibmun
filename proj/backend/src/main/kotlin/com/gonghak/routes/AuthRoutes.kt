@@ -3,6 +3,7 @@ package com.gonghak.routes
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.LoginRequest
 import com.gonghak.dto.RegisterRequest
+import com.gonghak.service.PasswordSecurity
 import com.gonghak.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -72,7 +73,7 @@ fun Route.authRoutes(userService: UserService) {
                 return@post
             }
             val request = call.receive<LoginRequest>()
-            val accountKey = request.username.trim().lowercase()
+            val accountKey = PasswordSecurity.sanitizeInput(request.username).lowercase()
             if (accountKey.isNotEmpty() && !loginAccountLimiter.allow(accountKey)) {
                 call.respond(
                     HttpStatusCode.TooManyRequests,

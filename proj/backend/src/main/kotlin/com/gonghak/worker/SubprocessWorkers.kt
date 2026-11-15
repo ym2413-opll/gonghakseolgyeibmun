@@ -140,25 +140,31 @@ object ImageCompressionProcessor {
      * Reads image container headers BEFORE full pixel decoding to prevent image-bomb OOMs.
      */
     fun validateImageDimensions(originalBytes: ByteArray) {
-        val iis = ImageIO.createImageInputStream(ByteArrayInputStream(originalBytes)) ?: return
-        iis.use { stream ->
-            val readers = ImageIO.getImageReaders(stream)
-            if (!readers.hasNext()) return
-            val reader = readers.next()
-            try {
-                reader.input = stream
-                val width = reader.getWidth(0)
-                val height = reader.getHeight(0)
-                if (width <= 0 || height <= 0 ||
-                    width > MAX_SOURCE_DIMENSION ||
-                    height > MAX_SOURCE_DIMENSION ||
-                    width.toLong() * height.toLong() > MAX_SOURCE_PIXELS
-                ) {
-                    throw SecurityException("이미지 해상도(${width}x${height})가 보안 허용 범위를 초과했습니다.")
+        try {
+            val iis = ImageIO.createImageInputStream(ByteArrayInputStream(originalBytes)) ?: return
+            iis.use { stream ->
+                val readers = ImageIO.getImageReaders(stream)
+                if (!readers.hasNext()) return
+                val reader = readers.next()
+                try {
+                    reader.input = stream
+                    val width = reader.getWidth(0)
+                    val height = reader.getHeight(0)
+                    if (width <= 0 || height <= 0 ||
+                        width > MAX_SOURCE_DIMENSION ||
+                        height > MAX_SOURCE_DIMENSION ||
+                        width.toLong() * height.toLong() > MAX_SOURCE_PIXELS
+                    ) {
+                        throw SecurityException("이미지 해상도(${width}x${height})가 보안 허용 범위를 초과했습니다.")
+                    }
+                } finally {
+                    reader.dispose()
                 }
-            } finally {
-                reader.dispose()
             }
+        } catch (se: SecurityException) {
+            throw se
+        } catch (_: Exception) {
+            throw IllegalArgumentException("유효하지 않거나 손상된 이미지 파일입니다.")
         }
     }
 
@@ -217,14 +223,18 @@ object ImageCompressionProcessor {
             val writers = ImageIO.getImageWritersByFormatName("jpeg")
             if (writers.hasNext()) {
                 val writer = writers.next()
-                val param = writer.defaultWriteParam
-                param.compressionMode = ImageWriteParam.MODE_EXPLICIT
-                param.compressionQuality = jpegQuality
-                val ios = ImageIO.createImageOutputStream(outputStream)
-                writer.output = ios
-                writer.write(null, IIOImage(resizedImage, null, null), param)
-                writer.dispose()
-                ios.close()
+                var ios: javax.imageio.stream.ImageOutputStream? = null
+                try {
+                    val param = writer.defaultWriteParam
+                    param.compressionMode = ImageWriteParam.MODE_EXPLICIT
+                    param.compressionQuality = jpegQuality
+                    ios = ImageIO.createImageOutputStream(outputStream)
+                    writer.output = ios
+                    writer.write(null, IIOImage(resizedImage, null, null), param)
+                } finally {
+                    runCatching { ios?.close() }
+                    runCatching { writer.dispose() }
+                }
             } else {
                 ImageIO.write(resizedImage, "jpeg", outputStream)
             }
@@ -305,6 +315,29 @@ object SubprocessRunner {
         return if (bin.exists()) bin.absolutePath else "java"
     }
 
+    private fun drainStreamAsync(input: java.io.InputStream, maxBytes: Int = 65_536): Pair<Thread, ByteArrayOutputStream> {
+        val baos = ByteArrayOutputStream()
+        val readerThread = Thread({
+            runCatching {
+                input.use { stream ->
+                    val buf = ByteArray(2048)
+                    while (true) {
+                        val read = stream.read(buf)
+                        if (read == -1) break
+                        val remaining = maxBytes - baos.size()
+                        if (remaining > 0) {
+                            baos.write(buf, 0, minOf(read, remaining))
+                        }
+                    }
+                }
+            }
+        }, "subprocess-stream-drainer").apply {
+            isDaemon = true
+            start()
+        }
+        return readerThread to baos
+    }
+
     fun runSmtpSubprocess(payload: SmtpJobPayload, timeoutSeconds: Long = 10L): SmtpJobResult {
         val javaExec = resolveJavaExecutable()
         val classpath = System.getProperty("java.class.path")
@@ -317,21 +350,30 @@ object SubprocessRunner {
             "com.gonghak.worker.SmtpWorkerMain"
         ).redirectErrorStream(true).start()
 
-        process.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
-            writer.write(json.encodeToString(payload))
-            writer.flush()
-        }
+        val (drainThread, outputBuf) = drainStreamAsync(process.inputStream)
+        try {
+            process.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.write(json.encodeToString(payload))
+                writer.flush()
+            }
 
-        val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-        if (!finished) {
-            process.destroyForcibly()
-            return SmtpJobResult(success = false, message = "SMTP subprocess timed out after ${timeoutSeconds}s")
-        }
+            val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                runCatching { process.waitFor(2, TimeUnit.SECONDS) }
+                return SmtpJobResult(success = false, message = "SMTP subprocess timed out after ${timeoutSeconds}s")
+            }
 
-        val output = process.inputStream.bufferedReader(Charsets.UTF_8).readText().trim()
-        val lastLine = output.lines().lastOrNull { it.isNotBlank() }.orEmpty()
-        return runCatching { json.decodeFromString<SmtpJobResult>(lastLine) }
-            .getOrElse { SmtpJobResult(success = process.exitValue() == 0, message = output.ifBlank { null }) }
+            drainThread.join(1000L)
+            val output = outputBuf.toString(Charsets.UTF_8).trim()
+            val lastLine = output.lines().lastOrNull { it.isNotBlank() }.orEmpty()
+            return runCatching { json.decodeFromString<SmtpJobResult>(lastLine) }
+                .getOrElse { SmtpJobResult(success = process.exitValue() == 0, message = output.ifBlank { null }) }
+        } finally {
+            runCatching { process.outputStream.close() }
+            runCatching { process.inputStream.close() }
+            runCatching { process.errorStream.close() }
+        }
     }
 
     fun runImageCompressSubprocess(
@@ -361,16 +403,25 @@ object SubprocessRunner {
                 jpegQuality.toString()
             ).redirectErrorStream(true).start()
 
-            val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                return null
+            val (drainThread, _) = drainStreamAsync(process.inputStream)
+            try {
+                runCatching { process.outputStream.close() }
+                val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    runCatching { process.waitFor(2, TimeUnit.SECONDS) }
+                    return null
+                }
+                drainThread.join(1000L)
+                if (process.exitValue() != 0 || !Files.exists(tempOut)) {
+                    return null
+                }
+                val resultBytes = Files.readAllBytes(tempOut)
+                if (resultBytes.isNotEmpty()) resultBytes else null
+            } finally {
+                runCatching { process.inputStream.close() }
+                runCatching { process.errorStream.close() }
             }
-            if (process.exitValue() != 0 || !Files.exists(tempOut)) {
-                return null
-            }
-            val resultBytes = Files.readAllBytes(tempOut)
-            if (resultBytes.isNotEmpty()) resultBytes else null
         } finally {
             Files.deleteIfExists(tempIn)
             Files.deleteIfExists(tempOut)

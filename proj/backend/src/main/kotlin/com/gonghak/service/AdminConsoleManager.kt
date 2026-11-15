@@ -14,10 +14,13 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
@@ -72,15 +75,24 @@ object AdminConsoleManager {
         val secretPath = resolveSecretFilePath()
         runCatching {
             secretPath.parent?.let { Files.createDirectories(it) }
-            Files.write(
-                secretPath,
-                (generated + "\n").toByteArray(StandardCharsets.UTF_8),
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING,
-                StandardOpenOption.WRITE
-            )
-            runCatching {
-                Files.setPosixFilePermissions(secretPath, PosixFilePermissions.fromString("rw-------"))
+            // Write via owner-restricted temp file before moving onto secretPath to avoid a world-readable window on POSIX.
+            val tmpSecret = Files.createTempFile(secretPath.parent ?: Paths.get("."), ".admin-ctl-", ".tmp")
+            try {
+                runCatching {
+                    Files.setPosixFilePermissions(tmpSecret, PosixFilePermissions.fromString("rw-------"))
+                }
+                Files.write(
+                    tmpSecret,
+                    (generated + "\n").toByteArray(StandardCharsets.UTF_8),
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+                )
+                runCatching {
+                    Files.setPosixFilePermissions(tmpSecret, PosixFilePermissions.fromString("rw-------"))
+                }
+                Files.move(tmpSecret, secretPath, StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                runCatching { Files.deleteIfExists(tmpSecret) }
             }
         }.onFailure { err ->
             logger.warn("[ADMIN CONSOLE] 제어 토큰 파일 저장 실패 (${secretPath}): ${err.message}")
@@ -118,9 +130,14 @@ object AdminConsoleManager {
         startLoopbackControlListener(resolveControlPort())
     }
 
+    @Volatile
+    private var clientExecutor: ExecutorService? = null
+
     fun stopConsoleListener() {
         runCatching { controlServerSocket?.close() }
         controlServerSocket = null
+        runCatching { clientExecutor?.shutdownNow() }
+        clientExecutor = null
         activeControlToken = null
         socketStarted.set(false)
     }
@@ -157,6 +174,11 @@ object AdminConsoleManager {
         if (!socketStarted.compareAndSet(false, true)) return
         ensureControlToken()
 
+        val pool = Executors.newFixedThreadPool(4) { runnable ->
+            Thread(runnable, "admin-control-client").apply { isDaemon = true }
+        }
+        clientExecutor = pool
+
         thread(isDaemon = true, name = "admin-control-socket") {
             try {
                 val server = ServerSocket().apply {
@@ -172,13 +194,16 @@ object AdminConsoleManager {
                     } catch (_: Exception) {
                         break
                     }
-                    thread(isDaemon = true, name = "admin-control-client") {
-                        handleSocketClient(client)
+                    try {
+                        pool.submit { handleSocketClient(client) }
+                    } catch (_: Exception) {
+                        runCatching { client.close() }
                     }
                 }
             } catch (e: Exception) {
                 logger.warn("[ADMIN CONSOLE] 로컬 관리자 소켓 바인딩 생략/종료 (127.0.0.1:$port): ${e.message}")
             } finally {
+                runCatching { pool.shutdownNow() }
                 socketStarted.set(false)
             }
         }

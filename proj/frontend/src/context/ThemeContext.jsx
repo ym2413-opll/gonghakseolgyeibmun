@@ -34,35 +34,42 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     let mounted = true;
     async function loadUserSettings() {
-      if (!currentUser?.id) return;
-      const userSettings = await api.getSettings(currentUser.id);
-      if (mounted && userSettings) {
-        setSettings(userSettings);
-        if (userSettings.theme && VALID_THEMES.includes(userSettings.theme)) {
-          setTheme(userSettings.theme);
-          localStorage.setItem('prof_qa_theme_mode', userSettings.theme);
-        }
-        if (userSettings.fontSize) {
-          setFontSize(userSettings.fontSize);
-          localStorage.setItem('prof_qa_font_size', userSettings.fontSize);
-        }
-        if (userSettings.helpLevel) {
-          const upperHelp = String(userSettings.helpLevel).toUpperCase();
-          if (VALID_HELP_LEVELS.includes(upperHelp)) {
-            setHelpLevel(upperHelp);
-            localStorage.setItem('prof_qa_help_level', upperHelp);
+      if (!currentUser?.id) {
+        setSettings(null);
+        return;
+      }
+      try {
+        const userSettings = await api.getSettings(currentUser.id);
+        if (mounted && userSettings) {
+          setSettings(userSettings);
+          if (userSettings.theme && VALID_THEMES.includes(userSettings.theme)) {
+            setTheme(userSettings.theme);
+            localStorage.setItem('prof_qa_theme_mode', userSettings.theme);
+          }
+          if (userSettings.fontSize) {
+            setFontSize(userSettings.fontSize);
+            localStorage.setItem('prof_qa_font_size', userSettings.fontSize);
+          }
+          if (userSettings.helpLevel) {
+            const upperHelp = String(userSettings.helpLevel).toUpperCase();
+            if (VALID_HELP_LEVELS.includes(upperHelp)) {
+              setHelpLevel(upperHelp);
+              localStorage.setItem('prof_qa_help_level', upperHelp);
+            }
+          }
+          if (typeof userSettings.exhibitionMode === 'boolean') {
+            const hasLocalPref = localStorage.getItem('prof_qa_exhibition_mode') !== null;
+            if (userSettings.exhibitionMode) {
+              setExhibitionMode(true);
+              localStorage.setItem('prof_qa_exhibition_mode', 'true');
+            } else if (!hasLocalPref) {
+              setExhibitionMode(false);
+              localStorage.setItem('prof_qa_exhibition_mode', 'false');
+            }
           }
         }
-        if (typeof userSettings.exhibitionMode === 'boolean') {
-          const hasLocalPref = localStorage.getItem('prof_qa_exhibition_mode') !== null;
-          if (userSettings.exhibitionMode) {
-            setExhibitionMode(true);
-            localStorage.setItem('prof_qa_exhibition_mode', 'true');
-          } else if (!hasLocalPref) {
-            setExhibitionMode(false);
-            localStorage.setItem('prof_qa_exhibition_mode', 'false');
-          }
-        }
+      } catch (err) {
+        console.warn('Failed to load user settings:', err);
       }
     }
     loadUserSettings();

@@ -1,5 +1,6 @@
 package com.gonghak.routes
 
+import com.gonghak.config.EnvConfig
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.UserDto
 import com.gonghak.models.UserRole
@@ -12,6 +13,8 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
 
 const val AUTH_COOKIE_NAME = "cistus_auth_token"
 
@@ -45,7 +48,7 @@ val DEFAULT_COURSE_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333
  * enabled with ENABLE_DEMO_USERS=true.
  */
 fun isDemoModeEnabled(): Boolean =
-    System.getenv("ENABLE_DEMO_USERS")?.trim()?.equals("true", ignoreCase = true) == true
+    EnvConfig.get("ENABLE_DEMO_USERS")?.equals("true", ignoreCase = true) == true
 
 fun parseDemoUserIdOrNull(input: String?): UUID? {
     if (input.isNullOrBlank()) return null
@@ -204,8 +207,9 @@ suspend fun ApplicationCall.requireProfessorOrAdmin(userService: UserService): U
 fun ApplicationCall.clientRateLimitKey(): String {
     val remote = request.local.remoteAddress
     val forwardedFor = if (remote == "127.0.0.1" || remote == "::1" || remote == "0:0:0:0:0:0:0:1") {
+        // Prefer X-Real-IP set by the local reverse proxy, or the rightmost hop appended by the local proxy.
         request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
-            ?: request.headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: request.headers["X-Forwarded-For"]?.split(",")?.lastOrNull()?.trim()?.takeIf { it.isNotEmpty() }
     } else {
         null
     }
@@ -214,30 +218,57 @@ fun ApplicationCall.clientRateLimitKey(): String {
 
 class SlidingWindowRateLimiter(
     private val maxRequests: Int,
-    private val windowMillis: Long
+    private val windowMillis: Long,
+    private val maxBuckets: Int = 4096
 ) {
     private val buckets = ConcurrentHashMap<String, ArrayDeque<Long>>()
+    private val pruneLock = ReentrantLock()
+    private val lastPruneAt = AtomicLong(0L)
 
     fun allow(key: String, nowMillis: Long = System.currentTimeMillis()): Boolean {
-        val queue = buckets.computeIfAbsent(key) { ArrayDeque() }
-        synchronized(queue) {
-            val cutoff = nowMillis - windowMillis
+        val cutoff = nowMillis - windowMillis
+        if (buckets.size > maxBuckets) {
+            pruneExpiredBuckets(cutoff, nowMillis)
+        }
+
+        // Reject brand-new keys when saturated even after pruning so memory cannot grow unboundedly under flood.
+        if (buckets.size >= maxBuckets * 2 && !buckets.containsKey(key)) {
+            return false
+        }
+
+        var allowed = false
+        // ConcurrentHashMap.compute locks only the single bucket key (no nested locks -> deadlock-free).
+        buckets.compute(key) { _, existing ->
+            val queue = existing ?: ArrayDeque()
             while (queue.isNotEmpty() && queue.first() <= cutoff) {
                 queue.removeFirst()
             }
-            if (queue.size >= maxRequests) {
-                return false
+            if (queue.size < maxRequests) {
+                queue.addLast(nowMillis)
+                allowed = true
             }
-            queue.addLast(nowMillis)
-            if (buckets.size > 4096) {
-                // Opportunistic bound to avoid unbounded memory growth
-                buckets.entries.removeIf { entry ->
-                    synchronized(entry.value) {
-                        entry.value.isEmpty() || entry.value.last() <= cutoff
+            if (queue.isEmpty()) null else queue
+        }
+        return allowed
+    }
+
+    private fun pruneExpiredBuckets(cutoff: Long, nowMillis: Long) {
+        val prevPrune = lastPruneAt.get()
+        if (nowMillis - prevPrune < 1_000L && buckets.size <= maxBuckets * 2) return
+        if (!pruneLock.tryLock()) return
+        try {
+            lastPruneAt.set(nowMillis)
+            val keys = buckets.keys().toList()
+            for (k in keys) {
+                buckets.computeIfPresent(k) { _, queue ->
+                    while (queue.isNotEmpty() && queue.first() <= cutoff) {
+                        queue.removeFirst()
                     }
+                    if (queue.isEmpty()) null else queue
                 }
             }
-            return true
+        } finally {
+            pruneLock.unlock()
         }
     }
 }

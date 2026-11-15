@@ -1,5 +1,5 @@
 // src/components/professor/NotificationSettingsModal.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -34,8 +34,16 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   });
   const [emailLogs, setEmailLogs] = useState([]);
   const [savedToast, setSavedToast] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
   const [courseError, setCourseError] = useState('');
+  const savedTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,11 +75,19 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   }, [settings, isOpen, currentUser?.email]);
 
   useEffect(() => {
+    let active = true;
     if (isOpen && currentUser?.id) {
-      api.getEmailLogs(currentUser.id).then((logs) => {
-        setEmailLogs(Array.isArray(logs) ? logs.slice(0, 5) : []);
-      });
+      api.getEmailLogs(currentUser.id)
+        .then((logs) => {
+          if (active) setEmailLogs(Array.isArray(logs) ? logs.slice(0, 5) : []);
+        })
+        .catch((err) => {
+          console.warn('Failed to fetch email logs:', err);
+        });
     }
+    return () => {
+      active = false;
+    };
   }, [isOpen, currentUser?.id]);
 
   if (!isOpen) return null;
@@ -84,11 +100,13 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   };
 
   const handleSave = async () => {
+    if (isSaving) return;
     setCourseError('');
     if (selectedCourseIds.length === 0) {
       setCourseError('담당 교과목은 최소 1개 이상 선택해야 합니다.');
       return;
     }
+    setIsSaving(true);
     try {
       await updateUserCourses(selectedCourseIds);
       await updateAllSettings({
@@ -102,12 +120,15 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
       });
       if (onCoursesUpdated) await onCoursesUpdated();
       setSavedToast(true);
-      setTimeout(() => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => {
         setSavedToast(false);
         onClose();
       }, 900);
     } catch (err) {
       setCourseError(err.message || '설정 저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -322,12 +343,12 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
             </div>
           ) : (
             <>
-              <button className="btn btn-secondary" onClick={onClose}>
+              <button className="btn btn-secondary" onClick={onClose} disabled={isSaving}>
                 취소
               </button>
-              <button className="btn btn-primary" onClick={handleSave}>
+              <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
                 <Save size={16} />
-                설정 저장하기
+                {isSaving ? '저장 중...' : '설정 저장하기'}
               </button>
             </>
           )}

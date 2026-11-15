@@ -67,7 +67,9 @@ class EmailService(
         )
 
         val prefix = if (isCoProfessor) "[공동강의 질문 알림]" else "[새 질문 알림]"
-        val subject = "$prefix [$courseName - $categoryLabel] $questionTitle"
+        val safeCourseName = PasswordSecurity.sanitizeHeaderValue(courseName)
+        val safeTitle = PasswordSecurity.sanitizeHeaderValue(questionTitle)
+        val subject = "$prefix [$safeCourseName - $categoryLabel] $safeTitle"
         val body = buildString {
             if (replyRoute != null) {
                 appendLine(EMAIL_REPLY_ABOVE_MARKER)

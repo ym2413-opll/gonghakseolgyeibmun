@@ -1,8 +1,10 @@
 package com.gonghak.service
 
 import com.gonghak.config.DatabaseFactory.dbQuery
+import com.gonghak.config.EnvConfig
 import com.gonghak.dto.AttachmentDto
 import com.gonghak.models.AttachmentsTable
+import com.gonghak.models.QuestionCategory
 import com.gonghak.models.QuestionsTable
 import com.gonghak.worker.ImageCompressionProcessor
 import com.gonghak.worker.SubprocessRunner
@@ -96,6 +98,7 @@ class AttachmentService(
         val safeSavedName = "${attachmentId}.$extension"
 
         // 5-6. CPU-집약적인 이미지 압축 및 디스크 I/O는 전용 워커 스레드 풀(및 필요시 격리 프로세스)에서 처리
+        val targetPath = resolveSafeStoragePath(safeSavedName)
         val (finalBytes, isCompressed, compressionRatio) = withContext(workerManager.attachmentDispatcher) {
             var processedBytes = originalBytes
             var compressedFlag = false
@@ -103,15 +106,17 @@ class AttachmentService(
 
             if (isImage) {
                 try {
-                    val useSubprocess = System.getenv("IMAGE_SUBPROCESS_ENABLED")
+                    val useSubprocess = EnvConfig.get("IMAGE_SUBPROCESS_ENABLED")
                         ?.trim()?.equals("false", ignoreCase = true) != true
                     val compressed = if (useSubprocess) {
+                        // Subprocess isolation prevents malformed images from OOM-crashing the JVM;
+                        // never fall back to in-process decoding when subprocess mode is enabled.
                         SubprocessRunner.runImageCompressSubprocess(
                             originalBytes = originalBytes,
                             extension = extension,
                             maxDimension = MAX_IMAGE_DIMENSION,
                             jpegQuality = JPEG_COMPRESSION_QUALITY
-                        ) ?: compressImage(originalBytes, extension)
+                        )
                     } else {
                         compressImage(originalBytes, extension)
                     }
@@ -128,7 +133,6 @@ class AttachmentService(
                 }
             }
 
-            val targetPath = resolveSafeStoragePath(safeSavedName)
             Files.write(
                 targetPath,
                 processedBytes,
@@ -142,37 +146,42 @@ class AttachmentService(
 
         val resolvedMimeType = getMimeTypeByExtension(extension)
 
-        // 7. DB 기록
-        val created = dbQuery(workerManager.attachmentDispatcher) {
-            AttachmentsTable.insert {
-                it[id] = attachmentId
-                it[AttachmentsTable.uploaderId] = uploaderId
-                it[originalName] = sanitizedOriginalName
-                it[savedName] = safeSavedName
-                it[fileSize] = finalBytes.size.toLong()
-                it[originalSize] = originalBytes.size.toLong()
-                it[mimeType] = resolvedMimeType
-                it[AttachmentsTable.isImage] = isImage
-                it[AttachmentsTable.isCompressed] = isCompressed
-                it[AttachmentsTable.compressionRatio] = compressionRatio
-                it[createdAt] = Instant.now()
-            }
+        // 7. DB 기록 (실패 시 고아 파일 제거)
+        val created = try {
+            dbQuery(workerManager.attachmentDispatcher) {
+                AttachmentsTable.insert {
+                    it[id] = attachmentId
+                    it[AttachmentsTable.uploaderId] = uploaderId
+                    it[originalName] = sanitizedOriginalName
+                    it[savedName] = safeSavedName
+                    it[fileSize] = finalBytes.size.toLong()
+                    it[originalSize] = originalBytes.size.toLong()
+                    it[mimeType] = resolvedMimeType
+                    it[AttachmentsTable.isImage] = isImage
+                    it[AttachmentsTable.isCompressed] = isCompressed
+                    it[AttachmentsTable.compressionRatio] = compressionRatio
+                    it[createdAt] = Instant.now()
+                }
 
-            AttachmentDto(
-                id = attachmentId.toString(),
-                questionId = null,
-                originalName = sanitizedOriginalName,
-                savedName = safeSavedName,
-                fileSize = finalBytes.size.toLong(),
-                originalSize = originalBytes.size.toLong(),
-                mimeType = resolvedMimeType,
-                isImage = isImage,
-                isCompressed = isCompressed,
-                compressionRatio = compressionRatio,
-                url = "/api/attachments/$attachmentId",
-                downloadUrl = "/api/attachments/$attachmentId/download",
-                createdAt = Instant.now().toString()
-            )
+                AttachmentDto(
+                    id = attachmentId.toString(),
+                    questionId = null,
+                    originalName = sanitizedOriginalName,
+                    savedName = safeSavedName,
+                    fileSize = finalBytes.size.toLong(),
+                    originalSize = originalBytes.size.toLong(),
+                    mimeType = resolvedMimeType,
+                    isImage = isImage,
+                    isCompressed = isCompressed,
+                    compressionRatio = compressionRatio,
+                    url = "/api/attachments/$attachmentId",
+                    downloadUrl = "/api/attachments/$attachmentId/download",
+                    createdAt = Instant.now().toString()
+                )
+            }
+        } catch (t: Throwable) {
+            runCatching { Files.deleteIfExists(targetPath) }
+            throw t
         }
 
         return created
@@ -190,6 +199,16 @@ class AttachmentService(
         // 안전한 파일명 기본값
         if (clean.isBlank()) {
             clean = "attachment_${UUID.randomUUID().toString().substring(0, 8)}"
+        }
+        if (clean.length > 200) {
+            val dotIdx = clean.lastIndexOf('.')
+            clean = if (dotIdx > 0 && clean.length - dotIdx <= 16) {
+                val extPart = clean.substring(dotIdx)
+                val basePart = clean.substring(0, (200 - extPart.length).coerceAtLeast(1))
+                "$basePart$extPart"
+            } else {
+                clean.take(200)
+            }
         }
         return clean
     }
@@ -393,6 +412,12 @@ class AttachmentService(
             val qRow = QuestionsTable.select { QuestionsTable.id eq linkedQuestionId }.singleOrNull()
             if (qRow == null || qRow[QuestionsTable.isHidden] || qRow[QuestionsTable.isDeletedByAuthor]) {
                 throw IllegalStateException("관리자에 의해 가려졌거나 삭제된 게시물의 첨부파일에 접근할 수 없습니다.")
+            }
+            if (qRow[QuestionsTable.category] == QuestionCategory.GRADE.name &&
+                qRow[QuestionsTable.studentId] != requesterId &&
+                qRow[QuestionsTable.assignedProfessorId] != requesterId
+            ) {
+                throw IllegalStateException("성적 카테고리 질문의 첨부파일은 작성자와 담당교수만 열람할 수 있습니다.")
             }
         }
 

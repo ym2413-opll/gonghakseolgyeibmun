@@ -1,5 +1,5 @@
 // src/components/student/AiRefineModal.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AI_INQUIRY_TEMPLATES } from '../../services/mockData';
@@ -26,20 +26,37 @@ export default function AiRefineModal({
   const [isLoading, setIsLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [isEditingRefined, setIsEditingRefined] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
+
+  const userName = currentUser?.name || '';
+  const userStudentId = currentUser?.identifier || currentUser?.studentId || '';
+  const userDept = currentUser?.department || '';
 
   const handleTriggerAI = React.useCallback(async (textToRefine, titleToRefine = '') => {
     const text = textToRefine !== undefined ? textToRefine : '';
     const ttl = titleToRefine !== undefined ? titleToRefine : '';
     if ((!text || !text.trim()) && (!ttl || !ttl.trim())) return;
 
+    const reqId = ++requestIdRef.current;
     setIsLoading(true);
+    setErrorMsg('');
     try {
       const studentInfo = isAnonymous
         ? {}
         : {
-            name: currentUser?.name || '',
-            studentId: currentUser?.identifier || currentUser?.studentId || '',
-            department: currentUser?.department || ''
+            name: userName,
+            studentId: userStudentId,
+            department: userDept
           };
       const result = await api.refineQuestionAI(text, category, studentInfo, ttl, {
         courseName,
@@ -47,15 +64,20 @@ export default function AiRefineModal({
         isFollowUp,
         previousAnswer
       });
+      if (!isMountedRef.current || reqId !== requestIdRef.current) return;
       setAiResult(result);
       setRefinedText(result.refined || '');
       setRefinedTitle(result.refinedTitle || '');
     } catch (err) {
+      if (!isMountedRef.current || reqId !== requestIdRef.current) return;
       console.error('Text refinement error', err);
+      setErrorMsg(err.message || '문장 다듬기 중 오류가 발생했습니다.');
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current && reqId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [currentUser, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
+  }, [userName, userStudentId, userDept, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
 
   useEffect(() => {
     if (isOpen) {
@@ -66,10 +88,13 @@ export default function AiRefineModal({
       setRefinedTitle('');
       setRefinedText('');
       setAiResult(null);
+      setErrorMsg('');
       setIsEditingRefined(false);
       if (initTxt.trim().length > 3 || initTtl.trim().length > 2) {
         handleTriggerAI(initTxt, initTtl);
       }
+    } else {
+      requestIdRef.current += 1;
     }
   }, [isOpen, initialText, initialTitle, handleTriggerAI]);
 
@@ -179,6 +204,10 @@ export default function AiRefineModal({
                   <div className="ai-loading-box">
                     <Loader2 size={22} className="spinning ai-spinner" />
                     <p>문장을 다듬는 중입니다...</p>
+                  </div>
+                ) : errorMsg ? (
+                  <div className="ai-empty-prompt">
+                    <p style={{ color: 'var(--danger-color, #dc2626)' }}>{errorMsg}</p>
                   </div>
                 ) : (refinedText || refinedTitle) ? (
                   <>

@@ -129,6 +129,7 @@ class EmailReplyImapPoller(
                 put("mail.imaps.ssl.enable", "true")
             } else {
                 put("mail.imap.starttls.enable", "true")
+                put("mail.imap.starttls.required", "true")
             }
         }
 
@@ -183,6 +184,7 @@ class EmailReplyImapPoller(
                         extractWebhookRequest(msg, combinedRecipients)
                     } catch (ex: Throwable) {
                         logger.warn("Failed to parse IMAP email message: {}", ex.message)
+                        if (uid != null) rememberIgnoredUid(uid)
                         continue
                     }
 
@@ -271,9 +273,7 @@ class EmailReplyImapPoller(
                 ?: emptyList()
             val authResults = authResultsList
                 .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .joinToString("; ")
-                .takeIf { it.isNotBlank() }
+                .firstOrNull { it.isNotBlank() }
 
             val extractedBodies = ExtractedEmailBodies()
             collectBodiesFromPart(msg, extractedBodies)
@@ -292,21 +292,34 @@ class EmailReplyImapPoller(
 
         private class ExtractedEmailBodies(
             val textParts: MutableList<String> = mutableListOf(),
-            val htmlParts: MutableList<String> = mutableListOf()
+            val htmlParts: MutableList<String> = mutableListOf(),
+            var textChars: Int = 0,
+            var htmlChars: Int = 0
         )
 
         private fun collectBodiesFromPart(part: Part, out: ExtractedEmailBodies, depth: Int = 0) {
             if (depth > 10) return
+            if (out.textChars >= MAX_BODY_CHARS && out.htmlChars >= MAX_BODY_CHARS) return
             val disposition = runCatching { part.disposition }.getOrNull()?.lowercase()
             if (disposition == Part.ATTACHMENT) return
 
             val content = runCatching { part.content }.getOrNull() ?: return
             when {
                 part.isMimeType("text/plain") && content is String -> {
-                    if (content.isNotBlank()) out.textParts.add(content)
+                    if (content.isNotBlank() && out.textChars < MAX_BODY_CHARS) {
+                        val remaining = MAX_BODY_CHARS - out.textChars
+                        val piece = content.take(remaining)
+                        out.textParts.add(piece)
+                        out.textChars += piece.length
+                    }
                 }
                 part.isMimeType("text/html") && content is String -> {
-                    if (content.isNotBlank()) out.htmlParts.add(content)
+                    if (content.isNotBlank() && out.htmlChars < MAX_BODY_CHARS) {
+                        val remaining = MAX_BODY_CHARS - out.htmlChars
+                        val piece = content.take(remaining)
+                        out.htmlParts.add(piece)
+                        out.htmlChars += piece.length
+                    }
                 }
                 part.isMimeType("multipart/*") && content is Multipart -> {
                     for (i in 0 until content.count) {

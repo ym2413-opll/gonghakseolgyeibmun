@@ -22,7 +22,7 @@ export function generateSummaryTitle(content, maxLength = 45) {
   // 마크다운 기호(#, -, *, 숫자 목차 등) 제거
   let stripped = firstLine
     .replace(/^[#*\-•\d.]+\s*/, '')
-    .replace(/[\[\\]]/g, '')
+    .replace(/[\[\]]/g, '')
     .trim();
 
   // 첫 문장 마침표나 물음표가 있으면 거기까지 우선 자름

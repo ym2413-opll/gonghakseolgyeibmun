@@ -316,6 +316,7 @@ const QuestionDetail = ({
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editTitle.trim() || !editContent.trim() || isUpdating) return;
+    setErrorMsg('');
     setIsUpdating(true);
     try {
       await onUpdateQuestion(question.id, {
@@ -324,6 +325,8 @@ const QuestionDetail = ({
         isAnonymous: category.allowAnonymous ? editAnonymous : false
       });
       setIsEditing(false);
+    } catch (err) {
+      setErrorMsg(err.message || '질문 수정 중 오류가 발생했습니다.');
     } finally {
       setIsUpdating(false);
     }
@@ -760,8 +763,9 @@ const QuestionDetail = ({
                     );
                   })()}
 
-                {/* AI 다듬기 전 원문 보기 (교수 계정에서는 노출하지 않음) */}
+                {/* AI 다듬기 전 원문 보기 (질문 작성 학생 본인 및 관리자에게만 표시) */}
                 {!isProfessor &&
+                  (isAuthorStudent || isAdmin) &&
                   (question.originalContent || question.rawContent) &&
                   (question.originalContent || question.rawContent) !== mainContent && (
                     <div className="original-content-toggle">
@@ -810,10 +814,15 @@ const QuestionDetail = ({
             const isPeerStudentReply = isStudentPost && !isQuestionOpFollowUp;
             const isAssigned =
               !isAdminPost && !isStudentPost && (ans.isPrimaryProf || ans.isAssignedProfessor);
-            const postAuthorName =
+            const rawPostAuthorName =
               ans.authorName ||
               ans.professorName ||
               (isAdminPost ? '관리자' : isStudentPost ? '수강생' : '교수');
+            const shouldMaskAnonStudentPost =
+              isStudentPost && question.isAnonymous && !isAuthorStudent && !isAdmin;
+            const postAuthorName = shouldMaskAnonStudentPost
+              ? `${question.courseName || '강의'} 수강생`
+              : rawPostAuthorName;
             const canModerateAns =
               Boolean(ans.canModerate) ||
               isAdmin ||
@@ -841,7 +850,7 @@ const QuestionDetail = ({
                       isAdminPost ? 'admin' : isStudentPost ? 'student' : 'professor'
                     }`}
                   >
-                    {isStudentPost && question.isAnonymous && !isAuthorStudent && !isAdmin
+                    {shouldMaskAnonStudentPost
                       ? '익'
                       : postAuthorName.charAt(0)}
                   </div>
@@ -951,6 +960,7 @@ const QuestionDetail = ({
                     const followUpCurrent = (ans.content || '').trim();
                     const hasFollowUpOriginalDraft =
                       !isProfessor &&
+                      (isAuthorStudent || isAdmin) &&
                       isQuestionOpFollowUp &&
                       !question.isDeleted &&
                       Boolean(followUpOrig) &&

@@ -39,6 +39,13 @@ fun Route.aiRoutes(
                 )
                 return@post
             }
+            if (contentToRefine.length > 20_000 || (titleToRefine?.length ?: 0) > 300 || (request.previousAnswer?.length ?: 0) > 20_000) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "AI 문장 윤색 입력 길이가 허용 한도를 초과했습니다.")
+                )
+                return@post
+            }
 
             val result = aiRefineService.refineQuestion(
                 rawContent = contentToRefine.ifBlank { titleToRefine ?: "" },

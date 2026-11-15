@@ -1,5 +1,6 @@
 package com.gonghak.service
 
+import com.gonghak.config.EnvConfig
 import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -27,8 +28,8 @@ object PasswordSecurity {
 
     private val secureRandom = SecureRandom()
     private val hmacSecret: ByteArray by lazy {
-        val isProd = System.getenv("PRODUCTION_MODE")?.trim()?.equals("true", ignoreCase = true) == true
-        val rawSecret = System.getenv("AUTH_TOKEN_SECRET")?.trim()
+        val isProd = EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true
+        val rawSecret = EnvConfig.get("AUTH_TOKEN_SECRET")
         if (isProd && (rawSecret.isNullOrEmpty() || rawSecret.length < 32)) {
             throw IllegalStateException("AUTH_TOKEN_SECRET (at least 32 characters) must be configured in PRODUCTION_MODE.")
         }
@@ -68,6 +69,15 @@ object PasswordSecurity {
 
         val actualHash = pbkdf2(rawPassword.toCharArray(), salt, iterations, expectedHash.size * 8)
         return MessageDigest.isEqual(expectedHash, actualHash)
+    }
+
+    /**
+     * Perform a full PBKDF2 computation when an account is not found so login latency does
+     * not leak username existence.
+     */
+    fun dummyVerifyPassword(rawPassword: String) {
+        val dummySalt = ByteArray(SALT_BYTES)
+        pbkdf2(rawPassword.toCharArray(), dummySalt, ITERATIONS, KEY_LENGTH)
     }
 
     private fun pbkdf2(password: CharArray, salt: ByteArray, iterations: Int, bits: Int): ByteArray {
@@ -179,6 +189,9 @@ object PasswordSecurity {
 
     fun validateEmail(email: String): String {
         val clean = sanitizeInput(email).lowercase()
+        if (clean.length > 150) {
+            throw IllegalArgumentException("이메일 주소는 150자 이하로 입력해 주세요.")
+        }
         if (!Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$").matches(clean)) {
             throw IllegalArgumentException("유효한 이메일 주소 형식이 아닙니다.")
         }

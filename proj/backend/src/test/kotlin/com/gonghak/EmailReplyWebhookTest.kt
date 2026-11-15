@@ -233,6 +233,54 @@ class EmailReplyWebhookTest {
         }
         assertEquals(HttpStatusCode.Forbidden, wrongSenderRes.status)
 
+        // 3-1. Earlier DKIM/DMARC failure cannot be overwritten by later pass in Authentication-Results -> 403
+        val failThenPassRes = client.post("/api/webhooks/email-reply") {
+            header("X-Email-Webhook-Secret", testWebhookSecret)
+            contentType(ContentType.Application.Json)
+            setBody(
+                InboundEmailWebhookRequest(
+                    messageId = "<msg-fail-latch@kw.ac.kr>",
+                    from = profEmail,
+                    to = replyToAddr,
+                    textBody = "인증 실패 뒤 pass 추가 위조 시도",
+                    authenticationResults = "mx.example; dkim=fail; spf=pass; dkim=pass"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, failThenPassRes.status)
+
+        // 3-2. Bare unaligned SPF pass without DKIM/DMARC pass -> 403
+        val spfOnlyRes = client.post("/api/webhooks/email-reply") {
+            header("X-Email-Webhook-Secret", testWebhookSecret)
+            contentType(ContentType.Application.Json)
+            setBody(
+                InboundEmailWebhookRequest(
+                    messageId = "<msg-spf-only@kw.ac.kr>",
+                    from = profEmail,
+                    to = replyToAddr,
+                    textBody = "SPF 단독 위조 시도",
+                    spfResult = "pass"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, spfOnlyRes.status)
+
+        // 3-3. Multiple differing From addresses -> 403
+        val multiFromRes = client.post("/api/webhooks/email-reply") {
+            header("X-Email-Webhook-Secret", testWebhookSecret)
+            contentType(ContentType.Application.Json)
+            setBody(
+                InboundEmailWebhookRequest(
+                    messageId = "<msg-multi-from@kw.ac.kr>",
+                    from = "$profEmail, attacker@evil.test",
+                    to = replyToAddr,
+                    textBody = "복수 발신자 위조 시도",
+                    dkimResult = "pass"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, multiFromRes.status)
+
         // 4. Tampered token -> 403
         val badTokenRes = client.post("/api/webhooks/email-reply") {
             header("X-Email-Webhook-Secret", testWebhookSecret)

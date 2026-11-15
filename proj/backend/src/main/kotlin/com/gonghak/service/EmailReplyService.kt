@@ -130,7 +130,14 @@ class EmailReplyService(
                 "유효한 회신 주소 토큰을 찾을 수 없습니다."
             )
 
-        val senderEmail = extractBareEmails(request.from).firstOrNull()
+        val fromEmails = extractBareEmails(request.from)
+        if (fromEmails.size > 1) {
+            throw EmailReplyRejectedException(
+                HttpStatusCode.Forbidden,
+                "복수의 발신자 주소가 포함된 회신은 허용되지 않습니다."
+            )
+        }
+        val senderEmail = fromEmails.firstOrNull()
             ?: throw EmailReplyRejectedException(
                 HttpStatusCode.BadRequest,
                 "발신자 이메일 주소를 확인할 수 없습니다."
@@ -330,9 +337,21 @@ class EmailReplyService(
     }
 
     private fun isSenderAuthValid(request: InboundEmailWebhookRequest): Boolean {
-        var spf = request.spfResult?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-        var dkim = request.dkimResult?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-        var dmarc = request.dmarcResult?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val failureVerdicts = setOf("fail", "softfail", "permerror", "temperror", "policy")
+        fun mergeVerdict(current: String?, incoming: String?): String? {
+            val next = incoming?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return current
+            return when {
+                current in failureVerdicts -> current
+                next in failureVerdicts -> next
+                next == "pass" -> "pass"
+                current == "pass" -> current
+                else -> current ?: next
+            }
+        }
+
+        var spf = mergeVerdict(null, request.spfResult)
+        var dkim = mergeVerdict(null, request.dkimResult)
+        var dmarc = mergeVerdict(null, request.dmarcResult)
 
         val rawAuth = request.authenticationResults?.lowercase().orEmpty()
         if (rawAuth.isNotBlank()) {
@@ -340,16 +359,15 @@ class EmailReplyService(
                 val mechanism = m.groupValues[1]
                 val verdict = m.groupValues[2]
                 when (mechanism) {
-                    "spf" -> if (spf == null || verdict == "pass") spf = verdict
-                    "dkim" -> if (dkim == null || verdict == "pass") dkim = verdict
-                    "dmarc" -> if (dmarc == null || verdict == "pass") dmarc = verdict
+                    "spf" -> spf = mergeVerdict(spf, verdict)
+                    "dkim" -> dkim = mergeVerdict(dkim, verdict)
+                    "dmarc" -> dmarc = mergeVerdict(dmarc, verdict)
                 }
             }
         }
 
-        if (dmarc == "fail") return false
-        if (dkim == "fail" && spf != "pass") return false
-        return dkim == "pass" || dmarc == "pass" || (spf == "pass" && dkim != "fail" && dmarc != "fail")
+        if (dmarc in failureVerdicts || dkim in failureVerdicts) return false
+        return dkim == "pass" || dmarc == "pass"
     }
 
     private fun buildEffectiveMessageId(
@@ -462,10 +480,40 @@ class EmailReplyService(
             }
         }
 
+        private fun stripTagBlock(input: String, tagName: String): String {
+            val lower = input.lowercase()
+            val openPrefix = "<$tagName"
+            val closeTag = "</$tagName>"
+            val sb = StringBuilder(input.length)
+            var cursor = 0
+            while (cursor < input.length) {
+                val start = lower.indexOf(openPrefix, cursor)
+                if (start < 0) {
+                    sb.append(input, cursor, input.length)
+                    break
+                }
+                val afterPrefix = start + openPrefix.length
+                val nextCh = if (afterPrefix < lower.length) lower[afterPrefix] else ' '
+                if (nextCh != '>' && !nextCh.isWhitespace() && nextCh != '/') {
+                    sb.append(input, cursor, afterPrefix)
+                    cursor = afterPrefix
+                    continue
+                }
+                sb.append(input, cursor, start)
+                val endIdx = lower.indexOf(closeTag, afterPrefix)
+                if (endIdx < 0) {
+                    break
+                }
+                cursor = endIdx + closeTag.length
+            }
+            return sb.toString()
+        }
+
         private fun htmlToPlainText(html: String): String {
-            return html
-                .replace(Regex("(?i)<style[^>]*>[\\s\\S]*?</style>"), "")
-                .replace(Regex("(?i)<script[^>]*>[\\s\\S]*?</script>"), "")
+            val bounded = if (html.length > 100_000) html.take(100_000) else html
+            val withoutStyles = stripTagBlock(bounded, "style")
+            val withoutScripts = stripTagBlock(withoutStyles, "script")
+            return withoutScripts
                 .replace(Regex("(?i)<br\\s*/?>"), "\n")
                 .replace(Regex("(?i)</(?:p|div|li|tr|blockquote|h[1-6])>"), "\n")
                 .replace(Regex("<[^>]+>"), "")

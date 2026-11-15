@@ -10,7 +10,8 @@ export default function SimilarQuestionsModal({
   queryText,
   onResolveWithSimilar
 }) {
-  const [expandedId, setExpandedId] = useState(similarList?.[0]?.id || null);
+  const safeList = Array.isArray(similarList) ? similarList : [];
+  const [expandedId, setExpandedId] = useState(safeList[0]?.id || null);
 
   if (!isOpen) return null;
 
@@ -32,12 +33,12 @@ export default function SimilarQuestionsModal({
 
         <div className="modal-body">
           <div className="similar-cards-list">
-            {similarList.length === 0 ? (
+            {safeList.length === 0 ? (
               <div className="similar-empty">
                 <p>일치하는 유사 질답이 없습니다.</p>
               </div>
             ) : (
-              similarList.map((item) => {
+              safeList.map((item) => {
                 const isExpanded = expandedId === item.id;
                 const catDef = CATEGORY_DEFINITIONS[item.category?.toLowerCase()] || CATEGORY_DEFINITIONS[item.category] || {};
                 const hasAnswer = item.answers && item.answers.length > 0;

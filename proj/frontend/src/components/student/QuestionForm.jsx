@@ -225,8 +225,15 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
   const handleRemoveAttachment = async (indexToRemove) => {
     const item = attachments[indexToRemove];
+    if (item?.previewUrl && String(item.previewUrl).startsWith('blob:')) {
+      URL.revokeObjectURL(item.previewUrl);
+    }
     if (item && item.id) {
-      await api.deleteAttachment(item.id);
+      try {
+        await api.deleteAttachment(item.id);
+      } catch (err) {
+        console.warn('Failed to delete remote attachment:', err);
+      }
     }
     setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
@@ -253,6 +260,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!content.trim()) {
       setErrorMsg('질문 내용을 입력해 주세요.');
       return;
@@ -697,6 +705,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         category={selectedCategory}
         courseName={currentCourse?.name || ''}
         professorName={currentCourse?.profName || currentCourse?.assignedProfessorName || ''}
+        isAnonymous={isAnonymous}
         onApplyRefined={handleApplyAiRefined}
       />
 

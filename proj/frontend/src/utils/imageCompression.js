@@ -19,9 +19,11 @@ const COMPRESSION_QUALITY = 0.82;
  */
 export async function compressImageClient(file) {
   const originalSize = file.size;
+  const extMatch = (file.name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+  const ext = extMatch ? extMatch[1] : '';
 
-  // GIF 애니메이션 등은 Canvas 변환 시 프레임 손실이 있을 수 있으므로 그대로 유지
-  if (file.type === 'image/gif') {
+  // GIF 애니메이션 및 WebP는 확장자·포맷 불일치 및 프레임 손실 방지를 위해 원본 유지
+  if (file.type === 'image/gif' || ext === 'gif' || file.type === 'image/webp' || ext === 'webp') {
     const previewUrl = URL.createObjectURL(file);
     return {
       compressedFile: file,
@@ -77,8 +79,8 @@ export async function compressImageClient(file) {
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // 출력 포맷 결정 (투명도가 있는 PNG는 PNG 유지, 나머지는 JPEG/WebP로 고효율 압축)
-      const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      // 출력 포맷 결정 (확장자 기준 PNG는 PNG 유지, JPG/JPEG는 JPEG로 고효율 압축)
+      const outputType = ext === 'png' || file.type === 'image/png' ? 'image/png' : 'image/jpeg';
       const quality = outputType === 'image/jpeg' ? COMPRESSION_QUALITY : undefined;
 
       canvas.toBlob(
@@ -133,14 +135,14 @@ export async function compressImageClient(file) {
 
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      // 로드 실패 시 원본 그대로 유지
+      // 디코딩 실패 시 빈 previewUrl과 함께 원본 유지 (깨진 blob URL 누수 방지)
       resolve({
         compressedFile: file,
         originalSize,
         compressedSize: originalSize,
         isCompressed: false,
         compressionRatio: 0,
-        previewUrl: URL.createObjectURL(file)
+        previewUrl: ''
       });
     };
 

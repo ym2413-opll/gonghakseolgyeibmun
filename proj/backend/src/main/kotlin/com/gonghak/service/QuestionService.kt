@@ -1,6 +1,7 @@
 package com.gonghak.service
 
 import com.gonghak.config.DatabaseFactory.dbQuery
+import com.gonghak.config.DatabaseFactory.dbQueryWithRetry
 import com.gonghak.dto.*
 import com.gonghak.models.*
 import kotlinx.coroutines.withContext
@@ -129,18 +130,26 @@ class QuestionService(
                 (EnrollmentsTable.studentId eq currentUserId) and (EnrollmentsTable.courseId eq courseUUID)
             }.singleOrNull()
 
-            val requestedProfUUID = request.profId?.takeIf { it.isNotBlank() }?.let {
-                com.gonghak.routes.parseUserIdOrNull(it)
-            }?.takeIf { pId ->
-                UsersTable.select { (UsersTable.id eq pId) and (UsersTable.role eq UserRole.PROFESSOR.name) }.count() > 0
+            val requestedProfUUID = request.profId?.takeIf { it.isNotBlank() }?.let { rawProfId ->
+                val pId = com.gonghak.routes.parseUserIdOrNull(rawProfId)
+                    ?: throw IllegalArgumentException("유효하지 않은 교수 ID입니다.")
+                val isTeachingCourse = CourseProfessorsTable.innerJoin(
+                    UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id }
+                ).select {
+                    (CourseProfessorsTable.courseId eq courseUUID) and
+                        (CourseProfessorsTable.professorId eq pId) and
+                        (UsersTable.role eq UserRole.PROFESSOR.name)
+                }.count() > 0
+                if (!isTeachingCourse) {
+                    throw IllegalArgumentException("해당 교과목에 배정된 담당 교수가 아닙니다.")
+                }
+                pId
             }
 
             val assignedProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId)
                 ?: requestedProfUUID
                 ?: CourseProfessorsTable.select { CourseProfessorsTable.courseId eq courseUUID }
                     .firstOrNull()?.get(CourseProfessorsTable.professorId)
-                ?: UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
-                    .firstOrNull()?.get(UsersTable.id)?.value
                 ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
 
             // 3. Validate if professor has enabled this category
@@ -281,6 +290,13 @@ class QuestionService(
         if (!isAdmin && !isProfessor) {
             query.andWhere { QuestionsTable.isDeletedByAuthor eq false }
         }
+        if (!isAdmin) {
+            query.andWhere {
+                (QuestionsTable.category neq QuestionCategory.GRADE.name) or
+                    (QuestionsTable.studentId eq currentUserId) or
+                    (QuestionsTable.assignedProfessorId eq currentUserId)
+            }
+        }
         courseIdFilter?.let { query.andWhere { QuestionsTable.courseId eq it } }
         categoryFilter?.let { query.andWhere { QuestionsTable.category eq it.name } }
 
@@ -334,8 +350,8 @@ class QuestionService(
 
             val maskedForHidden = isQuestionHidden && !isAdmin
             val displayTitle = when {
-                isQuestionDeleted -> "[작성자 삭제] $actualTitle"
                 maskedForHidden -> "관리자에 의해 가려진 질문입니다."
+                isQuestionDeleted -> "[작성자 삭제] $actualTitle"
                 else -> actualTitle
             }
             val displayContent = when {
@@ -475,12 +491,17 @@ class QuestionService(
             throw IllegalArgumentException("작성자에 의해 삭제된 질문입니다.")
         }
 
+        val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
+        val assignedProfId = qRow[QuestionsTable.assignedProfessorId]
+        if (category == QuestionCategory.GRADE && !isAdmin && !isMyQuestion && currentUserId != assignedProfId) {
+            throw IllegalStateException("성적 카테고리 질문은 작성자와 담당교수만 열람할 수 있습니다.")
+        }
+
         val courseName = course?.get(CoursesTable.name) ?: "강의"
         val authorTag = author?.get(UsersTable.displayTag) ?: "수강생"
         val authorName = author?.get(UsersTable.name) ?: "학생"
         val authorIdentifier = author?.get(UsersTable.identifier) ?: ""
         val authorIsAdmin = author?.let { it[UsersTable.isAdmin] || it[UsersTable.role] == UserRole.ADMIN.name } ?: false
-        val assignedProfId = qRow[QuestionsTable.assignedProfessorId]
         val isAssignedProfViewer = (currentUserId == assignedProfId)
         val assignedProfName = assignedProf?.get(UsersTable.name) ?: "담당교수"
 
@@ -529,7 +550,6 @@ class QuestionService(
 
         val profAnswers = answersList.filter { it.authorRole == UserRole.PROFESSOR.name || it.isAdminAuthor }
         val isAnsweredByAssigned = answersList.any { it.authorRole == UserRole.PROFESSOR.name && it.isAssignedProfessor }
-        val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
 
         val canAnswer = !isQuestionDeleted && calculateCanAnswer(
             currentUserRole = currentUserRole,
@@ -580,8 +600,8 @@ class QuestionService(
         val actualContent = actualRefined.ifBlank { actualRaw }
 
         val displayTitle = when {
-            isQuestionDeleted -> "[작성자 삭제] $actualTitle"
             maskedForHidden -> "관리자에 의해 가려진 질문입니다."
+            isQuestionDeleted -> "[작성자 삭제] $actualTitle"
             else -> actualTitle
         }
         val displayContent = when {
@@ -862,7 +882,7 @@ class QuestionService(
                 attachmentNames = attachmentNames,
                 assignedProfId = qRow[QuestionsTable.assignedProfessorId],
                 courseName = courseName,
-                questionTitle = qRow[QuestionsTable.title]
+                questionTitle = if (qRow[QuestionsTable.isHidden]) "관리자에 의해 가려진 질문입니다." else qRow[QuestionsTable.title]
             )
         }
 
@@ -995,7 +1015,7 @@ class QuestionService(
         request: CreateAnswerRequest
     ): AnswerDto {
         validateContentLength(request.content, "답변 내용")
-        val created = dbQuery {
+        val created = dbQueryWithRetry {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
@@ -1146,8 +1166,11 @@ class QuestionService(
             throw IllegalArgumentException("추가 질문 내용을 입력해 주세요.")
         }
         validateContentLength(cleanContent, "추가 질문 내용")
+        request.originalContent?.trim()?.takeIf { it.isNotBlank() }?.let {
+            validateContentLength(it, "추가 질문 원문")
+        }
 
-        val created = dbQuery {
+        val created = dbQueryWithRetry {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
@@ -1375,6 +1398,9 @@ class QuestionService(
         isAnsweredByAssignedProfessor: Boolean
     ): Boolean {
         if (isAdmin) return true
+        if (category == QuestionCategory.GRADE) {
+            return currentUserRole == UserRole.PROFESSOR && currentUserId == assignedProfessorId
+        }
 
         if (currentUserRole == UserRole.STUDENT) {
             // In R4: when thread is open (열림), students other than original question author can answer

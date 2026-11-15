@@ -58,6 +58,10 @@ object ProfessorCategorySettingsTable : UUIDTable("professor_category_settings")
     val courseId = uuid("course_id").references(CoursesTable.id)
     val category = varchar("category", 20)
     val isEnabled = bool("is_enabled").default(true)
+
+    init {
+        uniqueIndex(professorId, courseId, category)
+    }
 }
 
 object ProfessorNotificationSettingsTable : UUIDTable("professor_notification_settings") {
