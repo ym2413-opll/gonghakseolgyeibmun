@@ -7794,7 +7794,82 @@ body,
 .attachment-meta,
 .detail-attachments-box {
   min-width: 0;
+}
+
+.app-root,
+.app-shell,
+.forum-stage-wrapper,
+.forum-desktop-split,
+.forum-split-left,
+.forum-split-right,
+.forum-board-container,
+.forum-topic-list,
+.forum-topic-row,
+.forum-topic-main,
+.forum-topic-content,
+.forum-topic-title-line,
+.forum-thread-view,
+.forum-post-stream,
+.forum-post-card,
+.forum-post-body-col,
+.question-form-card,
+.prof-dashboard,
+.admin-panel-card,
+.modal-body,
+.course-picker-header,
+.attachment-card,
+.attachment-card-body,
+.attachment-meta,
+.detail-attachments-box {
   max-width: 100%;
+}
+
+/* 데스크톱 가로 폭 상한 유지 (반응형 넘침 방지 규칙에 의해 덮어써지지 않도록 보정) */
+.header-inner {
+  max-width: min(1480px, 100%);
+}
+
+.forum-main-stage {
+  max-width: min(1480px, 100%);
+}
+
+.question-form-container {
+  width: 100%;
+  max-width: min(840px, 100%);
+  margin: 0 auto;
+}
+
+.auth-gate-card {
+  width: 100%;
+  max-width: min(640px, 100%);
+}
+
+.modal-container {
+  max-width: 100%;
+}
+
+.modal-container.modal-sm {
+  max-width: min(420px, 100%);
+}
+
+.modal-container.modal-md {
+  max-width: min(540px, 100%);
+}
+
+.modal-container.modal-lg {
+  max-width: min(720px, 100%);
+}
+
+.modal-container.modal-xl {
+  width: 95%;
+  max-width: min(1040px, 100%);
+}
+
+.admin-settings-pair-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .forum-topic-title,
@@ -7882,6 +7957,10 @@ body,
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .admin-settings-pair-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .prof-summary-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -7897,7 +7976,9 @@ body,
   }
 
   .modal-xl,
-  .modal-lg {
+  .modal-lg,
+  .modal-container.modal-xl,
+  .modal-container.modal-lg {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
   }
@@ -8103,7 +8184,11 @@ body,
   .modal-container,
   .modal-xl,
   .modal-lg,
-  .modal-md {
+  .modal-md,
+  .modal-container.modal-xl,
+  .modal-container.modal-lg,
+  .modal-container.modal-md,
+  .modal-container.modal-sm {
     width: 100%;
     max-width: 100%;
     max-height: calc(100dvh - 20px);

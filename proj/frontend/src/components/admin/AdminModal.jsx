@@ -1282,62 +1282,64 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 })()}
               </div>
 
-              <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>
-                <h3 className="admin-panel-title">
-                  <ShieldAlert size={18} />
-                  관리자 닉네임 설정 (관리자 전용)
-                </h3>
-                <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
-                  상단 프로필과 게시글·답변 작성자 표시명에 본명 대신 노출될 관리자 닉네임(최대 30자)을 설정합니다. 비워 두고 저장하면 기본 표시명으로 돌아갑니다.
-                </p>
-                <AdminNicknameForm
-                  compact
-                  onSaved={async (msg) => {
-                    notifySuccess(msg);
-                    if (onDataChanged) await onDataChanged();
-                  }}
-                />
-              </div>
+              <div className="admin-settings-pair-grid">
+                <div className="admin-panel-card">
+                  <h3 className="admin-panel-title">
+                    <ShieldAlert size={18} />
+                    관리자 닉네임 설정 (관리자 전용)
+                  </h3>
+                  <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
+                    상단 프로필과 게시글·답변 작성자 표시명에 본명 대신 노출될 관리자 닉네임(최대 30자)을 설정합니다. 비워 두고 저장하면 기본 표시명으로 돌아갑니다.
+                  </p>
+                  <AdminNicknameForm
+                    compact
+                    onSaved={async (msg) => {
+                      notifySuccess(msg);
+                      if (onDataChanged) await onDataChanged();
+                    }}
+                  />
+                </div>
 
-              <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>
-                <h3 className="admin-panel-title">
-                  <Sparkles size={18} />
-                  전시 모드 (관리자 전용)
-                </h3>
-                <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
-                  시연·전시 환경에서 비로그인 회원가입 시 학번 무작위 생성 버튼을 노출합니다. 이 설정은 관리자 모드에서만 변경할 수 있습니다.
-                </p>
-                <div className="exhibition-option-list">
-                  {[
-                    { id: 'off', value: false, label: '꺼짐', desc: '직접 입력' },
-                    { id: 'on', value: true, label: '켜짐', desc: '무작위 생성 표시' }
-                  ].map((option) => (
-                    <button
-                      type="button"
-                      key={option.id}
-                      className={`fontsize-option-item ${exhibitionMode === option.value ? 'active' : ''}`}
-                      onClick={async () => {
-                        setErrorMessage('');
-                        setStatusMessage('');
-                        try {
-                          await updateExhibitionMode(option.value);
-                          setStatusMessage(
-                            option.value
-                              ? '전시 모드가 켜졌습니다. 회원가입 화면에 학번 무작위 생성 버튼이 노출됩니다.'
-                              : '전시 모드가 꺼졌습니다.'
-                          );
-                        } catch (err) {
-                          setErrorMessage(err.message || '전시 모드 설정 변경에 실패했습니다.');
-                        }
-                      }}
-                    >
-                      <div>
-                        <div className="fontsize-label">{option.label}</div>
-                        <div className="help-level-option-desc">{option.desc}</div>
-                      </div>
-                      {exhibitionMode === option.value && <Check size={16} className="text-primary" />}
-                    </button>
-                  ))}
+                <div className="admin-panel-card">
+                  <h3 className="admin-panel-title">
+                    <Sparkles size={18} />
+                    전시 모드 (관리자 전용)
+                  </h3>
+                  <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
+                    시연·전시 환경에서 비로그인 회원가입 시 학번 무작위 생성 버튼을 노출합니다. 이 설정은 관리자 모드에서만 변경할 수 있습니다.
+                  </p>
+                  <div className="exhibition-option-list">
+                    {[
+                      { id: 'off', value: false, label: '꺼짐', desc: '직접 입력' },
+                      { id: 'on', value: true, label: '켜짐', desc: '무작위 생성 표시' }
+                    ].map((option) => (
+                      <button
+                        type="button"
+                        key={option.id}
+                        className={`fontsize-option-item ${exhibitionMode === option.value ? 'active' : ''}`}
+                        onClick={async () => {
+                          setErrorMessage('');
+                          setStatusMessage('');
+                          try {
+                            await updateExhibitionMode(option.value);
+                            setStatusMessage(
+                              option.value
+                                ? '전시 모드가 켜졌습니다. 회원가입 화면에 학번 무작위 생성 버튼이 노출됩니다.'
+                                : '전시 모드가 꺼졌습니다.'
+                            );
+                          } catch (err) {
+                            setErrorMessage(err.message || '전시 모드 설정 변경에 실패했습니다.');
+                          }
+                        }}
+                      >
+                        <div>
+                          <div className="fontsize-label">{option.label}</div>
+                          <div className="help-level-option-desc">{option.desc}</div>
+                        </div>
+                        {exhibitionMode === option.value && <Check size={16} className="text-primary" />}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
