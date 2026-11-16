@@ -401,7 +401,7 @@ const AuthGateOverlay = () => {
                 >
                   {departments.map((dept) => (
                     <option key={dept.id || dept.name} value={dept.name}>
-                      {dept.name} ({dept.code || '101'})
+                      {dept.name}
                     </option>
                   ))}
                 </select>
