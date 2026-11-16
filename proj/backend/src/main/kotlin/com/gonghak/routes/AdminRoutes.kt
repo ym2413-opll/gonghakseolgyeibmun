@@ -12,6 +12,26 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.util.UUID
 
+private suspend fun ApplicationCall.parseUuidParam(paramName: String, invalidMessage: String): UUID? {
+    return runCatching { UUID.fromString(parameters[paramName]) }.getOrNull() ?: run {
+        respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = invalidMessage))
+        null
+    }
+}
+
+private suspend inline fun <reified T> ApplicationCall.respondServiceCall(
+    successStatus: HttpStatusCode = HttpStatusCode.OK,
+    successMessage: String? = null,
+    block: () -> T
+) {
+    try {
+        val data = block()
+        respond(successStatus, ApiResponse(success = true, data = data, message = successMessage))
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+    }
+}
+
 fun Route.adminRoutes(
     userService: UserService,
     questionService: QuestionService,
@@ -84,15 +104,93 @@ fun Route.adminRoutes(
             }
         }
 
-        // Dynamic Department addition
+        // Dynamic Department addition & editing
         post("/departments") {
             call.requireAdmin() ?: return@post
             val request = call.receive<CreateDepartmentRequest>()
-            try {
-                val created = userService.createDepartment(request)
-                call.respond(HttpStatusCode.Created, ApiResponse(success = true, data = created, message = "학과가 추가되었습니다."))
-            } catch (e: IllegalArgumentException) {
-                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            call.respondServiceCall(HttpStatusCode.Created, "학과가 추가되었습니다.") {
+                userService.createDepartment(request)
+            }
+        }
+
+        put("/departments/{id}") {
+            call.requireAdmin() ?: return@put
+            val deptUuid = call.parseUuidParam("id", "유효하지 않은 학과 ID입니다.") ?: return@put
+            val request = call.receive<UpdateDepartmentRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "학과 정보가 수정되었습니다.") {
+                userService.updateDepartment(deptUuid, request)
+            }
+        }
+
+        post("/departments/{id}/aliases") {
+            call.requireAdmin() ?: return@post
+            val deptUuid = call.parseUuidParam("id", "유효하지 않은 학과 ID입니다.") ?: return@post
+            val request = call.receive<DepartmentAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.Created, "학과 별칭이 추가되었습니다.") {
+                userService.addDepartmentAlias(deptUuid, request.alias)
+            }
+        }
+
+        put("/departments/{id}/aliases") {
+            call.requireAdmin() ?: return@put
+            val deptUuid = call.parseUuidParam("id", "유효하지 않은 학과 ID입니다.") ?: return@put
+            val request = call.receive<RenameAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "학과 별칭이 변경되었습니다.") {
+                userService.renameDepartmentAlias(deptUuid, request.oldAlias, request.newAlias)
+            }
+        }
+
+        delete("/departments/{id}/aliases") {
+            call.requireAdmin() ?: return@delete
+            val deptUuid = call.parseUuidParam("id", "유효하지 않은 학과 ID입니다.") ?: return@delete
+            val aliasParam = call.request.queryParameters["alias"].orEmpty()
+            call.respondServiceCall(HttpStatusCode.OK, "학과 별칭이 삭제되었습니다.") {
+                userService.removeDepartmentAlias(deptUuid, aliasParam)
+            }
+        }
+
+        // Dynamic College addition, editing, & alias management
+        post("/colleges") {
+            call.requireAdmin() ?: return@post
+            val request = call.receive<CreateCollegeRequest>()
+            call.respondServiceCall(HttpStatusCode.Created, "단과대학이 추가되었습니다.") {
+                userService.createCollege(request)
+            }
+        }
+
+        put("/colleges/{id}") {
+            call.requireAdmin() ?: return@put
+            val collegeUuid = call.parseUuidParam("id", "유효하지 않은 단과대학 ID입니다.") ?: return@put
+            val request = call.receive<UpdateCollegeRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "단과대학 정보가 수정되었습니다.") {
+                userService.updateCollege(collegeUuid, request)
+            }
+        }
+
+        post("/colleges/{id}/aliases") {
+            call.requireAdmin() ?: return@post
+            val collegeUuid = call.parseUuidParam("id", "유효하지 않은 단과대학 ID입니다.") ?: return@post
+            val request = call.receive<DepartmentAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.Created, "단과대학 별칭이 추가되었습니다.") {
+                userService.addCollegeAlias(collegeUuid, request.alias)
+            }
+        }
+
+        put("/colleges/{id}/aliases") {
+            call.requireAdmin() ?: return@put
+            val collegeUuid = call.parseUuidParam("id", "유효하지 않은 단과대학 ID입니다.") ?: return@put
+            val request = call.receive<RenameAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "단과대학 별칭이 변경되었습니다.") {
+                userService.renameCollegeAlias(collegeUuid, request.oldAlias, request.newAlias)
+            }
+        }
+
+        delete("/colleges/{id}/aliases") {
+            call.requireAdmin() ?: return@delete
+            val collegeUuid = call.parseUuidParam("id", "유효하지 않은 단과대학 ID입니다.") ?: return@delete
+            val aliasParam = call.request.queryParameters["alias"].orEmpty()
+            call.respondServiceCall(HttpStatusCode.OK, "단과대학 별칭이 삭제되었습니다.") {
+                userService.removeCollegeAlias(collegeUuid, aliasParam)
             }
         }
 

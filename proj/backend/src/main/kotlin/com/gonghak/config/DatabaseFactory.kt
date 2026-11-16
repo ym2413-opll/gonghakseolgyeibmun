@@ -9,10 +9,14 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
@@ -53,7 +57,10 @@ object DatabaseFactory {
 
         val tables = arrayOf(
             UsersTable,
+            CollegesTable,
+            CollegeAliasesTable,
             DepartmentsTable,
+            DepartmentAliasesTable,
             CoursesTable,
             CourseProfessorsTable,
             EnrollmentsTable,
@@ -78,8 +85,8 @@ object DatabaseFactory {
 
         // 2. Backfill legacy nullable timestamps and token_version only when the column already exists
         val timestampTables = listOf(
-            "users", "departments", "questions", "answers",
-            "notifications", "attachments", "email_logs"
+            "users", "colleges", "college_aliases", "departments", "department_aliases",
+            "questions", "answers", "notifications", "attachments", "email_logs"
         )
         for (tableName in timestampTables) {
             runCatching {
@@ -156,6 +163,7 @@ object DatabaseFactory {
 
         // 4. Seed reference and demo data in a clean transaction
         transaction {
+            seedDefaultColleges()
             seedDefaultDepartments()
             seedConvertedCoursesData()
             seedDemoData()
@@ -273,17 +281,153 @@ object DatabaseFactory {
 
     private val validDeptCodeRegex = Regex("^[1-9](?:0[1-9]|[1-9]\\d)$")
 
+    private val defaultCollegeAliases = listOf(
+        "인공지능융합대학" to "소프트웨어융합대학"
+    )
+
+    private val specialCollegeScopes = setOf("전체", "공통", "광운대학교")
+
+    internal fun isReservedCatalogName(rawName: String): Boolean {
+        val clean = rawName.trim()
+        return clean in specialCollegeScopes || clean.endsWith(" 전체")
+    }
+
+    internal fun resolveCollegeRow(rawName: String): ResultRow? {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return null
+        val lower = clean.lowercase()
+        val direct = CollegesTable.select { CollegesTable.name.lowerCase() eq lower }.firstOrNull()
+        if (direct != null) return direct
+
+        val aliasRow = CollegeAliasesTable.select {
+            CollegeAliasesTable.aliasName.lowerCase() eq lower
+        }.firstOrNull() ?: return null
+        return CollegesTable.select {
+            CollegesTable.id eq aliasRow[CollegeAliasesTable.collegeId]
+        }.firstOrNull()
+    }
+
+    internal fun resolveCanonicalCollegeName(rawName: String): String {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return clean
+        return resolveCollegeRow(clean)?.get(CollegesTable.name) ?: clean
+    }
+
+    internal fun expandCollegeAliasNames(rawName: String): List<String> {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return emptyList()
+        val colRow = resolveCollegeRow(clean) ?: return listOf(clean)
+        val canonicalName = colRow[CollegesTable.name]
+        val colId = colRow[CollegesTable.id].value
+        val aliases = CollegeAliasesTable.select {
+            CollegeAliasesTable.collegeId eq colId
+        }.map { it[CollegeAliasesTable.aliasName] }
+        return (listOf(canonicalName) + aliases + clean).distinct()
+    }
+
+    internal fun ensureCollegeAliasInternal(collegeId: UUID, rawAlias: String) {
+        val cleanAlias = rawAlias.trim()
+        if (cleanAlias.isBlank() || cleanAlias.length > 100) return
+        val lower = cleanAlias.lowercase()
+        val canonicalExists = CollegesTable.select { CollegesTable.name.lowerCase() eq lower }.count() > 0L
+        if (canonicalExists) return
+        val aliasExists = CollegeAliasesTable.select {
+            CollegeAliasesTable.aliasName.lowerCase() eq lower
+        }.count() > 0L
+        if (!aliasExists) {
+            CollegeAliasesTable.insert {
+                it[id] = UUID.randomUUID()
+                it[CollegeAliasesTable.collegeId] = collegeId
+                it[aliasName] = cleanAlias
+            }
+        }
+    }
+
+    internal fun ensureCollegeExistsInternal(rawCollegeName: String, preferredDigit: Int? = null): String {
+        val cleanCollege = rawCollegeName.trim()
+        if (cleanCollege.isBlank() || cleanCollege in specialCollegeScopes) return cleanCollege
+        val resolved = resolveCollegeRow(cleanCollege)
+        if (resolved != null) return resolved[CollegesTable.name]
+
+        val digit = preferredDigit
+            ?: knownCollegeDigits[cleanCollege]
+            ?: run {
+                val usedDigits = (knownCollegeDigits.values +
+                    CollegesTable.selectAll().mapNotNull { it[CollegesTable.codeDigit] }).toSet()
+                (1..9).firstOrNull { it !in usedDigits }
+            }
+
+        CollegesTable.insert {
+            it[id] = UUID.randomUUID()
+            it[name] = cleanCollege
+            it[codeDigit] = digit
+        }
+        return cleanCollege
+    }
+
+    private fun seedDefaultColleges() {
+        defaultCollegeAliases.forEach { (canonicalName, legacyName) ->
+            val legacyRow = CollegesTable.select { CollegesTable.name eq legacyName }.singleOrNull()
+            val canonRow = CollegesTable.select { CollegesTable.name eq canonicalName }.singleOrNull()
+            if (legacyRow != null && canonRow == null) {
+                CollegesTable.update({ CollegesTable.id eq legacyRow[CollegesTable.id] }) {
+                    it[name] = canonicalName
+                }
+            } else if (legacyRow != null && canonRow != null) {
+                val legacyId = legacyRow[CollegesTable.id].value
+                val canonId = canonRow[CollegesTable.id].value
+                CollegeAliasesTable.update({ CollegeAliasesTable.collegeId eq legacyId }) {
+                    it[collegeId] = canonId
+                }
+                CollegesTable.deleteWhere { CollegesTable.id eq legacyId }
+            }
+            DepartmentsTable.update({ DepartmentsTable.college eq legacyName }) {
+                it[college] = canonicalName
+            }
+            CoursesTable.update({ CoursesTable.college eq legacyName }) {
+                it[college] = canonicalName
+            }
+            CoursesTable.update({ CoursesTable.department eq "$legacyName 전체" }) {
+                it[department] = "$canonicalName 전체"
+            }
+        }
+
+        knownCollegeDigits.forEach { (collegeName, digit) ->
+            val existing = CollegesTable.select { CollegesTable.name eq collegeName }.singleOrNull()
+            if (existing == null) {
+                CollegesTable.insert {
+                    it[id] = UUID.randomUUID()
+                    it[name] = collegeName
+                    it[codeDigit] = digit
+                }
+            } else if (existing[CollegesTable.codeDigit] == null) {
+                CollegesTable.update({ CollegesTable.id eq existing[CollegesTable.id] }) {
+                    it[codeDigit] = digit
+                }
+            }
+        }
+
+        defaultCollegeAliases.forEach { (canonicalName, legacyAlias) ->
+            val colRow = CollegesTable.select { CollegesTable.name eq canonicalName }.singleOrNull()
+            if (colRow != null) {
+                ensureCollegeAliasInternal(colRow[CollegesTable.id].value, legacyAlias)
+            }
+        }
+    }
+
     internal fun allocateDepartmentCodeForCollege(collegeName: String): String {
-        val cleanCollege = collegeName.trim().ifBlank { "광운대학교" }
+        val cleanCollege = resolveCanonicalCollegeName(collegeName.trim().ifBlank { "광운대학교" })
         val allRows = DepartmentsTable.selectAll().toList()
 
-        val collegeDigit = knownCollegeDigits[cleanCollege]
+        val collegeDigit = resolveCollegeRow(cleanCollege)?.get(CollegesTable.codeDigit)
+            ?: knownCollegeDigits[cleanCollege]
             ?: allRows.firstOrNull {
                 it[DepartmentsTable.college] == cleanCollege &&
                     validDeptCodeRegex.matches(it[DepartmentsTable.code])
             }?.let { it[DepartmentsTable.code][0].digitToInt() }
             ?: run {
                 val usedDigits = knownCollegeDigits.values.toMutableSet()
+                CollegesTable.selectAll().mapNotNull { it[CollegesTable.codeDigit] }.forEach { usedDigits.add(it) }
                 allRows.forEach { r ->
                     val c = r[DepartmentsTable.code]
                     if (validDeptCodeRegex.matches(c)) {
@@ -305,10 +449,84 @@ object DatabaseFactory {
         return String.format("%d%02d", collegeDigit, nextIdx)
     }
 
+    private val defaultDepartmentAliases = listOf(
+        "소프트웨어학부" to "소프트웨어학과",
+        "컴퓨터정보공학부" to "컴퓨터공학과"
+    )
+
+    internal fun resolveDepartmentRow(rawName: String): ResultRow? {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return null
+        val lower = clean.lowercase()
+        val direct = DepartmentsTable.select { DepartmentsTable.name.lowerCase() eq lower }.firstOrNull()
+        if (direct != null) return direct
+
+        val aliasRow = DepartmentAliasesTable.select {
+            DepartmentAliasesTable.aliasName.lowerCase() eq lower
+        }.firstOrNull() ?: return null
+        return DepartmentsTable.select {
+            DepartmentsTable.id eq aliasRow[DepartmentAliasesTable.departmentId]
+        }.firstOrNull()
+    }
+
+    internal fun resolveCanonicalDepartmentName(rawName: String): String {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return clean
+        return resolveDepartmentRow(clean)?.get(DepartmentsTable.name) ?: clean
+    }
+
+    internal fun expandDepartmentAliasNames(rawName: String): List<String> {
+        val clean = rawName.trim()
+        if (clean.isBlank()) return emptyList()
+        val deptRow = resolveDepartmentRow(clean) ?: return listOf(clean)
+        val canonicalName = deptRow[DepartmentsTable.name]
+        val deptId = deptRow[DepartmentsTable.id].value
+        val aliases = DepartmentAliasesTable.select {
+            DepartmentAliasesTable.departmentId eq deptId
+        }.map { it[DepartmentAliasesTable.aliasName] }
+        return (listOf(canonicalName) + aliases + clean).distinct()
+    }
+
+    internal fun ensureDepartmentAliasInternal(departmentId: UUID, rawAlias: String) {
+        val cleanAlias = rawAlias.trim()
+        if (cleanAlias.isBlank() || cleanAlias.length > 100) return
+        val lower = cleanAlias.lowercase()
+        val canonicalExists = DepartmentsTable.select { DepartmentsTable.name.lowerCase() eq lower }.count() > 0L
+        if (canonicalExists) return
+        val aliasExists = DepartmentAliasesTable.select {
+            DepartmentAliasesTable.aliasName.lowerCase() eq lower
+        }.count() > 0L
+        if (!aliasExists) {
+            DepartmentAliasesTable.insert {
+                it[id] = UUID.randomUUID()
+                it[DepartmentAliasesTable.departmentId] = departmentId
+                it[aliasName] = cleanAlias
+            }
+        }
+    }
+
     private fun seedDefaultDepartments() {
+        // Migrate legacy department rows (e.g. 소프트웨어학과 -> 소프트웨어학부) before seeding defaults
+        defaultDepartmentAliases.forEach { (canonicalName, legacyName) ->
+            val legacyRow = DepartmentsTable.select { DepartmentsTable.name eq legacyName }.singleOrNull()
+            val canonicalRow = DepartmentsTable.select { DepartmentsTable.name eq canonicalName }.singleOrNull()
+            if (legacyRow != null && canonicalRow == null) {
+                DepartmentsTable.update({ DepartmentsTable.id eq legacyRow[DepartmentsTable.id] }) {
+                    it[name] = canonicalName
+                }
+            } else if (legacyRow != null && canonicalRow != null) {
+                val legacyDeptId = legacyRow[DepartmentsTable.id].value
+                val canonDeptId = canonicalRow[DepartmentsTable.id].value
+                DepartmentAliasesTable.update({ DepartmentAliasesTable.departmentId eq legacyDeptId }) {
+                    it[departmentId] = canonDeptId
+                }
+                DepartmentsTable.deleteWhere { DepartmentsTable.id eq legacyDeptId }
+            }
+        }
+
         val initialDepartments = listOf(
-            Triple("101", "소프트웨어학과", "인공지능융합대학"),
-            Triple("102", "컴퓨터공학과", "인공지능융합대학"),
+            Triple("101", "소프트웨어학부", "인공지능융합대학"),
+            Triple("102", "컴퓨터정보공학부", "인공지능융합대학"),
             Triple("103", "정보융합학부", "인공지능융합대학"),
             Triple("104", "로봇학부", "인공지능융합대학"),
             Triple("201", "전자공학과", "전자정보공과대학"),
@@ -339,6 +557,13 @@ object DatabaseFactory {
                         it[college] = collegeName
                     }
                 }
+            }
+        }
+
+        defaultDepartmentAliases.forEach { (canonicalName, legacyAlias) ->
+            val deptRow = DepartmentsTable.select { DepartmentsTable.name eq canonicalName }.singleOrNull()
+            if (deptRow != null) {
+                ensureDepartmentAliasInternal(deptRow[DepartmentsTable.id].value, legacyAlias)
             }
         }
 
@@ -398,10 +623,11 @@ object DatabaseFactory {
             // 2. Insert courses, departments, and sections
             courseDataFile.courses.forEach { c ->
                 val cId = UUID.fromString(c.id)
+                val cleanCollege = ensureCollegeExistsInternal(c.college.ifBlank { "광운대학교" })
                 val cleanDept = c.department.trim()
                 if (cleanDept.isNotBlank() && cleanDept != "공통") {
-                    if (DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.count() == 0L) {
-                        val collegeName = c.college.ifBlank { "광운대학교" }
+                    if (resolveDepartmentRow(cleanDept) == null) {
+                        val collegeName = cleanCollege.ifBlank { "광운대학교" }
                         val assignedCode = allocateDepartmentCodeForCollege(collegeName)
                         DepartmentsTable.insert {
                             it[id] = UUID.randomUUID()
@@ -418,7 +644,7 @@ object DatabaseFactory {
                         it[name] = c.name
                         it[code] = c.code
                         it[semester] = c.semester
-                        it[college] = c.college
+                        it[college] = cleanCollege
                         it[department] = c.department
                         it[major] = c.major
                         it[completionType] = c.completionType
@@ -466,7 +692,7 @@ object DatabaseFactory {
             it[name] = "서영민"
             it[role] = UserRole.STUDENT.name
             it[identifier] = "2026101001"
-            it[department] = "소프트웨어학과"
+            it[department] = "소프트웨어학부"
             it[displayTag] = "26_소프트_서영민"
             it[isDemo] = true
         }
@@ -475,7 +701,7 @@ object DatabaseFactory {
             it[name] = "김민지"
             it[role] = UserRole.STUDENT.name
             it[identifier] = "2026101002"
-            it[department] = "소프트웨어학과"
+            it[department] = "소프트웨어학부"
             it[displayTag] = "25_소프트_김민지"
             it[isDemo] = true
         }
@@ -484,8 +710,8 @@ object DatabaseFactory {
             it[name] = "박준형"
             it[role] = UserRole.STUDENT.name
             it[identifier] = "2026102501"
-            it[department] = "컴퓨터공학과"
-            it[displayTag] = "24_컴공_박준형"
+            it[department] = "컴퓨터정보공학부"
+            it[displayTag] = "24_컴정_박준형"
             it[isDemo] = true
         }
 
@@ -494,8 +720,8 @@ object DatabaseFactory {
             it[name] = "김교수"
             it[role] = UserRole.PROFESSOR.name
             it[identifier] = "P2011"
-            it[department] = "소프트웨어학과"
-            it[displayTag] = "소프트웨어학과 김교수"
+            it[department] = "소프트웨어학부"
+            it[displayTag] = "소프트웨어학부 김교수"
             it[email] = "kim.prof@kw.ac.kr"
             it[isDemo] = true
         }
@@ -504,8 +730,8 @@ object DatabaseFactory {
             it[name] = "이교수"
             it[role] = UserRole.PROFESSOR.name
             it[identifier] = "P2012"
-            it[department] = "컴퓨터공학과"
-            it[displayTag] = "컴퓨터공학과 이교수"
+            it[department] = "컴퓨터정보공학부"
+            it[displayTag] = "컴퓨터정보공학부 이교수"
             it[email] = "lee.prof@kw.ac.kr"
             it[isDemo] = true
         }
@@ -514,8 +740,8 @@ object DatabaseFactory {
             it[name] = "박교수"
             it[role] = UserRole.PROFESSOR.name
             it[identifier] = "P2013"
-            it[department] = "컴퓨터공학과"
-            it[displayTag] = "컴퓨터공학과 박교수"
+            it[department] = "컴퓨터정보공학부"
+            it[displayTag] = "컴퓨터정보공학부 박교수"
             it[email] = "park.prof@kw.ac.kr"
             it[isDemo] = true
         }

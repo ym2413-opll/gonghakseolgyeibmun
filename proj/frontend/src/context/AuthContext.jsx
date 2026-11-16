@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(() => api.getCurrentSessionUser());
+  const [colleges, setColleges] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -14,10 +15,12 @@ export const AuthProvider = ({ children }) => {
 
   const refreshCatalog = useCallback(async () => {
     try {
-      const [deptList, courseList] = await Promise.all([
+      const [collegeList, deptList, courseList] = await Promise.all([
+        api.getColleges(),
         api.getDepartments(),
         api.getAllCourses()
       ]);
+      if (Array.isArray(collegeList)) setColleges(collegeList);
       if (Array.isArray(deptList)) setDepartments(deptList);
       if (Array.isArray(courseList)) setAllCourses(courseList);
     } catch (err) {
@@ -173,6 +176,7 @@ export const AuthProvider = ({ children }) => {
         isProfessor,
         isAdmin,
         isLoading,
+        colleges,
         departments,
         allCourses,
         authModalMode,

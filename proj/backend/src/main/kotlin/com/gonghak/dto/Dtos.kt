@@ -202,6 +202,7 @@ data class DepartmentDto(
     val name: String,
     val code: String = "101",
     val college: String = "",
+    val aliases: List<String> = emptyList(),
     val createdAt: String = ""
 )
 
@@ -209,7 +210,52 @@ data class DepartmentDto(
 data class CreateDepartmentRequest(
     val name: String,
     val code: String? = null,
-    val college: String = ""
+    val college: String = "",
+    val aliases: List<String> = emptyList()
+)
+
+@Serializable
+data class UpdateDepartmentRequest(
+    val name: String? = null,
+    val college: String? = null,
+    val code: String? = null,
+    val aliases: List<String>? = null,
+    val keepOldNameAsAlias: Boolean = true
+)
+
+@Serializable
+data class DepartmentAliasRequest(
+    val alias: String
+)
+
+@Serializable
+data class RenameAliasRequest(
+    val oldAlias: String,
+    val newAlias: String
+)
+
+@Serializable
+data class CollegeDto(
+    val id: String,
+    val name: String,
+    val codeDigit: Int? = null,
+    val aliases: List<String> = emptyList(),
+    val createdAt: String = ""
+)
+
+@Serializable
+data class CreateCollegeRequest(
+    val name: String,
+    val codeDigit: Int? = null,
+    val aliases: List<String> = emptyList()
+)
+
+@Serializable
+data class UpdateCollegeRequest(
+    val name: String? = null,
+    val codeDigit: Int? = null,
+    val aliases: List<String>? = null,
+    val keepOldNameAsAlias: Boolean = true
 )
 
 @Serializable

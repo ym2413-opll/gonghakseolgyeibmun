@@ -19,6 +19,13 @@ fun Route.courseRoutes(userService: UserService) {
         }
     }
 
+    route("/api/colleges") {
+        get {
+            val colleges = userService.getColleges()
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = colleges))
+        }
+    }
+
     route("/api/courses") {
         get {
             val isAll = call.request.queryParameters["all"]?.toBoolean() ?: false

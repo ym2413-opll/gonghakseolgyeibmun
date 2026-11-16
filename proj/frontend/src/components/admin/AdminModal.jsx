@@ -1,5 +1,5 @@
 // src/components/admin/AdminModal.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -24,22 +24,192 @@ import {
   RefreshCw,
   Trash2,
   Sparkles,
-  Check
+  Check,
+  Pencil
 } from 'lucide-react';
 
+const CatalogChipList = ({
+  items = [],
+  entityKey,
+  getCodeLabel,
+  getSubLabel,
+  editingAlias,
+  onStartRenameAlias,
+  onChangeEditingAliasValue,
+  onSubmitRenameAlias,
+  onCancelRenameAlias,
+  onRemoveAlias,
+  onStartEditItem
+}) => (
+  <div className="admin-chip-list">
+    {items.map((item) => {
+      const codeLabel = getCodeLabel(item);
+      const subLabel = getSubLabel(item);
+      const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+      return (
+        <span key={item.id || item.name} className="admin-dept-chip">
+          {codeLabel ? `${codeLabel} · ` : ''}{item.name}
+          {subLabel ? <small> ({subLabel})</small> : null}
+          <button
+            type="button"
+            title={`${item.name} 정보/명칭 수정`}
+            aria-label={`${item.name} 정보 수정`}
+            onClick={() => onStartEditItem(item)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              padding: '0 3px',
+              marginLeft: '4px',
+              color: 'inherit',
+              opacity: 0.75,
+              verticalAlign: 'middle'
+            }}
+          >
+            <Pencil size={11} />
+          </button>
+          {aliases.map((alias) => {
+            const isRenamingThis =
+              editingAlias &&
+              editingAlias.entityKey === entityKey &&
+              String(editingAlias.itemId) === String(item.id) &&
+              editingAlias.oldAlias === alias;
+
+            if (isRenamingThis) {
+              return (
+                <span
+                  key={alias}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    marginLeft: '6px'
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingAlias.value}
+                    onChange={(e) => onChangeEditingAliasValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        onSubmitRenameAlias();
+                      } else if (e.key === 'Escape') {
+                        onCancelRenameAlias();
+                      }
+                    }}
+                    style={{ width: '115px', padding: '1px 6px', fontSize: '0.75em', height: '22px' }}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    aria-label="별칭 저장"
+                    onClick={onSubmitRenameAlias}
+                    className="btn btn-primary btn-xs"
+                    style={{ padding: '1px 6px', fontSize: '0.72em' }}
+                  >
+                    저장
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="별칭 수정 취소"
+                    onClick={onCancelRenameAlias}
+                    className="btn btn-outline btn-xs"
+                    style={{ padding: '1px 6px', fontSize: '0.72em' }}
+                  >
+                    취소
+                  </button>
+                </span>
+              );
+            }
+
+            return (
+              <small
+                key={alias}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  marginLeft: '6px',
+                  padding: '1px 6px',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                  fontSize: '0.75em'
+                }}
+              >
+                구: {alias}
+                <button
+                  type="button"
+                  title={`${alias} 별칭 이름 변경`}
+                  aria-label={`${alias} 별칭 변경`}
+                  onClick={() => onStartRenameAlias(entityKey, item.id, alias)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    padding: 0,
+                    lineHeight: 1,
+                    color: 'inherit',
+                    opacity: 0.8
+                  }}
+                >
+                  <Pencil size={10} />
+                </button>
+                <button
+                  type="button"
+                  title={`${alias} 별칭 삭제`}
+                  aria-label={`${alias} 별칭 삭제`}
+                  onClick={() => onRemoveAlias(item.id, alias)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    padding: 0,
+                    lineHeight: 1,
+                    color: 'inherit',
+                    fontWeight: 700
+                  }}
+                >
+                  ×
+                </button>
+              </small>
+            );
+          })}
+        </span>
+      );
+    })}
+  </div>
+);
+
 const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQuestion }) => {
-  const { departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
+  const { colleges = [], departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
   const { exhibitionMode, updateExhibitionMode } = useTheme();
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'users' | 'posts' | 'emails'
   const [users, setUsers] = useState([]);
   const [emailLogs, setEmailLogs] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const statusTimerRef = useRef(null);
 
-  // Catalog form state
+  // Catalog form state (Departments)
   const [deptName, setDeptName] = useState('');
   const [deptCollege, setDeptCollege] = useState('');
+  const [deptAliasesInput, setDeptAliasesInput] = useState('');
+  const [aliasTargetDeptId, setAliasTargetDeptId] = useState('');
+  const [aliasNewName, setAliasNewName] = useState('');
+  const [editingDept, setEditingDept] = useState(null); // { id, name, college, code, keepOldNameAsAlias }
+
+  // Catalog form state (Colleges)
+  const [newCollegeName, setNewCollegeName] = useState('');
+  const [newCollegeDigit, setNewCollegeDigit] = useState('');
+  const [newCollegeAliasesInput, setNewCollegeAliasesInput] = useState('');
+  const [aliasTargetCollegeId, setAliasTargetCollegeId] = useState('');
+  const [collegeAliasNewName, setCollegeAliasNewName] = useState('');
+  const [editingCollege, setEditingCollege] = useState(null); // { id, name, codeDigit, keepOldNameAsAlias }
+
+  // Inline alias rename state shared for departments & colleges
+  const [editingAlias, setEditingAlias] = useState(null); // { entityKey: 'dept'|'college', itemId, oldAlias, value }
 
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
@@ -51,6 +221,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const availableColleges = Array.from(
     new Set(
       [
+        ...colleges.map((c) => (c.name || '').trim()),
         ...departments.map((d) => (d.college || '').trim()),
         ...allCourses.map((c) => (c.college || '').trim())
       ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
@@ -60,11 +231,23 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     ? availableColleges
     : ['전자정보공과대학', '인공지능융합대학', '공과대학', '자연과학대학', '인문사회과학대학', '정책법학대학', '경영대학', '참빛인재대학'];
 
+  const effectiveCourseDept = departments.some((d) => d.name === courseDept)
+    ? courseDept
+    : (departments[0]?.name || '');
+  const effectiveCourseCollege = collegeOptions.includes(courseCollege)
+    ? courseCollege
+    : (collegeOptions[0] || '');
+  const effectiveAliasTargetDeptId = departments.some((d) => String(d.id) === String(aliasTargetDeptId))
+    ? aliasTargetDeptId
+    : (departments[0]?.id || '');
+  const effectiveAliasTargetCollegeId = colleges.some((c) => String(c.id) === String(aliasTargetCollegeId))
+    ? aliasTargetCollegeId
+    : (colleges[0]?.id || '');
+
   // User sanction duration state
   const [banDurationHours, setBanDurationHours] = useState(24);
 
   const loadAdminData = useCallback(async () => {
-    setIsLoading(true);
     try {
       const [userList, emails] = await Promise.all([
         api.getAdminUsers(),
@@ -74,41 +257,31 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       setEmailLogs(Array.isArray(emails) ? emails : []);
     } catch (err) {
       console.warn('Admin data load warning:', err);
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setEditingDept(null);
+      setEditingCollege(null);
+      setEditingAlias(null);
+      return;
+    }
     loadAdminData();
     refreshCatalog();
   }, [isOpen, loadAdminData, refreshCatalog]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (!courseDept && departments.length > 0) {
-      setCourseDept(departments[0].name);
-    }
-    if (!courseCollege) {
-      const cols = Array.from(
-        new Set(
-          [
-            ...departments.map((d) => (d.college || '').trim()),
-            ...allCourses.map((c) => (c.college || '').trim())
-          ].filter((col) => col && col !== '전체' && col !== '공통' && col !== '광운대학교')
-        )
-      );
-      setCourseCollege(cols[0] || '전자정보공과대학');
-    }
-  }, [isOpen, departments, allCourses, courseDept, courseCollege]);
+  useEffect(() => () => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+  }, []);
 
   if (!isOpen) return null;
 
   const notifySuccess = (msg) => {
     setErrorMessage('');
     setStatusMessage(msg);
-    setTimeout(() => setStatusMessage(''), 4000);
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => setStatusMessage(''), 4000);
   };
 
   const notifyError = (msg) => {
@@ -120,13 +293,19 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     e.preventDefault();
     if (!deptName.trim()) return;
     const addedDeptName = deptName.trim();
+    const initialAliases = deptAliasesInput
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean);
     try {
       await api.createDepartment({
         name: addedDeptName,
-        college: deptCollege.trim() || '광운대학교'
+        college: deptCollege.trim() || '광운대학교',
+        aliases: initialAliases
       });
       setDeptName('');
       setDeptCollege('');
+      setDeptAliasesInput('');
       await refreshCatalog();
       notifySuccess(`학과 '${addedDeptName}'이(가) 동적으로 추가되었습니다.`);
     } catch (err) {
@@ -134,31 +313,161 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     }
   };
 
+  const handleAddAlias = async (e) => {
+    e.preventDefault();
+    const targetId = effectiveAliasTargetDeptId;
+    const cleanAlias = aliasNewName.trim();
+    if (!targetId || !cleanAlias) return;
+    try {
+      const updated = await api.addDepartmentAlias(targetId, cleanAlias);
+      setAliasNewName('');
+      await refreshCatalog();
+      notifySuccess(`'${updated?.name || '학과'}'에 기존 명칭(별칭) '${cleanAlias}'이(가) 연결되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '학과 별칭 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleRemoveAlias = async (deptId, aliasName) => {
+    try {
+      await api.removeDepartmentAlias(deptId, aliasName);
+      await refreshCatalog();
+      notifySuccess(`학과 별칭 '${aliasName}'이(가) 제거되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '학과 별칭 삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleSaveEditedDept = async (e) => {
+    e.preventDefault();
+    if (!editingDept || !editingDept.name.trim()) return;
+    try {
+      const updated = await api.updateDepartment(editingDept.id, {
+        name: editingDept.name.trim(),
+        college: editingDept.college.trim() || undefined,
+        code: editingDept.code.trim() || undefined,
+        keepOldNameAsAlias: editingDept.keepOldNameAsAlias
+      });
+      setEditingDept(null);
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`학과 '${updated?.name || editingDept.name}' 정보가 수정되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '학과 수정 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleAddCollege = async (e) => {
+    e.preventDefault();
+    if (!newCollegeName.trim()) return;
+    const addedName = newCollegeName.trim();
+    const initialAliases = newCollegeAliasesInput
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean);
+    const parsedDigit = newCollegeDigit.trim() ? Number(newCollegeDigit.trim()) : null;
+    try {
+      await api.createCollege({
+        name: addedName,
+        codeDigit: parsedDigit,
+        aliases: initialAliases
+      });
+      setNewCollegeName('');
+      setNewCollegeDigit('');
+      setNewCollegeAliasesInput('');
+      await refreshCatalog();
+      notifySuccess(`단과대학 '${addedName}'이(가) 추가되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '단과대학 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleAddCollegeAlias = async (e) => {
+    e.preventDefault();
+    const targetId = effectiveAliasTargetCollegeId;
+    const cleanAlias = collegeAliasNewName.trim();
+    if (!targetId || !cleanAlias) return;
+    try {
+      const updated = await api.addCollegeAlias(targetId, cleanAlias);
+      setCollegeAliasNewName('');
+      await refreshCatalog();
+      notifySuccess(`'${updated?.name || '단과대학'}'에 기존 명칭(별칭) '${cleanAlias}'이(가) 연결되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '단과대학 별칭 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleRemoveCollegeAlias = async (collegeId, aliasName) => {
+    try {
+      await api.removeCollegeAlias(collegeId, aliasName);
+      await refreshCatalog();
+      notifySuccess(`단과대학 별칭 '${aliasName}'이(가) 제거되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '단과대학 별칭 삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleSaveEditedCollege = async (e) => {
+    e.preventDefault();
+    if (!editingCollege || !editingCollege.name.trim()) return;
+    try {
+      const updated = await api.updateCollege(editingCollege.id, {
+        name: editingCollege.name.trim(),
+        codeDigit: editingCollege.codeDigit !== '' && editingCollege.codeDigit !== null
+          ? Number(editingCollege.codeDigit)
+          : null,
+        keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
+      });
+      setEditingCollege(null);
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`단과대학 '${updated?.name || editingCollege.name}' 정보가 수정되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '단과대학 수정 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleSubmitRenameAlias = async () => {
+    if (!editingAlias || !editingAlias.value.trim()) return;
+    try {
+      if (editingAlias.entityKey === 'dept') {
+        await api.renameDepartmentAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+      } else {
+        await api.renameCollegeAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+      }
+      setEditingAlias(null);
+      await refreshCatalog();
+      notifySuccess('별칭이 성공적으로 변경되었습니다.');
+    } catch (err) {
+      notifyError(err.message || '별칭 변경 중 오류가 발생했습니다.');
+    }
+  };
+
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!courseCode.trim() || !courseName.trim()) return;
-    if (courseScopeType === 'DEPARTMENT' && !courseDept) {
+    if (courseScopeType === 'DEPARTMENT' && !effectiveCourseDept) {
       notifyError('주관 학과를 선택해주세요.');
       return;
     }
-    if (courseScopeType === 'COLLEGE' && !courseCollege) {
+    if (courseScopeType === 'COLLEGE' && !effectiveCourseCollege) {
       notifyError('주관 단과대를 선택해주세요.');
       return;
     }
 
-    const matchedDept = departments.find((d) => d.name === courseDept);
+    const matchedDept = departments.find((d) => d.name === effectiveCourseDept);
     const resolvedCollege =
       courseScopeType === 'ALL'
         ? '전체'
         : courseScopeType === 'COLLEGE'
-          ? courseCollege
-          : (matchedDept?.college || courseCollege || '');
+          ? effectiveCourseCollege
+          : (matchedDept?.college || effectiveCourseCollege || '');
     const resolvedDepartment =
       courseScopeType === 'ALL'
         ? '전체'
         : courseScopeType === 'COLLEGE'
-          ? `${courseCollege} 전체`
-          : courseDept;
+          ? `${effectiveCourseCollege} 전체`
+          : effectiveCourseDept;
 
     const addedName = courseName.trim();
     const addedCode = courseCode.trim();
@@ -322,25 +631,258 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       ))}
                     </datalist>
                   </div>
+                  <div className="form-group">
+                    <label className="form-label">기존 학과명 별칭(선택 · 쉼표 구분)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 소프트웨어학과, 구전산학과"
+                      value={deptAliasesInput}
+                      onChange={(e) => setDeptAliasesInput(e.target.value)}
+                    />
+                  </div>
                   <button type="submit" className="btn btn-primary btn-sm">
                     <PlusCircle size={15} />
                     학과 즉시 추가
                   </button>
                 </form>
 
-                <div className="admin-chip-list-wrap">
-                  <div className="admin-chip-header">현재 등록된 학과 ({departments.length}개)</div>
-                  <div className="admin-chip-list">
-                    {departments.map((d) => {
-                      const subLabel = (d.college || d.shortName || '').trim();
-                      return (
-                        <span key={d.id || d.name} className="admin-dept-chip">
-                          {d.name}
-                          {subLabel ? <small> ({subLabel})</small> : null}
-                        </span>
-                      );
-                    })}
+                <form onSubmit={handleAddAlias} className="admin-compact-form" style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed var(--border-color)' }}>
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">별칭 연결 대상 학과</label>
+                      <select
+                        className="form-select"
+                        value={effectiveAliasTargetDeptId}
+                        onChange={(e) => setAliasTargetDeptId(e.target.value)}
+                      >
+                        {departments.map((d) => (
+                          <option key={d.id || d.name} value={d.id}>
+                            {d.code ? `[${d.code}] ` : ''}{d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">기존 학과명(별칭) *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 소프트웨어학과"
+                        value={aliasNewName}
+                        onChange={(e) => setAliasNewName(e.target.value)}
+                        required
+                      />
+                    </div>
                   </div>
+                  <button type="submit" className="btn btn-outline btn-sm">
+                    <PlusCircle size={14} />
+                    기존 학과명 별칭 연결
+                  </button>
+                </form>
+
+                <div className="admin-chip-list-wrap">
+                  <div className="admin-chip-header">현재 등록된 학과 ({departments.length}개) · 연필 아이콘으로 명칭/별칭 수정</div>
+                  {editingDept && (
+                    <form onSubmit={handleSaveEditedDept} className="admin-compact-form" style={{ marginBottom: '12px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="auth-form-grid-2">
+                        <div className="form-group">
+                          <label className="form-label">수정할 정식 학과명 *</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={editingDept.name}
+                            onChange={(e) => setEditingDept((prev) => ({ ...prev, name: e.target.value }))}
+                            required
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">소속 단과대학</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            list="admin-college-options"
+                            value={editingDept.college}
+                            onChange={(e) => setEditingDept((prev) => ({ ...prev, college: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <div className="auth-form-grid-2">
+                        <div className="form-group">
+                          <label className="form-label">학과 고유번호(3자리)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={editingDept.code}
+                            onChange={(e) => setEditingDept((prev) => ({ ...prev, code: e.target.value }))}
+                          />
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85em', marginTop: '20px' }}>
+                          <input
+                            type="checkbox"
+                            checked={editingDept.keepOldNameAsAlias}
+                            onChange={(e) => setEditingDept((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))}
+                          />
+                          학과명 변경 시 기존 이름을 별칭으로 자동 보존
+                        </label>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="submit" className="btn btn-primary btn-xs">저장</button>
+                        <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingDept(null)}>취소</button>
+                      </div>
+                    </form>
+                  )}
+                  <CatalogChipList
+                    items={departments}
+                    entityKey="dept"
+                    getCodeLabel={(d) => d.code || ''}
+                    getSubLabel={(d) => (d.college || d.shortName || '').trim()}
+                    editingAlias={editingAlias}
+                    onStartRenameAlias={(entityKey, itemId, oldAlias) => setEditingAlias({ entityKey, itemId, oldAlias, value: oldAlias })}
+                    onChangeEditingAliasValue={(value) => setEditingAlias((prev) => (prev ? { ...prev, value } : null))}
+                    onSubmitRenameAlias={handleSubmitRenameAlias}
+                    onCancelRenameAlias={() => setEditingAlias(null)}
+                    onRemoveAlias={handleRemoveAlias}
+                    onStartEditItem={(d) => setEditingDept({ id: d.id, name: d.name, college: d.college || '', code: d.code || '', keepOldNameAsAlias: true })}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-panel-card">
+                <h3 className="admin-panel-title">
+                  <Building2 size={18} />
+                  단과대학(College) 및 별칭 관리
+                </h3>
+                <form onSubmit={handleAddCollege} className="admin-compact-form">
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">단과대학 정식 명칭 *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 인공지능융합대학"
+                        value={newCollegeName}
+                        onChange={(e) => setNewCollegeName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">코드 첫자리 (1~9, 선택)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={9}
+                        className="form-input"
+                        placeholder="예: 1"
+                        value={newCollegeDigit}
+                        onChange={(e) => setNewCollegeDigit(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">기존 단과대학명 별칭(선택 · 쉼표 구분)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 소프트웨어융합대학"
+                      value={newCollegeAliasesInput}
+                      onChange={(e) => setNewCollegeAliasesInput(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="btn btn-primary btn-sm">
+                    <PlusCircle size={15} />
+                    단과대학 추가
+                  </button>
+                </form>
+
+                <form onSubmit={handleAddCollegeAlias} className="admin-compact-form" style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed var(--border-color)' }}>
+                  <div className="auth-form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">별칭 연결 대상 단과대학</label>
+                      <select
+                        className="form-select"
+                        value={effectiveAliasTargetCollegeId}
+                        onChange={(e) => setAliasTargetCollegeId(e.target.value)}
+                      >
+                        {colleges.map((c) => (
+                          <option key={c.id || c.name} value={c.id}>
+                            {c.codeDigit ? `[${c.codeDigit}] ` : ''}{c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">기존 단과대학명(별칭) *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="예: 소프트웨어융합대학"
+                        value={collegeAliasNewName}
+                        onChange={(e) => setCollegeAliasNewName(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn btn-outline btn-sm">
+                    <PlusCircle size={14} />
+                    기존 단과대학명 별칭 연결
+                  </button>
+                </form>
+
+                <div className="admin-chip-list-wrap">
+                  <div className="admin-chip-header">현재 등록된 단과대학 ({colleges.length}개)</div>
+                  {editingCollege && (
+                    <form onSubmit={handleSaveEditedCollege} className="admin-compact-form" style={{ marginBottom: '12px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div className="auth-form-grid-2">
+                        <div className="form-group">
+                          <label className="form-label">수정할 정식 단과대학명 *</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={editingCollege.name}
+                            onChange={(e) => setEditingCollege((prev) => ({ ...prev, name: e.target.value }))}
+                            required
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">코드 첫자리 (1~9)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={9}
+                            className="form-input"
+                            value={editingCollege.codeDigit}
+                            onChange={(e) => setEditingCollege((prev) => ({ ...prev, codeDigit: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85em', marginBottom: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={editingCollege.keepOldNameAsAlias}
+                          onChange={(e) => setEditingCollege((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))}
+                        />
+                        단과대학명 변경 시 기존 이름을 별칭으로 자동 보존
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="submit" className="btn btn-primary btn-xs">저장</button>
+                        <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingCollege(null)}>취소</button>
+                      </div>
+                    </form>
+                  )}
+                  <CatalogChipList
+                    items={colleges}
+                    entityKey="college"
+                    getCodeLabel={(c) => (c.codeDigit ? `${c.codeDigit}xx` : '')}
+                    getSubLabel={() => ''}
+                    editingAlias={editingAlias}
+                    onStartRenameAlias={(entityKey, itemId, oldAlias) => setEditingAlias({ entityKey, itemId, oldAlias, value: oldAlias })}
+                    onChangeEditingAliasValue={(value) => setEditingAlias((prev) => (prev ? { ...prev, value } : null))}
+                    onSubmitRenameAlias={handleSubmitRenameAlias}
+                    onCancelRenameAlias={() => setEditingAlias(null)}
+                    onRemoveAlias={handleRemoveCollegeAlias}
+                    onStartEditItem={(c) => setEditingCollege({ id: c.id, name: c.name, codeDigit: c.codeDigit ?? '', keepOldNameAsAlias: true })}
+                  />
                 </div>
               </div>
 
@@ -418,7 +960,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       ) : courseScopeType === 'COLLEGE' ? (
                         <select
                           className="form-select"
-                          value={courseCollege}
+                          value={effectiveCourseCollege}
                           onChange={(e) => setCourseCollege(e.target.value)}
                         >
                           {collegeOptions.map((col) => (
@@ -430,7 +972,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       ) : (
                         <select
                           className="form-select"
-                          value={courseDept}
+                          value={effectiveCourseDept}
                           onChange={(e) => setCourseDept(e.target.value)}
                         >
                           {departments.map((d) => (

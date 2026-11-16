@@ -23,10 +23,28 @@ object UsersTable : UUIDTable("users") {
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
+object CollegesTable : UUIDTable("colleges") {
+    val name = varchar("name", 100).uniqueIndex()
+    val codeDigit = integer("code_digit").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}
+
+object CollegeAliasesTable : UUIDTable("college_aliases") {
+    val collegeId = uuid("college_id").references(CollegesTable.id)
+    val aliasName = varchar("alias_name", 100).uniqueIndex()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}
+
 object DepartmentsTable : UUIDTable("departments") {
     val name = varchar("name", 100).uniqueIndex()
     val code = varchar("code", 3).default("101")
     val college = varchar("college", 100).default("")
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+}
+
+object DepartmentAliasesTable : UUIDTable("department_aliases") {
+    val departmentId = uuid("department_id").references(DepartmentsTable.id)
+    val aliasName = varchar("alias_name", 100).uniqueIndex()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 

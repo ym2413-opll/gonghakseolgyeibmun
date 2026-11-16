@@ -163,6 +163,7 @@ class EmailReplyWebhookTest {
             setBody(
                 CreateQuestionRequest(
                     courseId = courseId,
+                    profId = assignedProfId,
                     category = QuestionCategory.ASSIGNMENT,
                     title = "이메일 회신 E2E 질문",
                     rawContent = "이메일로 바로 답장하면 포럼에 답변이 등록되는지 확인하고 싶습니다."

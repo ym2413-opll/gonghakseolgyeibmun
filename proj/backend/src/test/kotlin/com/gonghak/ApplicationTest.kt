@@ -175,6 +175,7 @@ class ApplicationTest {
         // 1. Assignment Category: other professor cannot answer
         val assignReq = CreateQuestionRequest(
             courseId = courseId,
+            profId = assignedProfId,
             category = QuestionCategory.ASSIGNMENT,
             title = "과제 질문 - 다른 교수 답변 제한 테스트",
             rawContent = "과제 제출 형식 문의합니다.",
@@ -200,6 +201,7 @@ class ApplicationTest {
         // 2. Lecture Category: closed by default; other professor blocked until assigned professor opens thread (열림)
         val lectureReq = CreateQuestionRequest(
             courseId = courseId,
+            profId = assignedProfId,
             category = QuestionCategory.LECTURE,
             title = "강의 질문 - 공동 과목 다른 교수 답변 테스트",
             rawContent = "공동 과목 강의 질문입니다.",
@@ -338,6 +340,7 @@ class ApplicationTest {
         // Student tries to submit GRADE question -> should be Forbidden
         val tryGradeReq = CreateQuestionRequest(
             courseId = courseId,
+            profId = assignedProfId,
             category = QuestionCategory.GRADE,
             title = "비활성화된 카테고리 질문 시도",
             rawContent = "성적 문의드립니다.",

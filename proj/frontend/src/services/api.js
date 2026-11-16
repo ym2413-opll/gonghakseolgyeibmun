@@ -2,6 +2,7 @@
 // 광운대학교 학업 Q&A 포럼 Ktor 백엔드 API 통신 모듈 (R3 Overhaul: 인증/해시/관리모드/학과·과목 동적 관리/이메일 알림)
 
 import {
+  INITIAL_COLLEGES,
   INITIAL_DEPARTMENTS,
   INITIAL_COURSES,
   INITIAL_QUESTIONS,
@@ -18,6 +19,7 @@ const STORAGE_KEY_NOTIFS = 'prof_qa_notifications_v3';
 const STORAGE_KEY_USERS = 'prof_qa_registered_users_v3';
 const STORAGE_KEY_SESSION = 'prof_qa_session_user_v3';
 const STORAGE_KEY_TOKEN = 'prof_qa_auth_token_v3';
+const STORAGE_KEY_COLLEGES = 'prof_qa_colleges_v4';
 const STORAGE_KEY_DEPARTMENTS = 'prof_qa_departments_v4';
 const STORAGE_KEY_COURSES = 'prof_qa_courses_v3';
 const STORAGE_KEY_EMAIL_LOGS = 'prof_qa_email_logs_v3';
@@ -212,7 +214,128 @@ async function verifyPasswordBrowser(password, storedHash) {
   return computed === storedHash;
 }
 
+function normalizeCatalogEntry(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  return {
+    ...entry,
+    aliases: Array.isArray(entry.aliases)
+      ? entry.aliases.map((a) => String(a || '').trim()).filter(Boolean)
+      : []
+  };
+}
+
+function resolveCatalogEntry(list, fallbackList, rawName) {
+  const clean = String(rawName || '').trim();
+  if (!clean) return null;
+  const lower = clean.toLowerCase();
+  const candidates = Array.isArray(list) && list.length > 0 ? list : fallbackList;
+
+  const direct = candidates.find((d) => String(d?.name || '').trim().toLowerCase() === lower);
+  if (direct) return direct;
+
+  return (
+    candidates.find(
+      (d) =>
+        Array.isArray(d?.aliases) &&
+        d.aliases.some((alias) => String(alias || '').trim().toLowerCase() === lower)
+    ) || null
+  );
+}
+
+function getCatalogSearchNames(list, fallbackList, rawName) {
+  const clean = String(rawName || '').trim();
+  if (!clean) return [];
+  const matched = resolveCatalogEntry(list, fallbackList, clean);
+  if (!matched) return [clean];
+  const aliases = Array.isArray(matched.aliases) ? matched.aliases : [];
+  return Array.from(new Set([matched.name, ...aliases, clean].map((s) => String(s || '').trim()).filter(Boolean)));
+}
+
+function mutateLocalCatalogAliases({ storageKey, fallbackList, id, entityLabel, op, alias, newAlias }) {
+  const items = safeGetStorage(storageKey, fallbackList).map(normalizeCatalogEntry);
+  const target = items.find((item) => String(item.id) === String(id));
+  if (!target) throw new Error(`존재하지 않는 ${entityLabel}입니다.`);
+  const resolveFn = (name) => resolveCatalogEntry(items, fallbackList, name);
+
+  if (op === 'add') {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error(`등록할 기존 ${entityLabel}명(별칭)을 입력해주세요.`);
+    if (target.name.toLowerCase() === cleanAlias.toLowerCase()) {
+      throw new Error(`현재 ${entityLabel}명과 동일한 이름은 별칭으로 등록할 수 없습니다.`);
+    }
+    const collision = resolveFn(cleanAlias);
+    if (collision) {
+      throw new Error(
+        String(collision.id) === String(id)
+          ? `이미 등록된 별칭입니다: ${cleanAlias}`
+          : `이미 '${collision.name}'에서 사용 중인 ${entityLabel}명/별칭입니다: ${cleanAlias}`
+      );
+    }
+    target.aliases = Array.from(new Set([...(target.aliases || []), cleanAlias]));
+  } else if (op === 'rename') {
+    const cleanOld = String(alias || '').trim();
+    const cleanNew = String(newAlias || '').trim();
+    if (!cleanOld || !cleanNew) throw new Error('기존 별칭과 새 별칭을 모두 입력해주세요.');
+    if (target.name.toLowerCase() === cleanNew.toLowerCase()) {
+      throw new Error(`현재 ${entityLabel}명과 동일한 이름은 별칭으로 변경할 수 없습니다.`);
+    }
+    const idx = (target.aliases || []).findIndex((a) => a.toLowerCase() === cleanOld.toLowerCase());
+    if (idx < 0) throw new Error(`변경할 기존 별칭을 찾을 수 없습니다: ${cleanOld}`);
+    const collision = resolveFn(cleanNew);
+    if (collision && !(String(collision.id) === String(id) && cleanOld.toLowerCase() === cleanNew.toLowerCase())) {
+      throw new Error(`이미 사용 중인 ${entityLabel}명/별칭입니다: ${cleanNew}`);
+    }
+    target.aliases = target.aliases.map((a, i) => (i === idx ? cleanNew : a));
+  } else if (op === 'remove') {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('삭제할 별칭을 지정해주세요.');
+    target.aliases = (target.aliases || []).filter((a) => a.toLowerCase() !== cleanAlias.toLowerCase());
+  }
+  safeSetStorage(storageKey, items);
+  return target;
+}
+
+async function requestCatalogAdmin(path, method, payload, errorFallback) {
+  const res = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
+    method,
+    credentials: 'include',
+    headers: {
+      ...(payload !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...getAuthHeaders()
+    },
+    ...(payload !== undefined ? { body: JSON.stringify(payload) } : {})
+  }, 5000);
+  const body = await parseJsonSafe(res);
+  if (res.ok && body.data) {
+    return normalizeCatalogEntry(body.data);
+  }
+  const httpErr = new Error(body.message || errorFallback);
+  httpErr.isHttpError = true;
+  httpErr.status = res.status;
+  throw httpErr;
+}
+
+export function resolveDepartmentEntry(depts, rawName) {
+  return resolveCatalogEntry(depts, INITIAL_DEPARTMENTS, rawName);
+}
+
+export function getDepartmentSearchNames(depts, rawName) {
+  return getCatalogSearchNames(depts, INITIAL_DEPARTMENTS, rawName);
+}
+
+export function resolveCollegeEntry(colleges, rawName) {
+  return resolveCatalogEntry(colleges, INITIAL_COLLEGES, rawName);
+}
+
+export function getCollegeSearchNames(colleges, rawName) {
+  return getCatalogSearchNames(colleges, INITIAL_COLLEGES, rawName);
+}
+
 function initializeStorage() {
+  const existingColleges = safeGetStorage(STORAGE_KEY_COLLEGES, null);
+  if (!Array.isArray(existingColleges) || existingColleges.length === 0) {
+    safeSetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES);
+  }
   const existingQuestions = safeGetStorage(STORAGE_KEY_QUESTIONS, null);
   if (!Array.isArray(existingQuestions) || existingQuestions.length === 0) {
     safeSetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
@@ -366,7 +489,7 @@ export const api = {
     }
 
     const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    const deptObj = depts.find(d => d.name === department) || INITIAL_DEPARTMENTS.find(d => d.name === department);
+    const deptObj = resolveDepartmentEntry(depts, department) || resolveDepartmentEntry(INITIAL_DEPARTMENTS, department);
     const deptCode = /^[1-9](?:0[1-9]|[1-9]\d)$/.test(String(deptObj?.code || '')) ? String(deptObj.code) : '101';
     const prefix = `${safeYear}${deptCode}`;
     const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
@@ -516,8 +639,9 @@ export const api = {
     }
 
     const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    const deptObj = depts.find(d => d.name === cleanDept) || INITIAL_DEPARTMENTS.find(d => d.name === cleanDept);
-    const shortDept = deptObj?.shortName || cleanDept.replace(/학과|학부|전공/g, '').slice(0, 3);
+    const deptObj = resolveDepartmentEntry(depts, cleanDept) || resolveDepartmentEntry(INITIAL_DEPARTMENTS, cleanDept);
+    const canonicalDept = deptObj?.name || cleanDept;
+    const shortDept = deptObj?.shortName || canonicalDept.replace(/학과|학부|전공/g, '').slice(0, 3);
 
     let identifier = '';
     let email = null;
@@ -554,7 +678,7 @@ export const api = {
         email = rawEmail;
       }
       identifier = `P${Date.now().toString().slice(-6)}`;
-      displayTag = `${cleanDept} ${cleanName}`;
+      displayTag = `${canonicalDept} ${cleanName}`;
     }
 
     const passwordHash = await hashPasswordBrowser(payload.password);
@@ -573,7 +697,7 @@ export const api = {
       name: cleanName,
       identifier,
       studentId: identifier,
-      department: cleanDept,
+      department: canonicalDept,
       email,
       displayTag,
       avatar: cleanName.charAt(0),
@@ -724,6 +848,26 @@ export const api = {
   // ============================================================================
   // 2. 학과 및 과목 조회 / 동적 추가
   // ============================================================================
+  async getColleges() {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/colleges`, { credentials: 'include' }, 2000);
+        if (res.ok) {
+          const body = await parseJsonSafe(res);
+          const list = Array.isArray(body) ? body : body?.data;
+          if (Array.isArray(list) && list.length > 0) {
+            const normalizedList = list.map(normalizeCatalogEntry);
+            safeSetStorage(STORAGE_KEY_COLLEGES, normalizedList);
+            return normalizedList;
+          }
+        }
+      } catch (e) {
+        console.warn('[API] Remote getColleges failed, using local fallback', e);
+      }
+    }
+    return safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+  },
+
   async getDepartments() {
     if (USE_REMOTE_BACKEND) {
       try {
@@ -738,15 +882,16 @@ export const api = {
           const body = await res.json();
           const list = Array.isArray(body) ? body : body?.data;
           if (Array.isArray(list) && list.length > 0) {
-            safeSetStorage(STORAGE_KEY_DEPARTMENTS, list);
-            return list;
+            const normalizedList = list.map(normalizeCatalogEntry);
+            safeSetStorage(STORAGE_KEY_DEPARTMENTS, normalizedList);
+            return normalizedList;
           }
         }
       } catch (e) {
         console.warn('[API] Remote getDepartments failed, using local fallback', e);
       }
     }
-    return safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
+    return safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
   },
 
   async getAllCourses() {
@@ -968,11 +1113,31 @@ export const api = {
       }
     }
 
-    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    if (depts.some(d => d.name === deptPayload.name?.trim())) {
-      throw new Error('이미 등록된 학과명입니다.');
+    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+    const cleanDeptName = (deptPayload.name || '').trim();
+    const existingMatch = resolveDepartmentEntry(depts, cleanDeptName);
+    if (existingMatch) {
+      throw new Error(
+        existingMatch.name.toLowerCase() === cleanDeptName.toLowerCase()
+          ? '이미 등록된 학과명입니다.'
+          : `'${cleanDeptName}'은(는) 이미 '${existingMatch.name}'의 별칭으로 등록되어 있습니다.`
+      );
     }
-    const collegeName = (deptPayload.college || '광운대학교').trim();
+    const cleanAliases = Array.isArray(deptPayload.aliases)
+      ? Array.from(new Set(deptPayload.aliases.map((a) => String(a || '').trim()).filter(Boolean)))
+      : [];
+    for (const alias of cleanAliases) {
+      if (alias.toLowerCase() === cleanDeptName.toLowerCase()) {
+        throw new Error(`학과 정식 명칭과 동일한 별칭은 등록할 수 없습니다: ${alias}`);
+      }
+      const collision = resolveDepartmentEntry(depts, alias);
+      if (collision) {
+        throw new Error(`이미 '${collision.name}'에서 사용 중인 명칭/별칭입니다: ${alias}`);
+      }
+    }
+    const rawCollegeName = (deptPayload.college || '광운대학교').trim();
+    const collegeName = resolveCollegeEntry(colleges, rawCollegeName)?.name || rawCollegeName;
     const knownCollegeDigits = {
       '인공지능융합대학': 1,
       '전자정보공과대학': 2,
@@ -1012,14 +1177,302 @@ export const api = {
     }
     const newDept = {
       id: `dept-${Date.now()}`,
-      name: deptPayload.name.trim(),
-      shortName: (deptPayload.shortName || deptPayload.name.slice(0, 3)).trim(),
+      name: cleanDeptName,
+      shortName: (deptPayload.shortName || cleanDeptName.slice(0, 3)).trim(),
       college: collegeName,
+      aliases: cleanAliases,
       code: assignedCode
     };
     depts.push(newDept);
     safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts);
     return newDept;
+  },
+
+  async updateDepartment(deptId, payload) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/departments/${encodeURIComponent(deptId)}`,
+          'PUT',
+          payload,
+          '학과 정보 수정에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote updateDepartment fallback:', e);
+      }
+    }
+
+    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
+    const idx = depts.findIndex((d) => String(d.id) === String(deptId));
+    if (idx < 0) throw new Error('존재하지 않는 학과입니다.');
+    const cur = depts[idx];
+    const nextName = payload.name?.trim() || cur.name;
+    const collision = resolveDepartmentEntry(depts, nextName);
+    if (collision && String(collision.id) !== String(deptId)) {
+      throw new Error(`이미 '${collision.name}'에서 사용 중인 학과명/별칭입니다: ${nextName}`);
+    }
+    const rawCollege = payload.college?.trim() || cur.college;
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+    const nextCollege = resolveCollegeEntry(colleges, rawCollege)?.name || rawCollege;
+    let nextAliases = Array.isArray(payload.aliases)
+      ? Array.from(new Set(payload.aliases.map((a) => String(a || '').trim()).filter(Boolean)))
+      : [...(cur.aliases || [])];
+    if (nextName !== cur.name && payload.keepOldNameAsAlias !== false && !nextAliases.includes(cur.name)) {
+      nextAliases.push(cur.name);
+    }
+    nextAliases = nextAliases.filter((a) => a.toLowerCase() !== nextName.toLowerCase());
+    const updated = { ...cur, name: nextName, college: nextCollege, code: payload.code?.trim() || cur.code, aliases: nextAliases };
+    depts[idx] = updated;
+    safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts);
+    if (nextName !== cur.name) {
+      const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+      safeSetStorage(STORAGE_KEY_COURSES, courses.map((c) => (c.department === cur.name ? { ...c, department: nextName, college: nextCollege } : c)));
+    }
+    return updated;
+  },
+
+  async addDepartmentAlias(deptId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('등록할 기존 학과명(별칭)을 입력해주세요.');
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/departments/${encodeURIComponent(deptId)}/aliases`,
+          'POST',
+          { alias: cleanAlias },
+          '학과 별칭 추가에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote addDepartmentAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_DEPARTMENTS,
+      fallbackList: INITIAL_DEPARTMENTS,
+      id: deptId,
+      entityLabel: '학과',
+      op: 'add',
+      alias: cleanAlias
+    });
+  },
+
+  async renameDepartmentAlias(deptId, oldAlias, newAlias) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/departments/${encodeURIComponent(deptId)}/aliases`,
+          'PUT',
+          { oldAlias, newAlias },
+          '학과 별칭 변경에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote renameDepartmentAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_DEPARTMENTS,
+      fallbackList: INITIAL_DEPARTMENTS,
+      id: deptId,
+      entityLabel: '학과',
+      op: 'rename',
+      alias: oldAlias,
+      newAlias
+    });
+  },
+
+  async removeDepartmentAlias(deptId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('삭제할 별칭을 지정해주세요.');
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const params = new URLSearchParams({ alias: cleanAlias });
+        return await requestCatalogAdmin(
+          `/admin/departments/${encodeURIComponent(deptId)}/aliases?${params.toString()}`,
+          'DELETE',
+          undefined,
+          '학과 별칭 삭제에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote removeDepartmentAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_DEPARTMENTS,
+      fallbackList: INITIAL_DEPARTMENTS,
+      id: deptId,
+      entityLabel: '학과',
+      op: 'remove',
+      alias: cleanAlias
+    });
+  },
+
+  async createCollege(collegePayload) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          '/admin/colleges',
+          'POST',
+          collegePayload,
+          '단과대학 생성에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote createCollege fallback:', e);
+      }
+    }
+
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+    const cleanName = (collegePayload.name || '').trim();
+    const collision = resolveCollegeEntry(colleges, cleanName);
+    if (collision) {
+      throw new Error(`이미 '${collision.name}' 단과대학으로 등록된 명칭/별칭입니다.`);
+    }
+    const created = {
+      id: `col-${Date.now()}`,
+      name: cleanName,
+      codeDigit: collegePayload.codeDigit ? Number(collegePayload.codeDigit) : null,
+      aliases: Array.isArray(collegePayload.aliases) ? collegePayload.aliases.filter(Boolean) : []
+    };
+    colleges.push(created);
+    safeSetStorage(STORAGE_KEY_COLLEGES, colleges);
+    return created;
+  },
+
+  async updateCollege(collegeId, payload) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/colleges/${encodeURIComponent(collegeId)}`,
+          'PUT',
+          payload,
+          '단과대학 정보 수정에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote updateCollege fallback:', e);
+      }
+    }
+
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+    const idx = colleges.findIndex((c) => String(c.id) === String(collegeId));
+    if (idx < 0) throw new Error('존재하지 않는 단과대학입니다.');
+    const cur = colleges[idx];
+    const nextName = payload.name?.trim() || cur.name;
+    const collision = resolveCollegeEntry(colleges, nextName);
+    if (collision && String(collision.id) !== String(collegeId)) {
+      throw new Error(`이미 '${collision.name}'에서 사용 중인 단과대학명/별칭입니다: ${nextName}`);
+    }
+    let nextAliases = Array.isArray(payload.aliases)
+      ? Array.from(new Set(payload.aliases.map((a) => String(a || '').trim()).filter(Boolean)))
+      : [...(cur.aliases || [])];
+    if (nextName !== cur.name && payload.keepOldNameAsAlias !== false && !nextAliases.includes(cur.name)) {
+      nextAliases.push(cur.name);
+    }
+    nextAliases = nextAliases.filter((a) => a.toLowerCase() !== nextName.toLowerCase());
+    const updated = {
+      ...cur,
+      name: nextName,
+      codeDigit: payload.codeDigit !== undefined ? payload.codeDigit : cur.codeDigit,
+      aliases: nextAliases
+    };
+    colleges[idx] = updated;
+    safeSetStorage(STORAGE_KEY_COLLEGES, colleges);
+    if (nextName !== cur.name) {
+      const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
+      safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts.map((d) => (d.college === cur.name ? { ...d, college: nextName } : d)));
+      const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+      safeSetStorage(
+        STORAGE_KEY_COURSES,
+        courses.map((c) => ({
+          ...c,
+          college: c.college === cur.name ? nextName : c.college,
+          department: c.department === `${cur.name} 전체` ? `${nextName} 전체` : c.department
+        }))
+      );
+    }
+    return updated;
+  },
+
+  async addCollegeAlias(collegeId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('등록할 기존 단과대학명(별칭)을 입력해주세요.');
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/colleges/${encodeURIComponent(collegeId)}/aliases`,
+          'POST',
+          { alias: cleanAlias },
+          '단과대학 별칭 추가에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote addCollegeAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_COLLEGES,
+      fallbackList: INITIAL_COLLEGES,
+      id: collegeId,
+      entityLabel: '단과대학',
+      op: 'add',
+      alias: cleanAlias
+    });
+  },
+
+  async renameCollegeAlias(collegeId, oldAlias, newAlias) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/colleges/${encodeURIComponent(collegeId)}/aliases`,
+          'PUT',
+          { oldAlias, newAlias },
+          '단과대학 별칭 변경에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote renameCollegeAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_COLLEGES,
+      fallbackList: INITIAL_COLLEGES,
+      id: collegeId,
+      entityLabel: '단과대학',
+      op: 'rename',
+      alias: oldAlias,
+      newAlias
+    });
+  },
+
+  async removeCollegeAlias(collegeId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('삭제할 별칭을 지정해주세요.');
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const params = new URLSearchParams({ alias: cleanAlias });
+        return await requestCatalogAdmin(
+          `/admin/colleges/${encodeURIComponent(collegeId)}/aliases?${params.toString()}`,
+          'DELETE',
+          undefined,
+          '단과대학 별칭 삭제에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote removeCollegeAlias fallback:', e);
+      }
+    }
+    return mutateLocalCatalogAliases({
+      storageKey: STORAGE_KEY_COLLEGES,
+      fallbackList: INITIAL_COLLEGES,
+      id: collegeId,
+      entityLabel: '단과대학',
+      op: 'remove',
+      alias: cleanAlias
+    });
   },
 
   async createCourse(coursePayload) {
@@ -1050,15 +1503,20 @@ export const api = {
     }
 
     const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
     const scopeType = (coursePayload.scopeType || 'DEPARTMENT').toUpperCase();
+    const matchedCourseDept = resolveDepartmentEntry(depts, coursePayload.department);
+    const rawCollege = coursePayload.college || matchedCourseDept?.college || '';
+    const matchedCollegeObj = resolveCollegeEntry(colleges, rawCollege);
     const resolvedCollege = scopeType === 'ALL'
       ? '전체'
-      : (coursePayload.college || '');
+      : (matchedCollegeObj?.name || rawCollege);
     const resolvedDepartment = scopeType === 'ALL'
       ? '전체'
       : scopeType === 'COLLEGE'
         ? (resolvedCollege ? `${resolvedCollege} 전체` : '단과대 전체')
-        : (coursePayload.department || '소프트웨어학과');
+        : (matchedCourseDept?.name || coursePayload.department || '소프트웨어학부');
     const newCourse = {
       id: `course-${Date.now()}`,
       code: coursePayload.code.trim().toUpperCase(),

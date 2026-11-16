@@ -1,6 +1,8 @@
 // src/components/common/CoursePicker.jsx
 import React, { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { getCollegeSearchNames, getDepartmentSearchNames } from '../../services/api';
 import { formatCourseProfessorsSummary } from '../../utils/professorDisplay';
 import ProfessorNameList from './ProfessorNameList';
 
@@ -12,12 +14,17 @@ const CoursePicker = ({
   courses = [],
   selectedIds = [],
   onChange,
+  departments: propDepartments = null,
+  colleges: propColleges = null,
   label = '과목 선택',
   required = true,
   searchPlaceholder = '과목명, 학수번호, 학과·단과대 검색...',
   emptyText = '검색 결과가 없습니다.',
   helperText = ''
 }) => {
+  const auth = useAuth();
+  const departments = propDepartments ?? auth?.departments ?? [];
+  const colleges = propColleges ?? auth?.colleges ?? [];
   const [searchQuery, setSearchQuery] = useState('');
 
   const uniqueCourses = useMemo(() => {
@@ -37,17 +44,25 @@ const CoursePicker = ({
       const n = (c.name || '').toLowerCase();
       const code = (c.code || '').toLowerCase();
       const dept = (c.department || '').toLowerCase();
+      const deptAliases = getDepartmentSearchNames(departments, c.department).some((alias) =>
+        alias.toLowerCase().includes(kw)
+      );
       const college = (c.college || '').toLowerCase();
+      const collegeAliases = getCollegeSearchNames(colleges, c.college).some((alias) =>
+        alias.toLowerCase().includes(kw)
+      );
       const prof = (c.profName || c.assignedProfessorName || '').toLowerCase();
       return (
         n.includes(kw) ||
         code.includes(kw) ||
         dept.includes(kw) ||
+        deptAliases ||
         college.includes(kw) ||
+        collegeAliases ||
         prof.includes(kw)
       );
     });
-  }, [uniqueCourses, searchQuery]);
+  }, [uniqueCourses, searchQuery, departments, colleges]);
 
   const handleToggle = (courseId) => {
     const next = selectedIds.includes(courseId)

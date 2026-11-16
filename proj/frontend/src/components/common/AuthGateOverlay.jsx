@@ -400,11 +400,17 @@ const AuthGateOverlay = () => {
                   onChange={(e) => setDepartment(e.target.value)}
                   required
                 >
-                  {departments.map((dept) => (
-                    <option key={dept.id || dept.name} value={dept.name}>
-                      {dept.name}
-                    </option>
-                  ))}
+                  {departments.map((dept) => {
+                    const aliasList = Array.isArray(dept.aliases) ? dept.aliases.filter(Boolean) : [];
+                    const optionLabel = aliasList.length > 0
+                      ? `${dept.name} (기존: ${aliasList.join(', ')})`
+                      : dept.name;
+                    return (
+                      <option key={dept.id || dept.name} value={dept.name}>
+                        {optionLabel}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 

@@ -502,7 +502,7 @@ class R3OverhaulTest {
                     password = "password1234",
                     name = "박대소문자아이디",
                     department = "컴퓨터공학과",
-                    identifier = "2026102001"
+                    identifier = "2026102099"
                 )
             )
         }
@@ -604,7 +604,7 @@ class R3OverhaulTest {
             )
         }.also { assertEquals(HttpStatusCode.Created, it.status) }
             .body<ApiResponse<CourseDto>>().data!!
-        assertEquals("소프트웨어학과", deptCourse.department)
+        assertEquals("소프트웨어학부", deptCourse.department)
         assertEquals("인공지능융합대학", deptCourse.college)
         assertTrue(deptCourse.professors.isEmpty())
 
@@ -1769,5 +1769,362 @@ class R3OverhaulTest {
         }.also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<UserDto>>().data!!
         assertNull(clearRes.nickname)
+    }
+
+    @Test
+    fun testDepartmentAliasResolutionAndAdminManagement() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+        val suffix = (10000..99999).random()
+
+        // 1. Default seeded canonical department & alias (소프트웨어학과 -> 소프트웨어학부, 101)
+        val depts = client.get("/api/departments")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<DepartmentDto>>>().data!!
+        val swDept = depts.firstOrNull { it.name == "소프트웨어학부" }
+        assertNotNull(swDept, "Canonical 소프트웨어학부 should exist")
+        assertEquals("101", swDept.code)
+        assertTrue("소프트웨어학과" in swDept.aliases, "소프트웨어학과 should be registered as an alias of 소프트웨어학부")
+        assertFalse(depts.any { it.name == "소프트웨어학과" }, "Legacy alias should not duplicate canonical departments list")
+
+        val csDept = depts.firstOrNull { it.name == "컴퓨터정보공학부" }
+        assertNotNull(csDept)
+        assertEquals("102", csDept.code)
+        assertTrue("컴퓨터공학과" in csDept.aliases)
+
+        // 2. Preview next-student-id with legacy alias resolves canonical deptCode 101
+        val legacyPreview = client.get(
+            "/api/auth/next-student-id?year=2035&department=${java.net.URLEncoder.encode("소프트웨어학과", "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertEquals("101", legacyPreview.departmentCode)
+        assertTrue(legacyPreview.studentId.startsWith("2035101"))
+
+        // 3. Registering a student with legacy alias normalizes to canonical department & enrolls in canonical courses
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "",
+                    password = "stupass1234",
+                    name = "개편전학생",
+                    department = "소프트웨어학과",
+                    entryYear = 2035,
+                    identifier = "AUTO"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        assertEquals("소프트웨어학부", stuAuth.user.department)
+        assertTrue(stuAuth.user.identifier.startsWith("2035101"))
+        assertTrue(
+            stuAuth.user.courses.any { it.department == "소프트웨어학부" },
+            "Default course enrollment should match canonical 소프트웨어학부 courses via alias"
+        )
+
+        // 4. Course search & filter with legacy alias returns canonical department courses
+        val filteredCourses = client.get(
+            "/api/courses?department=${java.net.URLEncoder.encode("소프트웨어학과", "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(filteredCourses.courses.any { it.department == "소프트웨어학부" })
+
+        val queriedCourses = client.get(
+            "/api/courses?query=${java.net.URLEncoder.encode("소프트웨어학과", "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(queriedCourses.courses.any { it.department == "소프트웨어학부" })
+
+        // 5. Admin alias creation, duplicate/collision blocking, and deletion
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "alias_admin_$suffix",
+                    password = "adminpass1234",
+                    name = "별칭관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        assertEquals("소프트웨어학부", adminAuth.user.department)
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("alias_admin_$suffix", true)
+
+        // Cannot create standalone department reusing an existing alias
+        val dupAliasDeptRes = client.post("/api/admin/departments") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateDepartmentRequest(name = "소프트웨어학과", college = "인공지능융합대학"))
+        }
+        assertEquals(HttpStatusCode.BadRequest, dupAliasDeptRes.status)
+
+        // Create department with initial alias, add another alias, query & preview by custom alias, then remove it
+        val newDeptName = "차세대반도체학부_$suffix"
+        val initAlias = "옛반도체학과_$suffix"
+        val addedAlias = "초기집적회로전공_$suffix"
+        val createdDept = client.post("/api/admin/departments") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateDepartmentRequest(
+                    name = newDeptName,
+                    college = "전자정보공과대학",
+                    aliases = listOf(initAlias)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertEquals(listOf(initAlias), createdDept.aliases)
+
+        client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "신규반도체개론_$suffix",
+                    code = "SEMI-$suffix",
+                    scopeType = "DEPARTMENT",
+                    department = initAlias
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!.also { createdCourse ->
+                assertEquals(newDeptName, createdCourse.department)
+            }
+
+        val afterAdd = client.post("/api/admin/departments/${createdDept.id}/aliases") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(DepartmentAliasRequest(alias = addedAlias))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertTrue(initAlias in afterAdd.aliases && addedAlias in afterAdd.aliases)
+
+        // Collision on another department's alias/name rejected
+        val crossCollisionRes = client.post("/api/admin/departments/${swDept.id}/aliases") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(DepartmentAliasRequest(alias = addedAlias))
+        }
+        assertEquals(HttpStatusCode.BadRequest, crossCollisionRes.status)
+
+        // Query by custom added alias whose string shares nothing with canonical dept name
+        val customAliasCourses = client.get(
+            "/api/courses?query=${java.net.URLEncoder.encode(addedAlias, "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(customAliasCourses.courses.any { it.department == newDeptName })
+
+        val customAliasPreview = client.get(
+            "/api/auth/next-student-id?year=2035&department=${java.net.URLEncoder.encode(addedAlias, "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<NextStudentIdResponse>>().data!!
+        assertEquals(createdDept.code, customAliasPreview.departmentCode)
+
+        // Remove alias
+        val afterRemove = client.delete(
+            "/api/admin/departments/${createdDept.id}/aliases?alias=${java.net.URLEncoder.encode(addedAlias, "UTF-8")}"
+        ) {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertFalse(addedAlias in afterRemove.aliases)
+    }
+
+    @Test
+    fun testDynamicCollegeAndDepartmentEditAndAliases() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+        val suffix = (10000..99999).random()
+
+        // 1. Default seeded college alias: 소프트웨어융합대학 -> 인공지능융합대학 (codeDigit 1)
+        val colleges = client.get("/api/colleges")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<List<CollegeDto>>>().data!!
+        val aiCollege = colleges.firstOrNull { it.name == "인공지능융합대학" }
+        assertNotNull(aiCollege)
+        assertEquals(1, aiCollege.codeDigit)
+        assertTrue("소프트웨어융합대학" in aiCollege.aliases)
+
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "college_alias_admin_$suffix",
+                    password = "adminpass1234",
+                    name = "단과대관리자",
+                    department = "소프트웨어학부"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("college_alias_admin_$suffix", true)
+
+        // Course query & department creation via legacy college alias
+        val legacyCollegeCourses = client.get(
+            "/api/courses?college=${java.net.URLEncoder.encode("소프트웨어융합대학", "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(legacyCollegeCourses.courses.any { it.college == "인공지능융합대학" })
+
+        val legacyCollegeScopeCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "소융대기초세미나_$suffix",
+                    code = "COL-$suffix",
+                    scopeType = "COLLEGE",
+                    college = "소프트웨어융합대학"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+        assertEquals("인공지능융합대학", legacyCollegeScopeCourse.college)
+        assertEquals("인공지능융합대학 전체", legacyCollegeScopeCourse.department)
+
+        // 2. Dynamic College creation, alias add/rename/delete, & canonical college rename with cascade + alias preservation
+        val oldColName = "미래모빌리티단과대_$suffix"
+        val newColName = "첨단모빌리티대학_$suffix"
+        val colAlias1 = "차량융합대학_$suffix"
+        val colAlias2 = "자율주행단과대_$suffix"
+
+        val createdCol = client.post("/api/admin/colleges") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCollegeRequest(name = oldColName, codeDigit = 9, aliases = listOf(colAlias1)))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CollegeDto>>().data!!
+        assertEquals(listOf(colAlias1), createdCol.aliases)
+
+        val deptInNewCol = client.post("/api/admin/departments") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateDepartmentRequest(name = "모빌리티전공_$suffix", college = colAlias1))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertEquals(oldColName, deptInNewCol.college)
+        assertTrue(deptInNewCol.code.startsWith("9"))
+
+        client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCourseRequest(name = "모빌리티개론_$suffix", code = "MOB-$suffix", scopeType = "DEPARTMENT", department = deptInNewCol.name))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val renamedCol = client.put("/api/admin/colleges/${createdCol.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateCollegeRequest(name = newColName, keepOldNameAsAlias = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CollegeDto>>().data!!
+        assertEquals(newColName, renamedCol.name)
+        assertTrue(oldColName in renamedCol.aliases && colAlias1 in renamedCol.aliases)
+
+        // Cascaded update to department & courses + alias rename + delete
+        val updatedDepts = client.get("/api/departments").body<ApiResponse<List<DepartmentDto>>>().data!!
+        assertEquals(newColName, updatedDepts.first { it.id == deptInNewCol.id }.college)
+
+        val afterRenameColAlias = client.put("/api/admin/colleges/${createdCol.id}/aliases") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(RenameAliasRequest(oldAlias = colAlias1, newAlias = colAlias2))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CollegeDto>>().data!!
+        assertTrue(colAlias2 in afterRenameColAlias.aliases && colAlias1 !in afterRenameColAlias.aliases)
+
+        val queriedByRenamedColAlias = client.get(
+            "/api/courses?query=${java.net.URLEncoder.encode(colAlias2, "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(queriedByRenamedColAlias.courses.any { it.college == newColName })
+
+        val afterRemoveColAlias = client.delete(
+            "/api/admin/colleges/${createdCol.id}/aliases?alias=${java.net.URLEncoder.encode(colAlias2, "UTF-8")}"
+        ) {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CollegeDto>>().data!!
+        assertFalse(colAlias2 in afterRemoveColAlias.aliases)
+
+        // 3. Dynamic Department edit (rename + keep old name as alias + user displayTag cascade + rename alias)
+        val oldDeptName = deptInNewCol.name
+        val deptProfAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "dept_rename_prof_$suffix",
+                    password = "profpass1234",
+                    name = "이차량",
+                    department = oldDeptName
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val newDeptName = "미래차융합학부_$suffix"
+        val editedDept = client.put("/api/admin/departments/${deptInNewCol.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateDepartmentRequest(name = newDeptName, keepOldNameAsAlias = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertEquals(newDeptName, editedDept.name)
+        assertTrue(oldDeptName in editedDept.aliases)
+
+        val updatedProfMe = client.get("/api/auth/me") {
+            header(HttpHeaders.Authorization, "Bearer ${deptProfAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<UserDto>>().data!!
+        assertEquals(newDeptName, updatedProfMe.department)
+        assertTrue(updatedProfMe.displayTag.startsWith(newDeptName), "Expected displayTag updated to $newDeptName: ${updatedProfMe.displayTag}")
+
+        // 4. Guardrails: reserved scope names & duplicate college codeDigit rejected (400)
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/admin/colleges") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(CreateCollegeRequest(name = "전체", codeDigit = 9))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/admin/colleges") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(CreateCollegeRequest(name = "중복코드단과대_$suffix", codeDigit = 1))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.post("/api/admin/departments") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(CreateDepartmentRequest(name = "공과대학 전체", college = "공과대학"))
+            }.status
+        )
+
+        val renamedDeptAlias = "구형자동차과_$suffix"
+        val afterRenameDeptAlias = client.put("/api/admin/departments/${deptInNewCol.id}/aliases") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(RenameAliasRequest(oldAlias = oldDeptName, newAlias = renamedDeptAlias))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<DepartmentDto>>().data!!
+        assertTrue(renamedDeptAlias in afterRenameDeptAlias.aliases && oldDeptName !in afterRenameDeptAlias.aliases)
+
+        val coursesAfterDeptRename = client.get(
+            "/api/courses?query=${java.net.URLEncoder.encode(renamedDeptAlias, "UTF-8")}"
+        ).also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseListResponse>>().data!!
+        assertTrue(coursesAfterDeptRename.courses.any { it.department == newDeptName })
     }
 }
