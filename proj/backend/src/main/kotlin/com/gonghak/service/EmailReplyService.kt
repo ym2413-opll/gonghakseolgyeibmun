@@ -353,9 +353,9 @@ class EmailReplyService(
         var dkim = mergeVerdict(null, request.dkimResult)
         var dmarc = mergeVerdict(null, request.dmarcResult)
 
-        val rawAuth = request.authenticationResults?.lowercase().orEmpty()
+        val rawAuth = stripQuotedAndCommentedAuthHeader(request.authenticationResults.orEmpty()).lowercase()
         if (rawAuth.isNotBlank()) {
-            Regex("\\b(spf|dkim|dmarc)=([a-z]+)").findAll(rawAuth).forEach { m ->
+            Regex("(?:^|[;\\s])(spf|dkim|dmarc)=([a-z]+)").findAll(rawAuth).forEach { m ->
                 val mechanism = m.groupValues[1]
                 val verdict = m.groupValues[2]
                 when (mechanism) {
@@ -412,9 +412,49 @@ class EmailReplyService(
         private val wrappedAttributionEndRegex = Regex("(?:님이\\s*작성|wrote)\\s*:?\\s*$", RegexOption.IGNORE_CASE)
         private val attributionLeadRegex = Regex("^(?:On\\s+.+|\\d{4}년\\s*\\d{1,2}월|\\d{4}[-./]\\d{1,2}[-./]\\d{1,2})")
 
+        private fun stripQuotedStrings(input: String): String {
+            val sb = StringBuilder(input.length)
+            var inQuotes = false
+            var escaped = false
+            for (ch in input) {
+                if (escaped) {
+                    escaped = false
+                    if (!inQuotes) sb.append(ch)
+                    continue
+                }
+                if (ch == '\\') {
+                    escaped = true
+                    continue
+                }
+                if (ch == '"') {
+                    inQuotes = !inQuotes
+                    sb.append(' ')
+                    continue
+                }
+                if (!inQuotes) {
+                    sb.append(ch)
+                }
+            }
+            return sb.toString()
+        }
+
+        private fun stripQuotedAndCommentedAuthHeader(raw: String): String {
+            val noQuotes = stripQuotedStrings(raw)
+            val sb = StringBuilder(noQuotes.length)
+            var commentDepth = 0
+            for (ch in noQuotes) {
+                when (ch) {
+                    '(' -> commentDepth++
+                    ')' -> if (commentDepth > 0) commentDepth--
+                    else -> if (commentDepth == 0) sb.append(ch)
+                }
+            }
+            return sb.toString()
+        }
+
         internal fun extractBareEmails(raw: String?): List<String> {
             if (raw.isNullOrBlank()) return emptyList()
-            val withoutQuotedDisplayNames = raw.replace(Regex("\"(?:\\\\.|[^\"])*\""), " ")
+            val withoutQuotedDisplayNames = stripQuotedStrings(raw)
             return withoutQuotedDisplayNames
                 .split(",")
                 .mapNotNull { segment ->
@@ -481,26 +521,25 @@ class EmailReplyService(
         }
 
         private fun stripTagBlock(input: String, tagName: String): String {
-            val lower = input.lowercase()
             val openPrefix = "<$tagName"
             val closeTag = "</$tagName>"
             val sb = StringBuilder(input.length)
             var cursor = 0
             while (cursor < input.length) {
-                val start = lower.indexOf(openPrefix, cursor)
+                val start = input.indexOf(openPrefix, cursor, ignoreCase = true)
                 if (start < 0) {
                     sb.append(input, cursor, input.length)
                     break
                 }
                 val afterPrefix = start + openPrefix.length
-                val nextCh = if (afterPrefix < lower.length) lower[afterPrefix] else ' '
+                val nextCh = if (afterPrefix < input.length) input[afterPrefix] else ' '
                 if (nextCh != '>' && !nextCh.isWhitespace() && nextCh != '/') {
                     sb.append(input, cursor, afterPrefix)
                     cursor = afterPrefix
                     continue
                 }
                 sb.append(input, cursor, start)
-                val endIdx = lower.indexOf(closeTag, afterPrefix)
+                val endIdx = input.indexOf(closeTag, afterPrefix, ignoreCase = true)
                 if (endIdx < 0) {
                     break
                 }
@@ -523,6 +562,7 @@ class EmailReplyService(
                 .replace("&amp;", "&")
                 .replace("&quot;", "\"")
                 .replace("&#39;", "'")
+                .replace(Regex("<[^>]+>"), "")
         }
     }
 }

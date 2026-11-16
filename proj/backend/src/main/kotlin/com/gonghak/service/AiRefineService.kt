@@ -38,8 +38,9 @@ class AiRefineService(
         )
 
         private val EMAIL_REGEX = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
-        private val PHONE_REGEX = Regex("(?<!\\d)01[016789][-\\s.]?\\d{3,4}[-\\s.]?\\d{4}(?!\\d)")
-        private val STUDENT_ID_REGEX = Regex("(?<!\\d)20\\d{6,8}(?!\\d)")
+        private val PHONE_REGEX = Regex("(?<!\\d)(?:\\+?82[-\\s.]?0?1[016789]|01[016789])[-\\s.]?\\d{3,4}[-\\s.]?\\d{4}(?!\\d)")
+        private val STUDENT_ID_REGEX = Regex("(?<!\\d)(?:19|20)\\d{6,8}(?!\\d)")
+        private val ENTRY_YEAR_BATCH_REGEX = Regex("(?<!\\d)\\d{2}\\s*학번")
 
         private val VALID_PLACEHOLDER_EXACT_REGEX = Regex(
             """\{\{(?:PROFESSOR_TITLE|STUDENT_INTRO|STUDENT_NAME|STUDENT_ID|STUDENT_DEPT|PII_(?:EMAIL|PHONE|SID)_\d+)\}\}"""
@@ -47,7 +48,7 @@ class AiRefineService(
 
         private val LINE_START_BRACKET_HEADER_REGEX = Regex("""(?m)^([ \t]*)\[([^\[\]\r\n]+)\]""")
         private val DIRECTIVE_BRACKET_REGEX = Regex(
-            """\[([^\[\]\r\n]*(?:필수\s*요구사항|강의\s*및\s*플레이스홀더|학생\s*작성|원문\s*카테고리|보안\s*및\s*격리|시스템|지시|요구사항|보안\s*규칙|PROFESSOR_TITLE|PROFESSOR_NAME|PROFESSOR_GREETING|STUDENT_INTRO|STUDENT_INFO|STUDENT_NAME|STUDENT_ID|STUDENT_IDENTIFIER|STUDENT_DEPT|STUDENT_DEPARTMENT|COURSE_NAME|PII_|교수님\s*성함|교수님\s*호칭|교수\s*이름|학생\s*자기소개|학생\s*소개|학생\s*정보|학생\s*이름|학번|학과)[^\[\]\r\n]*)\]""",
+            """\[([^\[\]\r\n]{0,160}(?:필수\s*요구사항|강의\s*및\s*플레이스홀더|학생\s*작성|원문\s*카테고리|보안\s*및\s*격리|시스템|지시|요구사항|보안\s*규칙|PROFESSOR_TITLE|PROFESSOR_NAME|PROFESSOR_GREETING|STUDENT_INTRO|STUDENT_INFO|STUDENT_NAME|STUDENT_ID|STUDENT_IDENTIFIER|STUDENT_DEPT|STUDENT_DEPARTMENT|COURSE_NAME|PII_|교수님\s*성함|교수님\s*호칭|교수\s*이름|학생\s*자기소개|학생\s*소개|학생\s*정보|학생\s*이름|학번|학과)[^\[\]\r\n]{0,160})\]""",
             RegexOption.IGNORE_CASE
         )
         private val ROLE_SPOOF_PREFIX_REGEX = Regex(
@@ -612,8 +613,22 @@ class AiRefineService(
         var result = stripZeroWidthAndControl(text)
 
         val cleanName = studentName?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
-        val cleanDeptVariants = (listOfNotNull(studentDepartment) + studentDepartmentAliases)
+        val baseDepts = (listOfNotNull(studentDepartment) + studentDepartmentAliases)
             .mapNotNull { stripZeroWidthAndControl(it).trim().takeIf { d -> d.length >= 2 } }
+        val cleanDeptVariants = baseDepts
+            .flatMap { d ->
+                when {
+                    d.endsWith("학부") && d.length > 2 -> {
+                        val stem = d.removeSuffix("학부")
+                        listOf(d, "${stem}학과", "${stem}전공")
+                    }
+                    d.endsWith("학과") && d.length > 2 -> {
+                        val stem = d.removeSuffix("학과")
+                        listOf(d, "${stem}학부", "${stem}전공")
+                    }
+                    else -> listOf(d)
+                }
+            }
             .distinct()
             .sortedByDescending { it.length }
         val cleanId = studentIdentifier?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
@@ -658,23 +673,24 @@ class AiRefineService(
         }.distinct().sortedByDescending { it.length }
 
         compoundIntros.forEach { phrase ->
-            result = result.replace(phrase, "학생")
+            result = result.replace(phrase, "학생", ignoreCase = true)
         }
 
         if (cleanEmail != null) {
-            result = result.replace(cleanEmail, "")
+            result = result.replace(cleanEmail, "", ignoreCase = true)
         }
         result = EMAIL_REGEX.replace(result, "")
         result = PHONE_REGEX.replace(result, "")
 
         if (cleanId != null) {
-            result = result.replace(cleanId, "")
+            result = result.replace(cleanId, "", ignoreCase = true)
         }
         result = STUDENT_ID_REGEX.replace(result, "")
+        result = ENTRY_YEAR_BATCH_REGEX.replace(result, "학생")
 
-        if (cleanName != null && cleanName !in profTokens) {
-            // Never strip professor greetings even if student and professor share a name
-            result = Regex("""${Regex.escape(cleanName)}(?!\s*교수)""").replace(result, "학생")
+        if (cleanName != null) {
+            // 동명이인 교수가 있더라도 'OOO 교수(님)' 호칭은 보존하고 학생 본인 성명만 마스킹
+            result = Regex("""${Regex.escape(cleanName)}(?!\s*(?:교수|님))""", RegexOption.IGNORE_CASE).replace(result, "학생")
         }
 
         // Collapse spaces created by removed IDs/contacts BEFORE stripping "<dept> 학생/수강생/입니다"
@@ -687,8 +703,8 @@ class AiRefineService(
         cleanDeptVariants.forEach { dept ->
             if (dept !in profTokens) {
                 val escapedDept = Regex.escape(dept)
-                result = Regex("""$escapedDept\s*(?:소속\s*)?(?:학생|수강생)""").replace(result, "학생")
-                result = Regex("""$escapedDept(?=\s*(?:입니다|학생|수강생))""").replace(result, "학생")
+                result = Regex("""$escapedDept\s*(?:\d\s*학년\s*)?(?:소속\s*)?(?:재학생|학생|수강생)""").replace(result, "학생")
+                result = Regex("""$escapedDept(?=\s*(?:입니다|인데|에서|소속|재학생|학생|수강생|\d\s*학년))""").replace(result, "학생")
             }
         }
 

@@ -109,7 +109,7 @@ const ProfessorDashboard = ({
         return (
           (q.title || '').toLowerCase().includes(kw) ||
           (q.content || q.refinedContent || '').toLowerCase().includes(kw) ||
-          (q.studentTag || '').toLowerCase().includes(kw)
+          (!q.isAnonymous && (q.studentTag || '').toLowerCase().includes(kw))
         );
       }
       return true;

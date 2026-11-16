@@ -5,6 +5,7 @@ import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import AnswerForm from '../professor/AnswerForm';
+import MarkdownContent from '../common/MarkdownContent';
 import AiRefineModal from './AiRefineModal';
 import {
   ArrowLeft,
@@ -343,7 +344,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
             {/* 본문 영역 */}
             <div className="detail-content-body">
-              <p className="detail-text">{question.content}</p>
+              <MarkdownContent content={question.content || ''} className="detail-text" />
 
               {/* ========================================================
                   [요구사항 준수]
@@ -363,7 +364,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
                   {showOriginal && (
                     <div className="original-diff-content">
-                      <p className="diff-text">{question.originalContent}</p>
+                      <MarkdownContent content={question.originalContent || ''} className="diff-text" />
                     </div>
                   )}
                 </div>
@@ -472,7 +473,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                       {safeFormatDate(ans.createdAt)}
                     </span>
                   </div>
-                  <div className="answer-card-content">{ans.content}</div>
+                  <MarkdownContent content={ans.content || ''} className="answer-card-content" />
                 </div>
               ))
             )}

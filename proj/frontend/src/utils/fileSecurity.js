@@ -193,18 +193,35 @@ export async function validateSecurity(file) {
 function hasControlChars(str) {
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i);
-    if (code <= 0x1f || code === 0x7f) return true;
+    if (
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      code === 0x00ad ||
+      code === 0x034f ||
+      (code >= 0x200b && code <= 0x200f) ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2060 && code <= 0x206f) ||
+      code === 0xfeff
+    ) {
+      return true;
+    }
   }
   return false;
 }
+
+const SAFE_ATTACHMENT_PATH_REGEX = /^\/api\/attachments\/[A-Za-z0-9_-]{1,64}(?:\/download)?$/;
 
 export function isSafeAttachmentUrl(url) {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed || hasControlChars(trimmed)) return false;
-
-  if (trimmed.startsWith('/api/')) {
-    return !trimmed.startsWith('//');
+  if (
+    trimmed.startsWith('//') ||
+    trimmed.includes('..') ||
+    trimmed.includes('\\') ||
+    /%2e|%2f|%5c/i.test(trimmed)
+  ) {
+    return false;
   }
 
   if (/^blob:/i.test(trimmed)) {
@@ -212,17 +229,27 @@ export function isSafeAttachmentUrl(url) {
     return trimmed.toLowerCase().startsWith(`blob:${window.location.origin.toLowerCase()}/`);
   }
 
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    try {
-      const parsed = new URL(trimmed, window.location.origin);
-      const isHttpProto = parsed.protocol === 'https:' || parsed.protocol === 'http:';
-      return isHttpProto && parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
-    } catch {
+  try {
+    const base =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost';
+    if (!trimmed.startsWith('/') && !/^https?:/i.test(trimmed)) {
       return false;
     }
+    const parsed = new URL(trimmed, base);
+    const isHttpProto = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    if (!isHttpProto || parsed.origin !== base || parsed.username !== '' || parsed.password !== '') {
+      return false;
+    }
+    const decodedPath = decodeURIComponent(parsed.pathname);
+    if (hasControlChars(decodedPath) || decodedPath.includes('..') || decodedPath.includes('\\')) {
+      return false;
+    }
+    return SAFE_ATTACHMENT_PATH_REGEX.test(parsed.pathname);
+  } catch {
+    return false;
   }
-
-  return false;
 }
 
 /**

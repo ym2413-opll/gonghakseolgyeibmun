@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import { generateSummaryTitle } from '../../utils/textSummary';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
+import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import ProfessorNameList from '../common/ProfessorNameList';
 import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
@@ -44,6 +45,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   // 파일 첨부 관련 상태
   const [attachments, setAttachments] = useState([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
 
   // 모달 및 제출 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -169,6 +171,13 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         ? refinedTitle.trim()
         : generateSummaryTitle(finalContent);
       const summaryTitle = effectiveAnonymous ? scrubForAnonymous(rawSummaryTitle) : rawSummaryTitle;
+      const safeAttachments = effectiveAnonymous
+        ? attachments.map((a) => ({
+            ...a,
+            originalName: a.originalName ? scrubForAnonymous(a.originalName) : a.originalName,
+            fileName: a.fileName ? scrubForAnonymous(a.fileName) : a.fileName
+          }))
+        : attachments;
 
       const payload = {
         courseId: currentCourse.id,
@@ -182,13 +191,13 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         originalContent: finalOriginal,
         hasAiRefined,
         studentId: currentUser.id,
-        studentName: currentUser.name,
-        studentTag: currentUser.displayTag,
-        department: currentUser.department,
+        studentName: effectiveAnonymous ? '익명 수강생' : currentUser.name,
+        studentTag: effectiveAnonymous ? `${currentCourse.name || '과목'} 수강생` : currentUser.displayTag,
+        department: effectiveAnonymous ? '' : currentUser.department,
         isAnonymous: effectiveAnonymous,
         // 첨부파일 목록 및 ID 연동
-        attachmentIds: attachments.map((a) => a.id),
-        attachments: attachments
+        attachmentIds: safeAttachments.map((a) => a.id),
+        attachments: safeAttachments
       };
 
       const created = await api.createQuestion(payload);
@@ -323,6 +332,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               </div>
 
               <div className="content-toolbar-actions">
+                <MarkdownModeTabs isPreview={isPreviewMode} onTogglePreview={setIsPreviewMode} />
                 <HelpBubble
                   tier="ALL"
                   mode="floating"
@@ -360,18 +370,49 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               </div>
             </div>
 
-            <textarea
-              ref={contentTextareaRef}
-              id="q-content"
-              rows={8}
-              className={`textarea-content ${hasAiRefined ? 'has-refined-border' : ''}`}
-              placeholder="질문 내용을 입력하세요."
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value);
-                if (hasAiRefined) setHasAiRefined(false);
-              }}
-            />
+            {isPreviewMode ? (
+              <div className="md-preview-box">
+                {content.trim() ? (
+                  <MarkdownContent
+                    content={
+                      isAnonymous && selectedCategory !== 'grade'
+                        ? scrubForAnonymous(content)
+                        : content
+                    }
+                    currentSeq={1}
+                    imagesBySeq={
+                      new Map([
+                        [
+                          1,
+                          attachments.filter(
+                            (a) =>
+                              a &&
+                              (a.isImage ||
+                                (a.mimeType && a.mimeType.startsWith('image/')) ||
+                                /\.(png|jpe?g|gif|webp)$/i.test(a.originalName || a.fileName || ''))
+                          )
+                        ]
+                      ])
+                    }
+                  />
+                ) : (
+                  <span className="md-preview-empty">미리볼 내용이 없습니다.</span>
+                )}
+              </div>
+            ) : (
+              <textarea
+                ref={contentTextareaRef}
+                id="q-content"
+                rows={8}
+                className={`textarea-content ${hasAiRefined ? 'has-refined-border' : ''}`}
+                placeholder="질문 내용을 입력하세요."
+                value={content}
+                onChange={(e) => {
+                  setContent(e.target.value);
+                  if (hasAiRefined) setHasAiRefined(false);
+                }}
+              />
+            )}
 
             {hasAiRefined && (
               <div className="refined-status-hint">

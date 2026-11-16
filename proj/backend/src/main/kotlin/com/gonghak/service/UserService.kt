@@ -215,11 +215,26 @@ class UserService {
             val shortDept = cleanDept.replace("학과", "").replace("학부", "").replace("전공", "").take(4)
             val displayTag = "${yearPrefix}_${shortDept}_${cleanName}"
 
+            val rawStudentEmail = request.email?.trim().orEmpty()
+            val cleanStudentEmail = if (rawStudentEmail.isNotBlank()) PasswordSecurity.validateEmail(rawStudentEmail) else null
+            if (cleanStudentEmail != null) {
+                val lowerEmail = cleanStudentEmail.lowercase()
+                val dupUserEmail = UsersTable.select {
+                    UsersTable.email.lowerCase() eq lowerEmail
+                }.count() > 0
+                val dupNotifEmail = ProfessorNotificationSettingsTable.select {
+                    ProfessorNotificationSettingsTable.notificationEmail.lowerCase() eq lowerEmail
+                }.count() > 0
+                if (dupUserEmail || dupNotifEmail) {
+                    throw IllegalArgumentException("이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.")
+                }
+            }
+
             UsersTable.insert {
                 it[id] = newUserId
                 it[username] = cleanUsername
                 it[UsersTable.passwordHash] = passwordHash
-                it[email] = request.email?.trim()?.takeIf { e -> e.isNotBlank() }
+                it[email] = cleanStudentEmail
                 it[name] = cleanName
                 it[UsersTable.role] = UserRole.STUDENT.name
                 it[identifier] = cleanStudentId
@@ -452,6 +467,7 @@ class UserService {
         UsersTable.update({ UsersTable.id eq userId }) {
             it[tokenVersion] = row[UsersTable.tokenVersion] + 1
         }
+        PushSubscriptionsTable.deleteWhere { PushSubscriptionsTable.userId eq userId }
     }
 
     suspend fun isUserAdmin(userId: UUID): Boolean = dbQuery {
@@ -1537,15 +1553,27 @@ class UserService {
         getCoursesForUserInternal(userId)
     }
 
+    private fun ensureCourseTeachesOrAdmin(professorId: UUID, courseId: UUID) {
+        val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
+        if (!courseExists) {
+            throw IllegalArgumentException("존재하지 않는 강의입니다.")
+        }
+        val teaches = !CourseProfessorsTable.select {
+            (CourseProfessorsTable.courseId eq courseId) and (CourseProfessorsTable.professorId eq professorId)
+        }.empty()
+        val isAdminUser = UsersTable.select { UsersTable.id eq professorId }.singleOrNull()
+            ?.let { it[UsersTable.isAdmin] || it[UsersTable.role] == UserRole.ADMIN.name } ?: false
+        if (!teaches && !isAdminUser) {
+            throw IllegalStateException("담당 강의가 아닙니다.")
+        }
+    }
+
     suspend fun getProfessorCategories(professorId: UUID, courseId: UUID): List<CategorySettingDto> = dbQuery {
         getProfessorCategoriesInternal(professorId, courseId)
     }
 
     private fun getProfessorCategoriesInternal(professorId: UUID, courseId: UUID): List<CategorySettingDto> {
-        val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
-        if (!courseExists) {
-            throw IllegalArgumentException("존재하지 않는 강의입니다.")
-        }
+        ensureCourseTeachesOrAdmin(professorId, courseId)
         val rows = ProfessorCategorySettingsTable.select {
             (ProfessorCategorySettingsTable.professorId eq professorId) and (ProfessorCategorySettingsTable.courseId eq courseId)
         }.toList()
@@ -1575,10 +1603,7 @@ class UserService {
         courseId: UUID,
         request: UpdateCategorySettingRequest
     ): List<CategorySettingDto> = dbQueryWithRetry {
-        val courseExists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
-        if (!courseExists) {
-            throw IllegalArgumentException("존재하지 않는 강의입니다.")
-        }
+        ensureCourseTeachesOrAdmin(professorId, courseId)
         val existing = ProfessorCategorySettingsTable.select {
             (ProfessorCategorySettingsTable.professorId eq professorId) and
                     (ProfessorCategorySettingsTable.courseId eq courseId) and

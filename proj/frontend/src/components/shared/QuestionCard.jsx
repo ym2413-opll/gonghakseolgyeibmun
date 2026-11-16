@@ -2,6 +2,7 @@
 import React from 'react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import { generateSummaryTitle } from '../../utils/textSummary';
+import { stripMarkdownForPreview } from '../../utils/markdown';
 import { useAuth } from '../../context/AuthContext';
 import { CheckCircle2, Clock, User, EyeOff, Users, Paperclip } from 'lucide-react';
 
@@ -77,9 +78,10 @@ export default function QuestionCard({ question, onClick }) {
       <h4 className="card-title">{question.title || generateSummaryTitle(question.content)}</h4>
 
       <p className="card-snippet">
-        {(question.content || '').length > 120
-          ? `${question.content.slice(0, 120)}...`
-          : (question.content || '')}
+        {(() => {
+          const plain = stripMarkdownForPreview(question.content || '');
+          return plain.length > 120 ? `${plain.slice(0, 120)}...` : plain;
+        })()}
       </p>
 
       <div className="card-bottom-row">

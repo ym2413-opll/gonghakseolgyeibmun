@@ -6,6 +6,7 @@ import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData'
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
+import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import AiRefineModal from '../student/AiRefineModal';
 import HelpBubble from '../common/HelpBubble';
 import {
@@ -44,149 +45,6 @@ function getImageAttachments(attachments) {
         (att.mimeType && att.mimeType.startsWith('image/')) ||
         /\.(png|jpe?g|gif|webp)$/i.test(att.originalName || att.fileName || att.name || ''))
   );
-}
-
-function renderInlineTokens(line, currentSeq, imagesBySeq, validSeqSet, onJumpToSeq, lineKey) {
-  const tokenRegex = /(\[#\d+\s*[-:]?\s*사진\s*\d+\]|\[사진\s*#\d+\s*[-:\s]\s*\d+\]|\[사진\s*\d+\]|#\d+(?!\d))/g;
-  const parts = [];
-  const inlineFigures = [];
-  let lastIdx = 0;
-  let match;
-  let partIdx = 0;
-
-  while ((match = tokenRegex.exec(line)) !== null) {
-    if (match.index > lastIdx) {
-      parts.push(
-        <React.Fragment key={`${lineKey}-t-${partIdx++}`}>
-          {line.slice(lastIdx, match.index)}
-        </React.Fragment>
-      );
-    }
-
-    const token = match[0];
-    const anchoredPrefixMatch = token.match(/^\[#(\d+)\s*[-:]?\s*사진\s*(\d+)\]$/);
-    const anchoredPhotoFirstMatch = token.match(/^\[사진\s*#(\d+)\s*[-:\s]\s*(\d+)\]$/);
-    const localPhotoMatch = token.match(/^\[사진\s*(\d+)\]$/);
-
-    if (anchoredPrefixMatch || anchoredPhotoFirstMatch || localPhotoMatch) {
-      const isExplicitAnchor = Boolean(anchoredPrefixMatch || anchoredPhotoFirstMatch);
-      const targetSeq = isExplicitAnchor
-        ? Number((anchoredPrefixMatch || anchoredPhotoFirstMatch)[1])
-        : currentSeq;
-      const k = Number((anchoredPrefixMatch || anchoredPhotoFirstMatch || localPhotoMatch)[2] || localPhotoMatch[1]);
-      const targetImages = imagesBySeq.get(targetSeq) || [];
-      const targetAtt = k >= 1 && k <= targetImages.length ? targetImages[k - 1] : null;
-      const rawUrl = targetAtt ? targetAtt.previewUrl || targetAtt.url || targetAtt.downloadUrl : '';
-
-      if (targetAtt && isSafeAttachmentUrl(rawUrl)) {
-        if (isExplicitAnchor) {
-          parts.push(
-            <button
-              type="button"
-              key={`${lineKey}-p-${partIdx++}`}
-              className="inline-photo-token is-anchored"
-              onClick={() => onJumpToSeq(targetSeq)}
-              title={`#${targetSeq} 글의 [사진 ${k}] · 클릭하여 #${targetSeq}로 이동`}
-            >
-              [#{targetSeq} 사진 {k}]
-            </button>
-          );
-        } else {
-          parts.push(
-            <span key={`${lineKey}-p-${partIdx++}`} className="inline-photo-token">
-              [사진 {k}]
-            </span>
-          );
-        }
-        inlineFigures.push({
-          key: `${lineKey}-fig-${targetSeq}-${k}-${partIdx}`,
-          k,
-          targetSeq: isExplicitAnchor ? targetSeq : null,
-          url: rawUrl,
-          name: targetAtt.originalName || targetAtt.fileName || `사진 ${k}`
-        });
-      } else {
-        parts.push(<React.Fragment key={`${lineKey}-pt-${partIdx++}`}>{token}</React.Fragment>);
-      }
-    } else if (token.startsWith('#')) {
-      const seqNum = Number(token.slice(1));
-      if (validSeqSet.has(seqNum)) {
-        parts.push(
-          <button
-            type="button"
-            key={`${lineKey}-seq-${partIdx++}`}
-            className="seq-anchor-link"
-            onClick={() => onJumpToSeq(seqNum)}
-            title={`#${seqNum} 글로 이동`}
-          >
-            #{seqNum}
-          </button>
-        );
-      } else {
-        parts.push(<React.Fragment key={`${lineKey}-st-${partIdx++}`}>{token}</React.Fragment>);
-      }
-    }
-
-    lastIdx = tokenRegex.lastIndex;
-  }
-
-  if (lastIdx < line.length) {
-    parts.push(<React.Fragment key={`${lineKey}-end`}>{line.slice(lastIdx)}</React.Fragment>);
-  }
-
-  return { parts, inlineFigures };
-}
-
-function renderFormattedPostContent(text, currentSeq, imagesBySeq, validSeqSet, onJumpToSeq) {
-  const lines = String(text || '').split('\n');
-
-  return lines.map((line, lineIdx) => {
-    if (!line) {
-      return (
-        <div key={`line-${lineIdx}`} className="forum-post-line">
-          {'\u00A0'}
-        </div>
-      );
-    }
-
-    const { parts, inlineFigures } = renderInlineTokens(
-      line,
-      currentSeq,
-      imagesBySeq,
-      validSeqSet,
-      onJumpToSeq,
-      `l-${lineIdx}`
-    );
-
-    return (
-      <React.Fragment key={`line-${lineIdx}`}>
-        <div className="forum-post-line">{parts}</div>
-        {inlineFigures.map((fig) => (
-          <figure key={fig.key} className="inline-photo-figure">
-            <img src={fig.url} alt={fig.name} loading="lazy" />
-            <figcaption>
-              {fig.targetSeq ? (
-                <>
-                  [
-                  <button
-                    type="button"
-                    className="seq-anchor-link inline-fig-anchor"
-                    onClick={() => onJumpToSeq(fig.targetSeq)}
-                    title={`#${fig.targetSeq} 글로 이동`}
-                  >
-                    #{fig.targetSeq}
-                  </button>{' '}
-                  사진 {fig.k}] {fig.name}
-                </>
-              ) : (
-                `[사진 ${fig.k}] ${fig.name}`
-              )}
-            </figcaption>
-          </figure>
-        ))}
-      </React.Fragment>
-    );
-  });
 }
 
 function AttachmentCardsGrid({ attachments }) {
@@ -287,6 +145,9 @@ const QuestionDetail = ({
   const [editContent, setEditContent] = useState('');
   const [editAnonymous, setEditAnonymous] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isEditPreview, setIsEditPreview] = useState(false);
+  const [isFollowUpPreview, setIsFollowUpPreview] = useState(false);
+  const [isAnswerPreview, setIsAnswerPreview] = useState(false);
 
   if (!question) {
     return (
@@ -439,12 +300,18 @@ const QuestionDetail = ({
       const nextContent = nextAnonymous
         ? sanitizeAnonymousStudentText(editContent.trim(), currentUser, { professorNames: profList })
         : editContent.trim();
+      const rawOriginal = (question.originalContent || question.rawContent || editContent).trim();
+      const nextOriginal = nextAnonymous
+        ? sanitizeAnonymousStudentText(rawOriginal, currentUser, { professorNames: profList })
+        : undefined;
       await onUpdateQuestion(question.id, {
         title: nextTitle,
         content: nextContent,
+        ...(nextOriginal !== undefined ? { originalContent: nextOriginal, rawContent: nextOriginal } : {}),
         isAnonymous: nextAnonymous
       });
       setIsEditing(false);
+      setIsEditPreview(false);
     } catch (err) {
       setErrorMsg(err.message || '질문 수정 중 오류가 발생했습니다.');
     } finally {
@@ -496,6 +363,7 @@ const QuestionDetail = ({
       });
       setAnswerText('');
       setAnswerAttachments([]);
+      setIsAnswerPreview(false);
     } catch (err) {
       setErrorMsg(err.message || '답변 등록에 실패했습니다.');
     } finally {
@@ -548,6 +416,7 @@ const QuestionDetail = ({
       setFollowUpOriginalText('');
       setHasFollowUpAiRefined(false);
       setFollowUpAttachments([]);
+      setIsFollowUpPreview(false);
     } catch (err) {
       setErrorMsg(err.message || '추가 질문 등록에 실패했습니다.');
     } finally {
@@ -786,14 +655,39 @@ const QuestionDetail = ({
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">질문 본문 수정</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={6}
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    required
-                  />
+                  <div className="md-editor-label-row">
+                    <label className="form-label" style={{ marginBottom: 0 }}>질문 본문 수정</label>
+                    <MarkdownModeTabs isPreview={isEditPreview} onTogglePreview={setIsEditPreview} />
+                  </div>
+                  {isEditPreview ? (
+                    <div className="md-preview-box">
+                      {editContent.trim() ? (
+                        <MarkdownContent
+                          content={
+                            category.allowAnonymous && editAnonymous
+                              ? sanitizeAnonymousStudentText(editContent, currentUser, {
+                                  professorNames: [question.profName, question.assignedProfessorName].filter(Boolean)
+                                })
+                              : editContent
+                          }
+                          currentSeq={1}
+                          imagesBySeq={imagesBySeq}
+                          validSeqSet={validSeqSet}
+                          onJumpToSeq={handleJumpToSeq}
+                        />
+                      ) : (
+                        <span className="md-preview-empty">미리볼 내용이 없습니다.</span>
+                      )}
+                    </div>
+                  ) : (
+                    <textarea
+                      className="form-textarea"
+                      rows={6}
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      required
+                    />
+                  )}
                 </div>
                 {category.allowAnonymous && (
                   <label className="anon-checkbox-row" style={{ marginBottom: 12 }}>
@@ -825,13 +719,13 @@ const QuestionDetail = ({
             ) : (
               <>
                 <div className="forum-post-text">
-                  {renderFormattedPostContent(
-                    mainContent,
-                    1,
-                    imagesBySeq,
-                    validSeqSet,
-                    handleJumpToSeq
-                  )}
+                  <MarkdownContent
+                    content={mainContent}
+                    currentSeq={1}
+                    imagesBySeq={imagesBySeq}
+                    validSeqSet={validSeqSet}
+                    onJumpToSeq={handleJumpToSeq}
+                  />
                 </div>
 
                 {/* 첨부파일 영역 */}
@@ -854,7 +748,7 @@ const QuestionDetail = ({
                       {showOriginal && (
                         <div className="original-content-box">
                           <span className="original-label">AI 윤문 전 초안:</span>
-                          <p>{question.originalContent || question.rawContent}</p>
+                          <MarkdownContent content={question.originalContent || question.rawContent} />
                         </div>
                       )}
                     </div>
@@ -1021,13 +915,13 @@ const QuestionDetail = ({
                   </div>
 
                   <div className="forum-post-text">
-                    {renderFormattedPostContent(
-                      ans.content || '',
-                      seq,
-                      imagesBySeq,
-                      validSeqSet,
-                      handleJumpToSeq
-                    )}
+                    <MarkdownContent
+                      content={ans.content || ''}
+                      currentSeq={seq}
+                      imagesBySeq={imagesBySeq}
+                      validSeqSet={validSeqSet}
+                      onJumpToSeq={handleJumpToSeq}
+                    />
                   </div>
 
                   <AttachmentCardsGrid attachments={ans.attachments} />
@@ -1062,9 +956,7 @@ const QuestionDetail = ({
                         {isFollowUpOrigExpanded && (
                           <div className="original-content-box">
                             <span className="original-label">AI 윤문 전 초안:</span>
-                            {followUpOrig.split('\n').map((line, idx) => (
-                              <p key={idx}>{line || '\u00A0'}</p>
-                            ))}
+                            <MarkdownContent content={followUpOrig} />
                           </div>
                         )}
                       </div>
@@ -1099,27 +991,55 @@ const QuestionDetail = ({
               <span className="editor-role-indicator">
                 <MessageSquare size={15} className="text-primary" /> 추가 질문 (#{nextSequenceNumber})
               </span>
-              <button
-                type="button"
-                className={`btn-ai-assist ${hasFollowUpAiRefined ? 'refined-active' : ''}`}
-                onClick={() => setIsFollowUpAiModalOpen(true)}
-              >
-                <PenTool size={14} />
-                <span>{hasFollowUpAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
-              </button>
+              <div className="md-editor-header-actions">
+                <MarkdownModeTabs
+                  isPreview={isFollowUpPreview}
+                  onTogglePreview={setIsFollowUpPreview}
+                />
+                <button
+                  type="button"
+                  className={`btn-ai-assist ${hasFollowUpAiRefined ? 'refined-active' : ''}`}
+                  onClick={() => setIsFollowUpAiModalOpen(true)}
+                >
+                  <PenTool size={14} />
+                  <span>{hasFollowUpAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
+                </button>
+              </div>
             </div>
-            <textarea
-              ref={followUpTextareaRef}
-              className={`answer-textarea ${hasFollowUpAiRefined ? 'has-refined-border' : ''}`}
-              rows={3}
-              placeholder="추가 질문을 입력하세요."
-              value={followUpText}
-              onChange={(e) => {
-                setFollowUpText(e.target.value);
-                if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
-              }}
-              required
-            />
+            {isFollowUpPreview ? (
+              <div className="md-preview-box">
+                {followUpText.trim() ? (
+                  <MarkdownContent
+                    content={
+                      question.isAnonymous
+                        ? sanitizeAnonymousStudentText(followUpText, currentUser, {
+                            professorNames: [question.profName, question.assignedProfessorName].filter(Boolean)
+                          })
+                        : followUpText
+                    }
+                    currentSeq={nextSequenceNumber}
+                    imagesBySeq={new Map([...imagesBySeq, [nextSequenceNumber, getImageAttachments(followUpAttachments)]])}
+                    validSeqSet={validSeqSet}
+                    onJumpToSeq={handleJumpToSeq}
+                  />
+                ) : (
+                  <span className="md-preview-empty">미리볼 내용이 없습니다.</span>
+                )}
+              </div>
+            ) : (
+              <textarea
+                ref={followUpTextareaRef}
+                className={`answer-textarea ${hasFollowUpAiRefined ? 'has-refined-border' : ''}`}
+                rows={3}
+                placeholder="추가 질문을 입력하세요."
+                value={followUpText}
+                onChange={(e) => {
+                  setFollowUpText(e.target.value);
+                  if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
+                }}
+                required
+              />
+            )}
             <AttachmentUploader
               attachments={followUpAttachments}
               onChangeAttachments={setFollowUpAttachments}
@@ -1229,16 +1149,36 @@ const QuestionDetail = ({
                     </>
                   )}
                 </span>
+                <MarkdownModeTabs
+                  isPreview={isAnswerPreview}
+                  onTogglePreview={setIsAnswerPreview}
+                />
               </div>
-              <textarea
-                ref={answerTextareaRef}
-                className="answer-textarea"
-                rows={4}
-                placeholder="답변을 입력하세요."
-                value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
-                required
-              />
+              {isAnswerPreview ? (
+                <div className="md-preview-box">
+                  {answerText.trim() ? (
+                    <MarkdownContent
+                      content={answerText}
+                      currentSeq={nextSequenceNumber}
+                      imagesBySeq={new Map([...imagesBySeq, [nextSequenceNumber, getImageAttachments(answerAttachments)]])}
+                      validSeqSet={validSeqSet}
+                      onJumpToSeq={handleJumpToSeq}
+                    />
+                  ) : (
+                    <span className="md-preview-empty">미리볼 내용이 없습니다.</span>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  ref={answerTextareaRef}
+                  className="answer-textarea"
+                  rows={4}
+                  placeholder="답변을 입력하세요."
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  required
+                />
+              )}
               <AttachmentUploader
                 attachments={answerAttachments}
                 onChangeAttachments={setAnswerAttachments}

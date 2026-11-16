@@ -184,52 +184,6 @@ function getCurrentUserId(overrideId) {
   return sessionUser?.id || localStorage.getItem('prof_qa_current_user_id') || '';
 }
 
-// Web Crypto API PBKDF2-HMAC-SHA256 해시 유틸리티 (오프라인/로컬 폴백 시에도 암호화 해시 보장)
-async function hashPasswordBrowser(password, saltHex = null) {
-  const enc = new TextEncoder();
-  let saltBytes;
-  if (saltHex) {
-    saltBytes = new Uint8Array(saltHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-  } else {
-    saltBytes = new Uint8Array(16);
-    window.crypto.getRandomValues(saltBytes);
-  }
-  const actualSaltHex = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-
-  if (window.crypto?.subtle) {
-    const keyMaterial = await window.crypto.subtle.importKey(
-      'raw',
-      enc.encode(password),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits']
-    );
-    const derivedBits = await window.crypto.subtle.deriveBits(
-      {
-        name: 'PBKDF2',
-        salt: saltBytes,
-        iterations: 65536,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      256
-    );
-    const hashArray = Array.from(new Uint8Array(derivedBits));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return `PBKDF2$65536$${actualSaltHex}$${hashHex}`;
-  }
-  throw new Error('안전한 암호화 Web Crypto API를 사용할 수 없는 브라우저 환경입니다.');
-}
-
-async function verifyPasswordBrowser(password, storedHash) {
-  if (!storedHash || !storedHash.startsWith('PBKDF2$')) return false;
-  const parts = storedHash.split('$');
-  if (parts.length !== 4) return false;
-  const saltHex = parts[2];
-  const computed = await hashPasswordBrowser(password, saltHex);
-  return computed === storedHash;
-}
-
 function normalizeCatalogEntry(entry) {
   if (!entry || typeof entry !== 'object') return entry;
   return {
@@ -658,112 +612,7 @@ export const api = {
       }
     }
 
-    // 로컬 암호화 스토리지 폴백
-    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    if (cleanUsername && localUsers.some(u => u.username === cleanUsername || (u.role === 'student' && u.identifier === cleanUsername))) {
-      throw new Error(roleUpper === 'STUDENT' ? '이미 가입된 학번입니다.' : '이미 사용 중인 아이디(ID)입니다.');
-    }
-
-    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    const deptObj = resolveDepartmentEntry(depts, cleanDept) || resolveDepartmentEntry(INITIAL_DEPARTMENTS, cleanDept);
-    const canonicalDept = deptObj?.name || cleanDept;
-    const shortDept = deptObj?.shortName || canonicalDept.replace(/학과|학부|전공/g, '').slice(0, 3);
-
-    let identifier = '';
-    let email = null;
-    let displayTag = '';
-
-    if (roleUpper === 'STUDENT') {
-      let sid = rawIdentifier;
-      if (isAutoId) {
-        const preview = await this.getNextStudentId({
-          year: payload.entryYear || 2026,
-          department: cleanDept,
-          isForeign: Boolean(payload.isForeign)
-        });
-        sid = preview.studentId;
-      }
-      if (!/^(19\d\d|20\d\d)[1-8]0[1-6](?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(sid)) {
-        throw new Error('학번은 (연도 4자리)(1~8 + 0 + 1~6)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
-      }
-      if (localUsers.some(u => u.role === 'student' && u.identifier === sid)) {
-        throw new Error('이미 가입된 학번입니다. 중복 가입이 불가능합니다.');
-      }
-      identifier = sid;
-      const yearPrefix = sid.slice(2, 4);
-      displayTag = `${yearPrefix}_${shortDept}_${cleanName}`;
-    } else {
-      const rawEmail = (payload.email || '').trim().toLowerCase();
-      if (rawEmail) {
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
-          throw new Error('유효한 이메일 주소를 입력해주세요.');
-        }
-        if (localUsers.some(u => u.email && u.email.toLowerCase() === rawEmail)) {
-          throw new Error('이미 등록된 이메일 주소입니다. 중복 가입이 불가능합니다.');
-        }
-        email = rawEmail;
-      }
-      identifier = `P${Date.now().toString().slice(-6)}`;
-      displayTag = `${canonicalDept} ${cleanName}`;
-    }
-
-    const passwordHash = await hashPasswordBrowser(payload.password);
-    const allCourses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
-    let userCourses = allCourses;
-
-    if (Array.isArray(payload.courseIds) && payload.courseIds.length > 0) {
-      userCourses = allCourses.filter(c => payload.courseIds.includes(c.id));
-    }
-
-    const newUser = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      username: cleanUsername || identifier,
-      passwordHash,
-      role: roleUpper === 'PROFESSOR' ? 'professor' : 'student',
-      name: cleanName,
-      identifier,
-      studentId: identifier,
-      department: canonicalDept,
-      email,
-      displayTag,
-      avatar: cleanName.charAt(0),
-      isAdmin: false,
-      isWithdrawn: false,
-      questionBanUntil: null,
-      answerBanUntil: null,
-      courses: userCourses.map(c => ({
-        id: c.id,
-        name: c.name,
-        code: c.code,
-        group: c.group || 'COMMON',
-        section: '01분반',
-        profId: c.assignedProfessorId || '',
-        profName: c.assignedProfessorName || '담당교수'
-      }))
-    };
-
-    localUsers.push(newUser);
-    safeSetStorage(STORAGE_KEY_USERS, localUsers);
-
-    const settingsMap = safeGetStorage(STORAGE_KEY_SETTINGS, {});
-    settingsMap[newUser.id] = {
-      theme: 'light',
-      fontSize: 'md',
-      helpLevel: 'SOME',
-      dndEnabled: false,
-      dndStartTime: '22:00',
-      dndEndTime: '08:00',
-      coProfNotification: true,
-      emailEnabled: Boolean(email),
-      notificationEmail: email || '',
-      activeCategories: { grade: true, assignment: true, lecture: true }
-    };
-    safeSetStorage(STORAGE_KEY_SETTINGS, settingsMap);
-
-    const { passwordHash: _ph, ...safeUser } = newUser;
-    const token = `local-token-${newUser.id}`;
-    this.saveSession(safeUser, token);
-    return { user: safeUser, token };
+    throw new Error('원격 인증 서버가 활성화되어 있지 않습니다.');
   },
 
   async login(username, password) {
@@ -800,27 +649,7 @@ export const api = {
       }
     }
 
-    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    const target = localUsers.find(
-      u =>
-        (u.username || '').trim().toLowerCase() === cleanUsername ||
-        (u.role === 'student' && (u.identifier || '').trim().toLowerCase() === cleanUsername)
-    );
-    if (!target) {
-      throw new Error('아이디(학번) 또는 비밀번호가 일치하지 않습니다.');
-    }
-    if (target.isWithdrawn) {
-      throw new Error('관리자에 의해 탈퇴(비활성화) 처리된 계정입니다.');
-    }
-    const valid = await verifyPasswordBrowser(password, target.passwordHash);
-    if (!valid) {
-      throw new Error('아이디 또는 비밀번호가 일치하지 않습니다.');
-    }
-
-    const { passwordHash: _ph, ...safeUser } = target;
-    const token = `local-token-${target.id}`;
-    this.saveSession(safeUser, token);
-    return { user: safeUser, token };
+    throw new Error('원격 인증 서버가 활성화되어 있지 않습니다.');
   },
 
   async getUser(userId) {
@@ -2093,22 +1922,34 @@ export const api = {
         if (String(q.category || '').toUpperCase() !== 'GRADE' || isAdmin) return true;
         return q.studentId === sessionUser.id || q.profId === sessionUser.id || q.assignedProfessorId === sessionUser.id;
       })
-      .map(q => ({
-        ...q,
-        title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
-        content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
-        originalContent: isProfessor ? '' : q.originalContent,
-        rawContent: isProfessor ? '' : q.rawContent,
-        answers: (q.answers || []).map(a => ({
-          ...a,
-          originalContent: isProfessor ? '' : a.originalContent,
-          rawContent: isProfessor ? '' : a.rawContent
-        })),
-        canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
-        realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
-        realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
-        realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null
-      }));
+      .map(q => {
+        const isMyQuestion = q.studentId === sessionUser?.id;
+        const canViewDraft = !isProfessor && (isMyQuestion || isAdmin);
+        const maskAnonIdentity = Boolean(q.isAnonymous && !isMyQuestion && !isAdmin);
+        return {
+          ...q,
+          title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
+          content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
+          originalContent: canViewDraft ? q.originalContent : '',
+          rawContent: canViewDraft ? q.rawContent : '',
+          studentId: maskAnonIdentity ? null : q.studentId,
+          studentName: maskAnonIdentity ? '익명 수강생' : q.studentName,
+          studentTag: maskAnonIdentity ? `${q.courseName || '수강'} 수강생` : q.studentTag,
+          answers: (q.answers || []).map(a => {
+            const isMyAns = a.authorId === sessionUser?.id;
+            const canViewAnsDraft = !isProfessor && (isMyAns || isAdmin);
+            return {
+              ...a,
+              originalContent: canViewAnsDraft ? a.originalContent : '',
+              rawContent: canViewAnsDraft ? a.rawContent : ''
+            };
+          }),
+          canDelete: !q.isDeleted && sessionUser?.role === 'student' && isMyQuestion,
+          realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
+          realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
+          realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null
+        };
+      });
   },
 
   async getQuestion(questionId, userId) {
@@ -2148,22 +1989,32 @@ export const api = {
     ) {
       return null;
     }
+    const isMyQuestion = q.studentId === sessionUser.id;
+    const canViewDraft = !isProfessor && (isMyQuestion || isAdmin);
+    const maskAnonIdentity = Boolean(q.isAnonymous && !isMyQuestion && !isAdmin);
     return {
       ...q,
       title: q.isHidden && !isAdmin ? '[관리자에 의해 가려진 질문입니다]' : q.title,
       content: q.isHidden && !isAdmin ? '관리자에 의해 비표시(가리기) 처리된 게시물입니다.' : q.content,
-      originalContent: isProfessor ? '' : q.originalContent,
-      rawContent: isProfessor ? '' : q.rawContent,
-      canDelete: !q.isDeleted && sessionUser?.role === 'student' && q.studentId === sessionUser?.id,
+      originalContent: canViewDraft ? q.originalContent : '',
+      rawContent: canViewDraft ? q.rawContent : '',
+      studentId: maskAnonIdentity ? null : q.studentId,
+      studentName: maskAnonIdentity ? '익명 수강생' : q.studentName,
+      studentTag: maskAnonIdentity ? `${q.courseName || '수강'} 수강생` : q.studentTag,
+      canDelete: !q.isDeleted && sessionUser?.role === 'student' && isMyQuestion,
       realStudentName: isAdmin ? q.realStudentName || q.studentName : null,
       realStudentTag: isAdmin ? q.realStudentTag || q.studentTag : null,
       realStudentIdentifier: isAdmin ? q.realStudentIdentifier || '' : null,
-      answers: (q.answers || []).map(a => ({
-        ...a,
-        content: a.isHidden && !isAdmin ? '관리자에 의해 가려진 답변입니다.' : a.content,
-        originalContent: isProfessor ? '' : a.originalContent,
-        rawContent: isProfessor ? '' : a.rawContent
-      }))
+      answers: (q.answers || []).map(a => {
+        const isMyAns = a.authorId === sessionUser.id;
+        const canViewAnsDraft = !isProfessor && (isMyAns || isAdmin);
+        return {
+          ...a,
+          content: a.isHidden && !isAdmin ? '관리자에 의해 가려진 답변입니다.' : a.content,
+          originalContent: canViewAnsDraft ? a.originalContent : '',
+          rawContent: canViewAnsDraft ? a.rawContent : ''
+        };
+      })
     };
   },
 
@@ -2290,6 +2141,9 @@ export const api = {
         if (e?.isHttpError) {
           throw e;
         }
+        if (!import.meta.env.DEV) {
+          throw new Error('서버에 연결할 수 없어 질문을 등록하지 못했습니다. 잠시 후 다시 시도해 주세요.', { cause: e });
+        }
         console.warn('[API] Remote createQuestion failed, using local fallback', e);
       }
     }
@@ -2389,6 +2243,9 @@ export const api = {
         throw httpErr;
       } catch (e) {
         if (e?.isHttpError) throw e;
+        if (!import.meta.env.DEV) {
+          throw new Error('서버에 연결할 수 없어 질문을 수정하지 못했습니다. 잠시 후 다시 시도해 주세요.', { cause: e });
+        }
         console.warn('[API] Remote updateQuestion failed, using local fallback', e);
       }
     }

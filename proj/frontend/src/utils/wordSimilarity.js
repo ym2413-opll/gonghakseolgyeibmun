@@ -94,7 +94,7 @@ export function calculateSimilarQuestions(queryText, questions, topN = 3) {
   const queryVector = getTermVector(queryTokens, vocabulary);
 
   const scoredQuestions = questions
-    .filter(q => q.category !== 'grade') // 명세: '성적' 카테고리는 유사 질답 보기 사용 불가
+    .filter(q => String(q.category || '').toLowerCase() !== 'grade' && !q.isHidden && !q.isDeleted) // 명세: '성적'·가림·삭제 게시물은 유사 질답 보기 제외
     .map(q => {
       const targetText = `${q.title} ${q.content}`;
       const targetTokens = tokenize(targetText);

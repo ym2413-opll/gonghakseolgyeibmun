@@ -9,6 +9,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -571,7 +572,7 @@ class QuestionService(
                 isHidden = isQuestionHidden,
                 isThreadOpen = isThreadOpen,
                 lastSequenceNumber = lastSequenceNumber,
-                isAdminAuthor = authorIsAdmin,
+                isAdminAuthor = if (isAnonymous && !isMyQuestion && !isAdmin) false else authorIsAdmin,
                 isDeleted = isQuestionDeleted,
                 deletedAt = deletedAtStr,
                 canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
@@ -610,8 +611,15 @@ class QuestionService(
         val isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor]
         val deletedAtStr = qRow[QuestionsTable.deletedAt]?.toString()
 
-        if (isQuestionDeleted && !isProfessor && !isAdmin) {
-            throw IllegalArgumentException("작성자에 의해 삭제된 질문입니다.")
+        if (isQuestionDeleted && !isAdmin) {
+            val teachesCourse = isProfessor && (
+                qRow[QuestionsTable.assignedProfessorId] == currentUserId ||
+                    !CourseProfessorsTable.select {
+                        (CourseProfessorsTable.courseId eq qRow[QuestionsTable.courseId]) and
+                            (CourseProfessorsTable.professorId eq currentUserId)
+                    }.empty()
+                )
+            if (!teachesCourse) throw IllegalArgumentException("작성자에 의해 삭제된 질문입니다.")
         }
 
         val category = QuestionCategory.valueOf(qRow[QuestionsTable.category])
@@ -755,7 +763,7 @@ class QuestionService(
             isHidden = isQuestionHidden,
             isThreadOpen = isThreadOpen,
             lastSequenceNumber = lastSequenceNumber,
-            isAdminAuthor = authorIsAdmin,
+            isAdminAuthor = if (isAnonymous && !isMyQuestion && !isAdmin) false else authorIsAdmin,
             isDeleted = isQuestionDeleted,
             deletedAt = deletedAtStr,
             canDelete = !isQuestionDeleted && isMyQuestion && currentUserRole == UserRole.STUDENT,
@@ -998,9 +1006,11 @@ class QuestionService(
                 throw IllegalArgumentException("이미 삭제된 질문입니다.")
             }
 
-            val attachmentNames = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+            val attachmentCond = (AttachmentsTable.questionId eq questionId) and
+                (AttachmentsTable.answerId.isNull() or (AttachmentsTable.uploaderId eq currentUserId))
+            val attachmentNames = AttachmentsTable.select { attachmentCond }
                 .map { it[AttachmentsTable.savedName] }
-            AttachmentsTable.deleteWhere { AttachmentsTable.questionId eq questionId }
+            AttachmentsTable.deleteWhere { attachmentCond }
 
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
                 it[isDeletedByAuthor] = true
@@ -1156,6 +1166,20 @@ class QuestionService(
                     it[refinedContent] = maybeRedact(incomingRefined)
                 } else if (effectiveAnonymous) {
                     it[refinedContent] = maybeRedact(qRow[QuestionsTable.refinedContent])
+                }
+            }
+
+            if (effectiveAnonymous && studentUserRow != null) {
+                val authorId = qRow[QuestionsTable.studentId]
+                val studentFollowUps = AnswersTable.select {
+                    (AnswersTable.questionId eq questionId) and (AnswersTable.professorId eq authorId)
+                }.toList()
+                for (fRow in studentFollowUps) {
+                    val fId = fRow[AnswersTable.id].value
+                    AnswersTable.update({ AnswersTable.id eq fId }) {
+                        it[content] = maybeRedact(fRow[AnswersTable.content])
+                        it[rawContent] = maybeRedact(fRow[AnswersTable.rawContent])
+                    }
                 }
             }
 
@@ -1464,7 +1488,12 @@ class QuestionService(
                 attachments = linkedAttachments
             )
 
-            val participatingProfIds = findParticipatingProfessorIds(questionId)
+            val qCategory = QuestionCategory.valueOf(qRow[QuestionsTable.category])
+            val participatingProfIds = if (qCategory == QuestionCategory.GRADE) {
+                emptyList()
+            } else {
+                findParticipatingProfessorIds(questionId)
+            }
 
             CreatedFollowUpResult(
                 dto = dto,
@@ -1472,7 +1501,7 @@ class QuestionService(
                 participatingProfIds = participatingProfIds,
                 courseName = courseName,
                 questionTitle = qRow[QuestionsTable.title],
-                category = QuestionCategory.valueOf(qRow[QuestionsTable.category]),
+                category = qCategory,
                 authorDisplay = authorDisplay
             )
         }
@@ -1586,7 +1615,16 @@ class QuestionService(
         val clean = content.trim()
         if (clean.isBlank()) return "학업 질문"
         val firstLine = clean.lines().firstOrNull { it.isNotBlank() } ?: clean
-        val stripped = firstLine.replace(Regex("^[#*\\-•\\d.]+\\s*"), "").replace(Regex("[\\[\\]]"), "").trim()
+        val stripped = firstLine
+            .replace(Regex("""!\[([^\]]*)\]\([^)]*\)""")) { mr ->
+                mr.groupValues[1].takeIf { it.isNotBlank() }?.let { "[이미지: $it]" } ?: "[이미지]"
+            }
+            .replace(Regex("""\[([^\]]+)\]\([^)]*\)"""), "$1")
+            .replace(Regex("""`([^`]+)`"""), "$1")
+            .replace(Regex("""^[#*\-•\d.>]+\s*"""), "")
+            .replace(Regex("""(\*\*|__|\*|_|~~)"""), "")
+            .replace(Regex("""[\[\]]"""), "")
+            .trim()
         val sentenceMatch = Regex("^(.+?[.!?])(\\s|$)").find(stripped)
         if (sentenceMatch != null && sentenceMatch.groupValues[1].length in 10..45) {
             return sentenceMatch.groupValues[1]

@@ -52,7 +52,7 @@ fun Route.aiRoutes(
             val isAnonymousRequest = request.isAnonymous
             val deptAliases = if (isAnonymousRequest) {
                 dbQuery {
-                    (listOfNotNull(request.effectiveStudentDepartment, user.department)
+                    (listOfNotNull(request.effectiveStudentDepartment, user.department, user.displayTag)
                         .flatMap { DatabaseFactory.expandDepartmentAliasNames(it) })
                         .distinct()
                 }
@@ -65,10 +65,10 @@ fun Route.aiRoutes(
                 courseName = request.courseName,
                 category = request.category,
                 professorName = request.effectiveProfessorName,
-                studentName = if (isAnonymousRequest) (request.effectiveStudentName ?: user.name) else request.effectiveStudentName,
-                studentDepartment = if (isAnonymousRequest) (request.effectiveStudentDepartment ?: user.department) else request.effectiveStudentDepartment,
-                studentIdentifier = if (isAnonymousRequest) (request.effectiveStudentIdentifier ?: user.identifier) else request.effectiveStudentIdentifier,
-                studentEmail = if (isAnonymousRequest) user.email else null,
+                studentName = if (isAnonymousRequest) user.name else (request.effectiveStudentName ?: user.name),
+                studentDepartment = if (isAnonymousRequest) user.department else (request.effectiveStudentDepartment ?: user.department),
+                studentIdentifier = if (isAnonymousRequest) user.identifier else (request.effectiveStudentIdentifier ?: user.identifier),
+                studentEmail = user.email,
                 studentDepartmentAliases = deptAliases,
                 isAnonymous = isAnonymousRequest,
                 isFollowUp = request.isFollowUp,

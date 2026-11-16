@@ -1,5 +1,6 @@
 // src/utils/textSummary.js
 // 질문 본문에서 핵심 첫 문장 또는 요약 제목을 추출하는 유틸리티
+import { stripMarkdownForPreview } from './markdown.js';
 
 /**
  * 본문 내용을 바탕으로 표시용 요약 제목 생성
@@ -15,15 +16,12 @@ export function generateSummaryTitle(content, maxLength = 45) {
   const clean = content.trim();
   if (!clean) return '학업 질문';
 
-  // 첫 번째 줄 추출 (엔터 기준)
-  const lines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const firstLine = lines[0] || clean;
-
-  // 마크다운 기호(#, -, *, 숫자 목차 등) 제거
-  let stripped = firstLine
-    .replace(/^[#*\-•\d.]+\s*/, '')
-    .replace(/[\[\]]/g, '')
-    .trim();
+  // 다중 줄 코드 블록을 먼저 평문화한 뒤 첫 번째 줄을 추출
+  const plainFull = stripMarkdownForPreview(clean);
+  const lines = plainFull.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const firstLine = lines[0] || plainFull;
+  const stripped = firstLine.replace(/[[\]]/g, '').trim();
+  if (!stripped) return '학업 질문';
 
   // 첫 문장 마침표나 물음표가 있으면 거기까지 우선 자름
   const sentenceMatch = stripped.match(/^(.+?[.!?])(\s|$)/);
@@ -32,7 +30,7 @@ export function generateSummaryTitle(content, maxLength = 45) {
   }
 
   if (stripped.length <= maxLength) {
-    return stripped || clean.slice(0, maxLength);
+    return stripped;
   }
 
   return stripped.slice(0, maxLength) + '...';

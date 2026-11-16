@@ -3,6 +3,7 @@
 import React from 'react';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { useAuth } from '../../context/AuthContext';
+import { stripMarkdownForPreview } from '../../utils/markdown';
 import {
   MessageSquare,
   CheckCircle2,
@@ -175,7 +176,7 @@ const QuestionCard = ({
           </div>
 
           <p className="forum-topic-excerpt">
-            {question.content || question.refinedContent || ''}
+            {stripMarkdownForPreview(question.content || question.refinedContent || '')}
           </p>
 
           <div className="forum-topic-submeta">

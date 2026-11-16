@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Search, CheckCircle, ChevronDown, ChevronUp, AlertCircle, BookOpen, X } from 'lucide-react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import MarkdownContent from '../common/MarkdownContent';
 
 export default function SimilarQuestionsModal({
   isOpen,
@@ -65,7 +66,7 @@ export default function SimilarQuestionsModal({
                       <div className="accordion-details">
                         <div className="sim-detail-question">
                           <div className="sim-detail-label">질문 내용</div>
-                          <p className="sim-question-text">{item.content}</p>
+                          <MarkdownContent content={item.content || ''} className="sim-question-text" />
                         </div>
 
                         {hasAnswer ? (
@@ -79,7 +80,7 @@ export default function SimilarQuestionsModal({
                                     {new Date(ans.createdAt).toLocaleDateString()}
                                   </span>
                                 </div>
-                                <div className="sim-ans-body">{ans.content}</div>
+                                <MarkdownContent content={ans.content || ''} className="sim-ans-body" />
                               </div>
                             ))}
                           </div>
