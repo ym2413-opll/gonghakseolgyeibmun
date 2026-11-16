@@ -13,6 +13,7 @@ object UsersTable : UUIDTable("users") {
     val identifier = varchar("identifier", 50) // 학번 또는 교번
     val department = varchar("department", 100)
     val displayTag = varchar("display_tag", 100)
+    val nickname = varchar("nickname", 50).nullable()
     val isDemo = bool("is_demo").default(false)
     val isAdmin = bool("is_admin").default(false)
     val isWithdrawn = bool("is_withdrawn").default(false)

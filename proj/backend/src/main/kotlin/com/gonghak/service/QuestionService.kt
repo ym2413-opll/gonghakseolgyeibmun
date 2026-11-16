@@ -66,8 +66,22 @@ class QuestionService(
         val role: String,
         val displayTag: String,
         val department: String,
-        val isAdmin: Boolean = false
+        val isAdmin: Boolean = false,
+        val nickname: String? = null
     )
+
+    private fun toAuthorSummary(uRow: ResultRow): AuthorSummary {
+        val isAdm = uRow[UsersTable.isAdmin] || uRow[UsersTable.role] == UserRole.ADMIN.name
+        val adminNick = if (isAdm) uRow[UsersTable.nickname]?.trim()?.takeIf { it.isNotEmpty() } else null
+        return AuthorSummary(
+            name = uRow[UsersTable.name],
+            role = uRow[UsersTable.role],
+            displayTag = uRow[UsersTable.displayTag],
+            department = uRow[UsersTable.department],
+            isAdmin = isAdm,
+            nickname = adminNick
+        )
+    }
 
     companion object {
         const val MAX_TITLE_LENGTH = 180
@@ -339,19 +353,14 @@ class QuestionService(
         val attachmentsByQuestionId = allAttachments.groupBy { it[AttachmentsTable.questionId] }
 
         val allUsersMap = UsersTable.selectAll().associate { uRow ->
-            uRow[UsersTable.id].value to AuthorSummary(
-                name = uRow[UsersTable.name],
-                role = uRow[UsersTable.role],
-                displayTag = uRow[UsersTable.displayTag],
-                department = uRow[UsersTable.department],
-                isAdmin = uRow[UsersTable.isAdmin] || uRow[UsersTable.role] == UserRole.ADMIN.name
-            )
+            uRow[UsersTable.id].value to toAuthorSummary(uRow)
         }
 
         query.map { row ->
             val qId = row[QuestionsTable.id].value
             val authorId = row[QuestionsTable.studentId]
-            val authorIsAdmin = allUsersMap[authorId]?.isAdmin ?: false
+            val authorSummary = allUsersMap[authorId]
+            val authorIsAdmin = authorSummary?.isAdmin ?: false
             val isMyQuestion = (authorId == currentUserId)
             val isAnonymous = row[QuestionsTable.isAnonymous]
             val isQuestionHidden = row[QuestionsTable.isHidden]
@@ -360,7 +369,7 @@ class QuestionService(
             val isQuestionDeleted = row[QuestionsTable.isDeletedByAuthor]
             val deletedAtStr = row[QuestionsTable.deletedAt]?.toString()
             val courseName = row[CoursesTable.name]
-            val authorDisplayTag = row[UsersTable.displayTag]
+            val authorDisplayTag = authorSummary?.nickname ?: row[UsersTable.displayTag]
             val studentName = row[UsersTable.name]
             val studentIdentifier = row[UsersTable.identifier]
 
@@ -535,13 +544,15 @@ class QuestionService(
         val authorName = author?.get(UsersTable.name) ?: "학생"
         val authorIdentifier = author?.get(UsersTable.identifier) ?: ""
         val authorIsAdmin = author?.let { it[UsersTable.isAdmin] || it[UsersTable.role] == UserRole.ADMIN.name } ?: false
+        val authorAdminNick = if (authorIsAdmin) author?.get(UsersTable.nickname)?.trim()?.takeIf { it.isNotEmpty() } else null
+        val effectiveAuthorTag = authorAdminNick ?: authorTag
         val isAssignedProfViewer = (currentUserId == assignedProfId)
         val assignedProfName = assignedProf?.get(UsersTable.name) ?: "담당교수"
 
         val authorDisplayName = when {
-            isMyQuestion -> "$authorTag (나)"
+            isMyQuestion -> "$effectiveAuthorTag (나)"
             isAnonymous -> "$courseName 수강생"
-            else -> authorTag
+            else -> effectiveAuthorTag
         }
 
         // Answers & Follow-up questions
@@ -554,13 +565,7 @@ class QuestionService(
                     questionId = questionId,
                     questionStudentId = qRow[QuestionsTable.studentId],
                     authorUuid = aRow[AnswersTable.professorId],
-                    authorSummary = AuthorSummary(
-                        name = aRow[UsersTable.name],
-                        role = aRow[UsersTable.role],
-                        displayTag = aRow[UsersTable.displayTag],
-                        department = aRow[UsersTable.department],
-                        isAdmin = aRow[UsersTable.isAdmin] || aRow[UsersTable.role] == UserRole.ADMIN.name
-                    ),
+                    authorSummary = toAuthorSummary(aRow),
                     rawContent = aRow[AnswersTable.content],
                     originalDraftContent = aRow[AnswersTable.rawContent],
                     isAssignedProfessor = aRow[AnswersTable.isAssignedProfessor],
@@ -835,11 +840,12 @@ class QuestionService(
 
         val authorRole = aRow[UsersTable.role]
         val isAdminAuthor = aRow[UsersTable.isAdmin] || authorRole == UserRole.ADMIN.name
+        val adminNick = if (isAdminAuthor) aRow[UsersTable.nickname]?.trim()?.takeIf { it.isNotEmpty() } else null
         return AnswerDto(
             id = answerId.toString(),
             questionId = aRow[AnswersTable.questionId].toString(),
             professorId = aRow[AnswersTable.professorId].toString(),
-            professorName = aRow[UsersTable.name],
+            professorName = adminNick ?: aRow[UsersTable.name],
             professorDepartment = aRow[UsersTable.department],
             authorRole = authorRole,
             authorTitle = if (isAdminAuthor) "관리자" else if (authorRole == UserRole.STUDENT.name) "질문자 추가 질문" else if (aRow[AnswersTable.isAssignedProfessor]) "담당교수" else "같은 과목 교수 (공동 답변)",
@@ -1144,13 +1150,7 @@ class QuestionService(
                 questionId = questionId,
                 questionStudentId = questionStudentId,
                 authorUuid = professorId,
-                authorSummary = AuthorSummary(
-                    name = profUser[UsersTable.name],
-                    role = role.name,
-                    displayTag = profUser[UsersTable.displayTag],
-                    department = profUser[UsersTable.department],
-                    isAdmin = isActorAdmin
-                ),
+                authorSummary = toAuthorSummary(profUser),
                 rawContent = request.content,
                 originalDraftContent = "",
                 isAssignedProfessor = isAssigned,
@@ -1170,7 +1170,9 @@ class QuestionService(
             )
 
             val participatingProfIds = findParticipatingProfessorIds(questionId)
+            val adminNick = if (isActorAdmin) profUser[UsersTable.nickname]?.trim()?.takeIf { it.isNotEmpty() } else null
             val answerAuthorDisplay = when {
+                adminNick != null -> adminNick
                 isActorAdmin && role != UserRole.PROFESSOR -> "관리자 (${profUser[UsersTable.name]})"
                 role == UserRole.STUDENT -> "다른 수강생"
                 else -> profUser[UsersTable.name]
@@ -1184,7 +1186,7 @@ class QuestionService(
                 courseName = courseName,
                 questionTitle = qRow[QuestionsTable.title],
                 professorName = answerAuthorDisplay,
-                isProfessorAuthor = (role == UserRole.PROFESSOR)
+                isProfessorAuthor = (role == UserRole.PROFESSOR && adminNick == null)
             )
         }
 
@@ -1508,6 +1510,7 @@ class QuestionService(
             authorUuid.toString()
         }
         val displayName = when {
+            authorSummary.isAdmin && !authorSummary.nickname.isNullOrBlank() -> authorSummary.nickname
             authorSummary.isAdmin && authorSummary.role != UserRole.PROFESSOR.name -> authorSummary.displayTag.ifBlank { authorSummary.name }
             !isStudentPost -> authorSummary.name
             isMyPost -> "${authorSummary.displayTag} (나)"

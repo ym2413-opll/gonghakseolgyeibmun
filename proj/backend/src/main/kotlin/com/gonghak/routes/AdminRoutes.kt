@@ -40,6 +40,31 @@ fun Route.adminRoutes(
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = users))
         }
 
+        // Update admin display nickname (blank resets to default name/tag)
+        put("/nickname") {
+            val adminId = call.requireAdmin() ?: return@put
+            val request = call.receive<UpdateAdminNicknameRequest>()
+            try {
+                val updated = userService.updateAdminNickname(adminId, request.nickname)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        data = updated,
+                        message = if (!updated.nickname.isNullOrBlank()) {
+                            "관리자 닉네임이 '${updated.nickname}'(으)로 저장되었습니다."
+                        } else {
+                            "관리자 닉네임이 기본값으로 초기화되었습니다."
+                        }
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
+            }
+        }
+
         // Sanction user: WITHDRAW, RESTORE, BAN_QUESTION, UNBAN_QUESTION, BAN_ANSWER, UNBAN_ANSWER
         post("/users/{id}/sanction") {
             call.requireAdmin() ?: return@post

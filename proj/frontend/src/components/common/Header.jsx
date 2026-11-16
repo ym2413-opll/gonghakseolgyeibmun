@@ -314,7 +314,7 @@ const Header = ({
 
               <div className="auth-user-pill">
                 <div className={`user-avatar role-${currentUser.role}`}>
-                  {currentUser.avatar || currentUser.name?.charAt(0) || 'U'}
+                  {(isAdmin && currentUser.nickname ? currentUser.nickname : currentUser.avatar || currentUser.name || 'U').charAt(0)}
                 </div>
                 <div className="user-info-text hide-mobile">
                   <span className="user-role-badge">
@@ -329,7 +329,9 @@ const Header = ({
                     )}
                     {isAdmin && <strong className="admin-mini-tag"> · ADMIN</strong>}
                   </span>
-                  <span className="user-display-tag">{currentUser.displayTag}</span>
+                  <span className="user-display-tag">
+                    {isAdmin && currentUser.nickname ? currentUser.nickname : currentUser.displayTag}
+                  </span>
                 </div>
                 <button
                   type="button"

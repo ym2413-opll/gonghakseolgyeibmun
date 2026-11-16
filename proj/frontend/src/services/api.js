@@ -893,6 +893,55 @@ export const api = {
     return safeTarget;
   },
 
+  async updateAdminNickname(nickname) {
+    const cleanInput = typeof nickname === 'string' ? nickname.trim() : '';
+    if (cleanInput.length > 30) {
+      throw new Error('관리자 닉네임은 최대 30자까지 입력할 수 있습니다.');
+    }
+
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/admin/nickname`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({ nickname: cleanInput || null })
+        }, 5000);
+        const body = await parseJsonSafe(res);
+        if (res.ok && body.data) {
+          const normalized = normalizeUserObject(body.data);
+          this.saveSession(normalized);
+          return normalized;
+        }
+        const httpErr = new Error(body.message || '관리자 닉네임 설정에 실패했습니다.');
+        httpErr.isHttpError = true;
+        httpErr.status = res.status;
+        throw httpErr;
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote updateAdminNickname fallback:', e);
+      }
+    }
+
+    const sessionUser = this.getCurrentSessionUser();
+    if (!sessionUser || !sessionUser.isAdmin) {
+      throw new Error('관리자 계정만 닉네임을 설정할 수 있습니다.');
+    }
+    const nextNickname = cleanInput || null;
+    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
+    const target = localUsers.find((u) => u.id === sessionUser.id);
+    if (target) {
+      target.nickname = nextNickname;
+      safeSetStorage(STORAGE_KEY_USERS, localUsers);
+    }
+    const updatedUser = normalizeUserObject({ ...sessionUser, nickname: nextNickname });
+    this.saveSession(updatedUser);
+    return updatedUser;
+  },
+
   async createDepartment(deptPayload) {
     if (USE_REMOTE_BACKEND) {
       try {
@@ -1857,10 +1906,10 @@ export const api = {
     }
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
 
-    const authorLabel = sessionUser.role === 'professor'
-      ? `${sessionUser.name} 교수님`
-      : sessionUser.isAdmin
-        ? `관리자 (${sessionUser.name})님`
+    const authorLabel = sessionUser.isAdmin
+      ? `${sessionUser.nickname || sessionUser.name}님`
+      : sessionUser.role === 'professor'
+        ? `${sessionUser.name} 교수님`
         : '다른 수강생님';
 
     if (targetQ.studentId && targetQ.studentId !== sessionUser.id) {

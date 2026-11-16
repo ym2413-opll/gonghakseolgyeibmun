@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfessorNameList from '../common/ProfessorNameList';
+import AdminNicknameForm from './AdminNicknameForm';
 import {
   ShieldAlert,
   X,
@@ -464,6 +465,23 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     ))}
                   </div>
                 </div>
+              </div>
+
+              <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>
+                <h3 className="admin-panel-title">
+                  <ShieldAlert size={18} />
+                  관리자 닉네임 설정 (관리자 전용)
+                </h3>
+                <p className="text-xs text-muted" style={{ marginBottom: 12 }}>
+                  상단 프로필과 게시글·답변 작성자 표시명에 본명 대신 노출될 관리자 닉네임(최대 30자)을 설정합니다. 비워 두고 저장하면 기본 표시명으로 돌아갑니다.
+                </p>
+                <AdminNicknameForm
+                  compact
+                  onSaved={async (msg) => {
+                    notifySuccess(msg);
+                    if (onDataChanged) await onDataChanged();
+                  }}
+                />
               </div>
 
               <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>

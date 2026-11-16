@@ -20,6 +20,12 @@ import java.util.UUID
 
 class UserService {
 
+    private fun resolveAdminNickname(row: ResultRow): String? {
+        val isAdminAcc = row[UsersTable.isAdmin] || row[UsersTable.role] == UserRole.ADMIN.name
+        if (!isAdminAcc) return null
+        return row[UsersTable.nickname]?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     private fun rowToUserDto(row: ResultRow, includeCourses: Boolean = false): UserDto {
         val uId = row[UsersTable.id].value
         val courses = if (includeCourses) getCoursesForUserInternal(uId) else emptyList()
@@ -30,6 +36,7 @@ class UserService {
             identifier = row[UsersTable.identifier],
             department = row[UsersTable.department],
             displayTag = row[UsersTable.displayTag],
+            nickname = resolveAdminNickname(row),
             isDemo = row[UsersTable.isDemo],
             username = row[UsersTable.username],
             email = row[UsersTable.email],
@@ -465,6 +472,30 @@ class UserService {
         UsersTable.select { UsersTable.isDemo eq false }
             .orderBy(UsersTable.createdAt to SortOrder.DESC)
             .map { rowToUserDto(it, includeCourses = false) }
+    }
+
+    suspend fun updateAdminNickname(adminUserId: UUID, rawNickname: String?): UserDto = dbQuery {
+        val row = UsersTable.select { UsersTable.id eq adminUserId }.singleOrNull()
+            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+        if (row[UsersTable.isWithdrawn]) {
+            throw IllegalStateException("탈퇴 처리된 계정은 닉네임을 변경할 수 없습니다.")
+        }
+        val isAdminAcc = row[UsersTable.isAdmin] || row[UsersTable.role] == UserRole.ADMIN.name
+        if (!isAdminAcc) {
+            throw IllegalStateException("관리자 계정만 닉네임을 설정할 수 있습니다.")
+        }
+
+        val cleaned = PasswordSecurity.sanitizeInput(rawNickname).trim().takeIf { it.isNotEmpty() }
+        if (cleaned != null && cleaned.length > 30) {
+            throw IllegalArgumentException("관리자 닉네임은 최대 30자까지 입력할 수 있습니다.")
+        }
+
+        UsersTable.update({ UsersTable.id eq adminUserId }) {
+            it[nickname] = cleaned
+        }
+
+        val updated = UsersTable.select { UsersTable.id eq adminUserId }.single()
+        rowToUserDto(updated, includeCourses = true)
     }
 
     suspend fun sanctionUser(targetUserId: UUID, request: UserSanctionRequest): UserDto = dbQuery {

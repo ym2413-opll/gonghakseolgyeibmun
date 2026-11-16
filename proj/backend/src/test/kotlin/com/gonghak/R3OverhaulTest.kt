@@ -1643,4 +1643,131 @@ class R3OverhaulTest {
         assertEquals(profB.user.id, courseBAfterB.assignedProfessorId)
         assertTrue(courseBAfterB.assignedProfessorRegistered)
     }
+
+    @Test
+    fun testAdminNicknameConfigurationAndAuthorization() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "nick_admin_prof",
+                    password = "adminpass1234",
+                    name = "실명관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("nick_admin_prof", grant = true)
+
+        val course = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCourseRequest(name = "닉네임테스트과목", code = "NCK-101", semester = "2026-2", scopeType = "ALL"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+
+        val profReg = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "nick_regular_prof",
+                    password = "profpass1234",
+                    name = "일반교수",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val stuReg = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "nick_stu_01",
+                    password = "stupass1234",
+                    name = "닉네임학생",
+                    department = "소프트웨어학과",
+                    identifier = "AUTO",
+                    courseIds = listOf(course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        // 1. Non-admin users cannot call PUT /api/admin/nickname
+        val stuAttempt = client.put("/api/admin/nickname") {
+            header(HttpHeaders.Authorization, "Bearer ${stuReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateAdminNicknameRequest(nickname = "사칭관리자"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, stuAttempt.status)
+
+        val profAttempt = client.put("/api/admin/nickname") {
+            header(HttpHeaders.Authorization, "Bearer ${profReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateAdminNicknameRequest(nickname = "사칭관리자"))
+        }
+        assertEquals(HttpStatusCode.Forbidden, profAttempt.status)
+
+        // 2. Excessively long nickname (>30 chars) rejected cleanly
+        val tooLongRes = client.put("/api/admin/nickname") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateAdminNicknameRequest(nickname = "매우긴관리자닉네임".repeat(5)))
+        }
+        assertEquals(HttpStatusCode.BadRequest, tooLongRes.status)
+
+        // 3. Admin sets nickname -> reflected in /api/auth/me, answer display name, and notification
+        val setRes = client.put("/api/admin/nickname") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateAdminNicknameRequest(nickname = "학사지원팀"))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<UserDto>>().data!!
+        assertEquals("학사지원팀", setRes.nickname)
+
+        val meAfterSet = client.get("/api/auth/me") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+        }.body<ApiResponse<UserDto>>().data!!
+        assertEquals("학사지원팀", meAfterSet.nickname)
+
+        val qRes = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuReg.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateQuestionRequest(courseId = course.id, profId = profReg.user.id, category = QuestionCategory.LECTURE, title = "관리자 닉네임 질문", rawContent = "테스트 본문"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        val ansRes = client.post("/api/questions/${qRes.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "학사지원팀 공식 안내입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals("학사지원팀", ansRes.authorName)
+        assertTrue(ansRes.isAdminAuthor)
+
+        val stuNotifs = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${stuReg.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(stuNotifs.any { it.questionId == qRes.id && it.message.contains("학사지원팀") })
+
+        // 4. Clearing nickname restores null cleanly
+        val clearRes = client.put("/api/admin/nickname") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateAdminNicknameRequest(nickname = "   "))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<UserDto>>().data!!
+        assertNull(clearRes.nickname)
+    }
 }

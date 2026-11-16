@@ -26,6 +26,7 @@ data class UserDto(
     val identifier: String,
     val department: String,
     val displayTag: String,
+    val nickname: String? = null,
     val isDemo: Boolean = false,
     val username: String? = null,
     val email: String? = null,
@@ -34,6 +35,11 @@ data class UserDto(
     val questionBanUntil: String? = null,
     val answerBanUntil: String? = null,
     val courses: List<CourseDto> = emptyList()
+)
+
+@Serializable
+data class UpdateAdminNicknameRequest(
+    val nickname: String? = null
 )
 
 @Serializable

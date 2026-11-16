@@ -4,7 +4,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import CoursePicker from './CoursePicker';
-import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell } from 'lucide-react';
+import AdminNicknameForm from '../admin/AdminNicknameForm';
+import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell, ShieldAlert } from 'lucide-react';
 
 const FONT_SIZE_OPTIONS = [
   { id: 'sm', label: '작게', sample: '가나다' },
@@ -28,7 +29,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
     updateFontSize,
     updateHelpLevel
   } = useTheme();
-  const { currentUser, isStudent, isProfessor, allCourses, updateUserCourses } = useAuth();
+  const { currentUser, isStudent, isProfessor, isAdmin, allCourses, updateUserCourses } = useAuth();
   const { browserPermission, requestPermission, sendTestNotification } = useNotifications();
 
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
@@ -291,6 +292,24 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
               </div>
             )}
           </div>
+
+          {isAdmin && (
+            <>
+              <div className="settings-divider" />
+              <div className="settings-section">
+                <div className="settings-title-group" style={{ marginBottom: 10 }}>
+                  <ShieldAlert size={17} className="text-danger" />
+                  <div>
+                    <h4 className="settings-section-title">관리자 닉네임 설정</h4>
+                    <p className="settings-section-desc">
+                      게시글·답변 및 상단 프로필에 표시될 관리자 닉네임을 설정합니다. (최대 30자)
+                    </p>
+                  </div>
+                </div>
+                <AdminNicknameForm onSaved={onCoursesUpdated} />
+              </div>
+            </>
+          )}
 
           {canManageCourses && (
             <>
