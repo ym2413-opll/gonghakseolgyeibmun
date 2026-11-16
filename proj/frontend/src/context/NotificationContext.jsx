@@ -86,9 +86,9 @@ export function NotificationProvider({ children }) {
     return result;
   };
 
-  const sendTestNotification = useCallback(() => {
+  const sendTestNotification = useCallback(async () => {
     setBrowserPermission(getBrowserNotificationPermission());
-    return sendBrowserNotification('교수질문센터 테스트 알림', {
+    return await sendBrowserNotification('교수질문센터 테스트 알림', {
       body: '새 질문·꼬리질문·답변이 등록되면 이와 같이 브라우저 알림이 표시됩니다.',
       tag: `cistus-test-${Date.now()}`
     });

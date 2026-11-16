@@ -35,7 +35,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
   const [courseSaving, setCourseSaving] = useState(false);
   const [courseStatus, setCourseStatus] = useState({ type: '', text: '' });
-  const [notifTestStatus, setNotifTestStatus] = useState('');
+  const [notifTestStatus, setNotifTestStatus] = useState({ type: '', text: '' });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -48,7 +48,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   useEffect(() => {
     if (isOpen) {
       setCourseStatus({ type: '', text: '' });
-      setNotifTestStatus('');
+      setNotifTestStatus({ type: '', text: '' });
     }
   }, [isOpen]);
 
@@ -247,10 +247,17 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                   onClick={async () => {
                     const perm = await requestPermission();
                     if (perm === 'granted') {
-                      sendTestNotification();
-                      setNotifTestStatus('알림 권한이 허용되었고 테스트 알림을 전송했습니다.');
+                      const sent = await sendTestNotification();
+                      setNotifTestStatus(
+                        sent
+                          ? { type: 'success', text: '알림 권한이 허용되었고 테스트 알림을 전송했습니다.' }
+                          : { type: 'error', text: '알림 권한은 허용되었지만 브라우저 알림 생성에 실패했습니다.' }
+                      );
                     } else if (perm === 'denied') {
-                      setNotifTestStatus('권한 요청이 차단되었습니다. 브라우저 주소창 권한 설정을 확인해 주세요.');
+                      setNotifTestStatus({
+                        type: 'error',
+                        text: '권한 요청이 차단되었습니다. 브라우저 주소창 권한 설정을 확인해 주세요.'
+                      });
                     }
                   }}
                 >
@@ -262,12 +269,15 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    const sent = sendTestNotification();
+                  onClick={async () => {
+                    const sent = await sendTestNotification();
                     setNotifTestStatus(
                       sent
-                        ? '테스트 브라우저 알림을 전송했습니다. (OS 방해금지 모드가 켜져 있으면 숨겨질 수 있습니다.)'
-                        : '브라우저 알림 생성에 실패했습니다.'
+                        ? {
+                            type: 'success',
+                            text: '테스트 브라우저 알림을 전송했습니다. (OS 방해금지 모드가 켜져 있으면 숨겨질 수 있습니다.)'
+                          }
+                        : { type: 'error', text: '브라우저 알림 생성에 실패했습니다.' }
                     );
                   }}
                 >
@@ -286,9 +296,14 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 Chrome 등 브라우저는 보안상 HTTPS(또는 localhost) 주소에서만 Web Notification 알림을 허용합니다.
               </p>
             )}
-            {notifTestStatus && (
-              <div className="settings-inline-status is-success" style={{ marginTop: 8 }}>
-                {notifTestStatus}
+            {notifTestStatus?.text && (
+              <div
+                className={`settings-inline-status ${
+                  notifTestStatus.type === 'error' ? 'is-error' : 'is-success'
+                }`}
+                style={{ marginTop: 8 }}
+              >
+                {notifTestStatus.text}
               </div>
             )}
           </div>

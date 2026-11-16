@@ -22,7 +22,7 @@ self.addEventListener('push', (event) => {
   const options = {
     body: payload.body || '',
     icon: payload.icon || '/favicon.png',
-    badge: '/favicon.png',
+    badge: payload.badge || '/notification-badge.png',
     tag: payload.tag || (payload.id ? `cistus-notif-${payload.id}` : `cistus-push-${Date.now()}`),
     data: {
       url: payload.url || '/',

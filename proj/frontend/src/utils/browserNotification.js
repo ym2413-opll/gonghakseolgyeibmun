@@ -140,16 +140,16 @@ export async function clearBrowserPushSubscription() {
   }
 }
 
-export function sendBrowserNotification(title, options = {}) {
-  if (!isBrowserNotificationSupported()) return null;
-  if (Notification.permission !== 'granted') return null;
+export async function sendBrowserNotification(title, options = {}) {
+  if (!isBrowserNotificationSupported()) return false;
+  if (Notification.permission !== 'granted') return false;
 
   const { onClick, ...rest } = options;
   const tag = options.tag || `qna-notif-${Date.now()}`;
   const notifOptions = {
     body: options.body || '',
     icon: options.icon || '/favicon.png',
-    badge: '/favicon.png',
+    badge: options.badge || '/notification-badge.png',
     tag,
     silent: Boolean(options.silent),
     ...rest
@@ -166,17 +166,34 @@ export function sendBrowserNotification(title, options = {}) {
       };
     }
 
-    return n;
+    return true;
   } catch (err) {
-    // Fallback for mobile browsers that forbid window.Notification constructor and require SW showNotification
-    if (isWebPushSupported()) {
-      navigator.serviceWorker
-        .getRegistration('/')
-        .then((reg) => reg?.showNotification(title, notifOptions))
-        .catch(() => {});
-    } else {
+    // Android Chrome 등 모바일 브라우저는 window.Notification 생성자를 차단하므로 Service Worker showNotification 사용
+    if (!('serviceWorker' in navigator) || !isBrowserNotificationSecureContext()) {
       console.warn('[Notification] Failed to create native Notification:', err);
+      return false;
     }
-    return null;
+
+    try {
+      let reg = await navigator.serviceWorker.getRegistration('/');
+      if (!reg) {
+        reg = await registerNotificationServiceWorker();
+      }
+      if (!reg?.active) {
+        const readyReg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000))
+        ]);
+        if (readyReg) reg = readyReg;
+      }
+      if (!reg || typeof reg.showNotification !== 'function') {
+        return false;
+      }
+      await reg.showNotification(title, notifOptions);
+      return true;
+    } catch (swErr) {
+      console.warn('[Notification] Failed to show Service Worker notification:', swErr);
+      return false;
+    }
   }
 }
