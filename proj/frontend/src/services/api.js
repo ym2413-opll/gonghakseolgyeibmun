@@ -10,6 +10,7 @@ import {
 } from './mockData';
 import { calculateSimilarQuestions } from '../utils/wordSimilarity';
 import { generateSummaryTitle } from '../utils/textSummary';
+import { clearBrowserPushSubscription } from '../utils/browserNotification';
 
 const STORAGE_KEY_QUESTIONS = 'prof_qa_questions_v3';
 const STORAGE_KEY_SETTINGS = 'prof_qa_settings_v3';
@@ -397,6 +398,24 @@ export const api = {
 
   async logout(options = {}) {
     const headers = getAuthHeaders();
+    if (USE_REMOTE_BACKEND && !options.skipRemote) {
+      try {
+        const endpoint = await clearBrowserPushSubscription();
+        if (endpoint) {
+          await fetch(`${API_BASE_URL}/push/unsubscribe`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              ...headers
+            },
+            body: JSON.stringify({ endpoint })
+          }).catch(() => {});
+        }
+      } catch {
+        // Ignore push unsubscribe errors during logout
+      }
+    }
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem('prof_qa_current_user_id');
@@ -2193,5 +2212,38 @@ export const api = {
       safeSetStorage(STORAGE_KEY_NOTIFS, notifs);
     }
     return true;
+  },
+
+  async getVapidPublicKey() {
+    if (!USE_REMOTE_BACKEND) return { publicKey: '', enabled: false };
+    try {
+      const res = await fetchWithTimeout(`${API_BASE_URL}/push/vapid-public-key`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      }, 3000);
+      if (!res.ok) return { publicKey: '', enabled: false };
+      const body = await parseJsonSafe(res);
+      return body?.data || { publicKey: '', enabled: false };
+    } catch {
+      return { publicKey: '', enabled: false };
+    }
+  },
+
+  async subscribeWebPush(subscriptionPayload) {
+    if (!USE_REMOTE_BACKEND) return false;
+    try {
+      const res = await fetchWithTimeout(`${API_BASE_URL}/push/subscribe`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(subscriptionPayload)
+      }, 3000);
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 };

@@ -105,6 +105,20 @@ function MainApp() {
   }, [fetchQuestions, isAuthenticated, isAdmin]);
 
   useEffect(() => {
+    if (!isAuthenticated || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const qid = params.get('questionId');
+    if (qid) {
+      setSelectedQuestionId(qid);
+      setCurrentView('detail');
+      params.delete('questionId');
+      const nextSearch = params.toString();
+      const cleanUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
+      window.history.replaceState({}, '', cleanUrl);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     const handleNotifsUpdated = (e) => {
       void fetchQuestions();
       if (selectedQuestionId) {

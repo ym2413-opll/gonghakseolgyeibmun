@@ -6,7 +6,8 @@ import { useTheme } from './ThemeContext';
 import {
   getBrowserNotificationPermission,
   requestBrowserNotificationPermission,
-  sendBrowserNotification
+  sendBrowserNotification,
+  syncBrowserPushSubscription
 } from '../utils/browserNotification';
 
 const NotificationContext = createContext();
@@ -79,6 +80,9 @@ export function NotificationProvider({ children }) {
   const requestPermission = async () => {
     const result = await requestBrowserNotificationPermission();
     setBrowserPermission(result);
+    if (result === 'granted' && currentUser?.id) {
+      void syncBrowserPushSubscription(api);
+    }
     return result;
   };
 
@@ -189,7 +193,7 @@ export function NotificationProvider({ children }) {
           toDispatch.slice(0, 3).forEach((item) => {
             sendBrowserNotification(item.title, {
               body: item.message,
-              tag: item.id,
+              tag: `cistus-notif-${item.id}`,
               onClick: () => {
                 void markAsRead(item.id);
                 if (item.questionId) {
@@ -233,8 +237,22 @@ export function NotificationProvider({ children }) {
     }
     notifiedIdsRef.current = readPersistedNotifiedIds(currentUser.id);
     void loadNotifications(false);
+    if (getBrowserNotificationPermission() === 'granted') {
+      void syncBrowserPushSubscription(api);
+    }
     if (isProfessor) {
       void loadProfSettings();
+    }
+
+    const handleServiceWorkerMessage = (event) => {
+      if (event?.data?.type === 'CISTUS_OPEN_QUESTION' && event.data.questionId) {
+        window.dispatchEvent(
+          new CustomEvent('cistus:open-question', { detail: { questionId: event.data.questionId } })
+        );
+      }
+    };
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
     }
 
     // 백그라운드 탭에서도 새 답변/질문을 감지해 OS 브라우저 알림을 띄울 수 있도록 8초마다 폴링
@@ -244,7 +262,11 @@ export function NotificationProvider({ children }) {
 
     const handleWakePoll = () => {
       if (document.hidden) return;
-      setBrowserPermission(getBrowserNotificationPermission());
+      const currentPerm = getBrowserNotificationPermission();
+      setBrowserPermission(currentPerm);
+      if (currentPerm === 'granted') {
+        void syncBrowserPushSubscription(api);
+      }
       if (Date.now() - lastPollAtRef.current >= 2000) {
         void loadNotifications(true);
       }
@@ -256,6 +278,9 @@ export function NotificationProvider({ children }) {
       clearInterval(pollInterval);
       window.removeEventListener('focus', handleWakePoll);
       document.removeEventListener('visibilitychange', handleWakePoll);
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
     };
   }, [currentUser?.id, isProfessor, loadNotifications, loadProfSettings]);
 

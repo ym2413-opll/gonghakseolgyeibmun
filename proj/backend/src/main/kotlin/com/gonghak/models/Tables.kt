@@ -147,3 +147,23 @@ object EmailLogsTable : UUIDTable("email_logs") {
     val status = varchar("status", 50).default("SENT")
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
+
+object WebPushKeysTable : org.jetbrains.exposed.sql.Table("web_push_keys") {
+    val keyName = varchar("key_name", 50)
+    val publicKey = varchar("public_key", 255)
+    val privateKey = text("private_key")
+    val subject = varchar("subject", 255).default("mailto:noreply@kw.ac.kr")
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+
+    override val primaryKey = PrimaryKey(keyName)
+}
+
+object PushSubscriptionsTable : UUIDTable("push_subscriptions") {
+    val userId = uuid("user_id").references(UsersTable.id)
+    val endpoint = varchar("endpoint", 1024).uniqueIndex()
+    val p256dh = varchar("p256dh", 255)
+    val auth = varchar("auth", 128)
+    val userAgent = varchar("user_agent", 255).default("")
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
+    val updatedAt = timestamp("updated_at").clientDefault { Instant.now() }
+}

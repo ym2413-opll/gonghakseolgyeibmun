@@ -513,6 +513,10 @@ class UserService {
             }
         }
 
+        if (action == "WITHDRAW") {
+            PushSubscriptionsTable.deleteWhere { PushSubscriptionsTable.userId eq targetUserId }
+        }
+
         val updated = UsersTable.select { UsersTable.id eq targetUserId }.single()
         rowToUserDto(updated, includeCourses = false)
     }

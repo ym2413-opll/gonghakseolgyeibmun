@@ -14,7 +14,8 @@ import java.util.UUID
 
 class NotificationService(
     private val emailService: EmailService = EmailService(),
-    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager()
+    private val workerManager: BackgroundWorkerManager = BackgroundWorkerManager(),
+    private val webPushService: WebPushService? = null
 ) {
     private val zoneId = ZoneId.of("Asia/Seoul")
     private val quietHourFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -146,7 +147,8 @@ class NotificationService(
         questionContent: String,
         authorDisplay: String,
         isCoProfessor: Boolean,
-        emailsToDispatch: MutableList<PendingEmailJob>
+        emailsToDispatch: MutableList<PendingEmailJob>,
+        pushesToDispatch: MutableList<PendingPushJob>
     ) {
         val profUser = UsersTable.select { UsersTable.id eq professorId }.singleOrNull()
         val profName = profUser?.get(UsersTable.name) ?: "교수"
@@ -160,15 +162,30 @@ class NotificationService(
             profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
         )
 
+        val notifId = UUID.randomUUID()
+        val safeTitle = notifTitle.take(200)
         NotificationsTable.insert {
+            it[id] = notifId
             it[userId] = professorId
             it[type] = notificationType.name
-            it[title] = notifTitle.take(200)
+            it[title] = safeTitle
             it[message] = notifMessage
             it[referenceId] = questionId
             it[isRead] = false
             it[isHeld] = isQuiet
             it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+        }
+
+        if (!isQuiet) {
+            pushesToDispatch.add(
+                PendingPushJob(
+                    userId = professorId,
+                    notificationId = notifId,
+                    title = safeTitle,
+                    message = notifMessage,
+                    questionId = questionId
+                )
+            )
         }
 
         val emailEnabled = profSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
@@ -202,8 +219,9 @@ class NotificationService(
         questionContent: String = "",
         authorDisplay: String = "수강생"
     ) {
-        val pendingEmails = dbQuery(workerManager.notificationDispatcher) {
+        val (pendingEmails, pendingPushes) = dbQuery(workerManager.notificationDispatcher) {
             val emailsToDispatch = mutableListOf<PendingEmailJob>()
+            val pushesToDispatch = mutableListOf<PendingPushJob>()
 
             // 1. Notify Assigned Professor
             dispatchToProfessor(
@@ -218,7 +236,8 @@ class NotificationService(
                 questionContent = questionContent,
                 authorDisplay = authorDisplay,
                 isCoProfessor = false,
-                emailsToDispatch = emailsToDispatch
+                emailsToDispatch = emailsToDispatch,
+                pushesToDispatch = pushesToDispatch
             )
 
             // 2. Notify other professors of the same course IF category is LECTURE
@@ -246,17 +265,19 @@ class NotificationService(
                             questionContent = questionContent,
                             authorDisplay = authorDisplay,
                             isCoProfessor = true,
-                            emailsToDispatch = emailsToDispatch
+                            emailsToDispatch = emailsToDispatch,
+                            pushesToDispatch = pushesToDispatch
                         )
                     }
                 }
             }
 
-            emailsToDispatch
+            emailsToDispatch to pushesToDispatch
         }
 
-        // Dispatch SMTP/mail sending asynchronously on dedicated email worker threads after DB commit
+        // Dispatch SMTP/mail sending & Web Push asynchronously after DB commit
         pendingEmails.forEach { emailService.dispatchEmailAsync(it) }
+        webPushService?.dispatchPushAsync(pendingPushes)
     }
 
     suspend fun notifyFollowUpQuestion(
@@ -269,8 +290,9 @@ class NotificationService(
         authorDisplay: String,
         participatingProfessorIds: List<UUID> = emptyList()
     ) {
-        val pendingEmails = dbQuery(workerManager.notificationDispatcher) {
+        val (pendingEmails, pendingPushes) = dbQuery(workerManager.notificationDispatcher) {
             val emailsToDispatch = mutableListOf<PendingEmailJob>()
+            val pushesToDispatch = mutableListOf<PendingPushJob>()
             dispatchToProfessor(
                 professorId = assignedProfessorId,
                 notificationType = NotificationType.QUESTION_NEW,
@@ -283,7 +305,8 @@ class NotificationService(
                 questionContent = followUpContent,
                 authorDisplay = authorDisplay,
                 isCoProfessor = false,
-                emailsToDispatch = emailsToDispatch
+                emailsToDispatch = emailsToDispatch,
+                pushesToDispatch = pushesToDispatch
             )
 
             // Also alert co-professors who previously participated in this thread so follow-ups are never missed.
@@ -301,13 +324,15 @@ class NotificationService(
                     questionContent = followUpContent,
                     authorDisplay = authorDisplay,
                     isCoProfessor = true,
-                    emailsToDispatch = emailsToDispatch
+                    emailsToDispatch = emailsToDispatch,
+                    pushesToDispatch = pushesToDispatch
                 )
             }
-            emailsToDispatch
+            emailsToDispatch to pushesToDispatch
         }
 
         pendingEmails.forEach { emailService.dispatchEmailAsync(it) }
+        webPushService?.dispatchPushAsync(pendingPushes)
     }
 
     private fun insertInAppNotification(
@@ -317,7 +342,7 @@ class NotificationService(
         notifMessage: String,
         questionId: UUID,
         honorQuietHours: Boolean
-    ) {
+    ): PendingPushJob? {
         val profSetting = if (honorQuietHours) {
             ProfessorNotificationSettingsTable.select {
                 ProfessorNotificationSettingsTable.professorId eq recipientId
@@ -336,15 +361,30 @@ class NotificationService(
             false
         }
 
+        val notifId = UUID.randomUUID()
+        val safeTitle = notifTitle.take(200)
         NotificationsTable.insert {
+            it[id] = notifId
             it[userId] = recipientId
             it[type] = notificationType.name
-            it[title] = notifTitle.take(200)
+            it[title] = safeTitle
             it[message] = notifMessage
             it[referenceId] = questionId
             it[isRead] = false
             it[isHeld] = isQuiet
             it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+        }
+
+        return if (!isQuiet) {
+            PendingPushJob(
+                userId = recipientId,
+                notificationId = notifId,
+                title = safeTitle,
+                message = notifMessage,
+                questionId = questionId
+            )
+        } else {
+            null
         }
     }
 
@@ -382,7 +422,8 @@ class NotificationService(
         val profTitle = "[$courseName] 스레드에 새로운 답변이 등록되었습니다.".take(200)
         val profMessage = "${authorDisplay}이 답변을 남겼습니다: \"$questionTitle\""
 
-        dbQuery(workerManager.notificationDispatcher) {
+        val pendingPushes = dbQuery(workerManager.notificationDispatcher) {
+            val pushes = mutableListOf<PendingPushJob>()
             if (actorId != studentId) {
                 insertInAppNotification(
                     recipientId = studentId,
@@ -391,7 +432,7 @@ class NotificationService(
                     notifMessage = safeMessage,
                     questionId = questionId,
                     honorQuietHours = false
-                )
+                )?.let { pushes.add(it) }
             }
 
             // Notify assigned/participating professors when another professor, admin, or peer student replies.
@@ -403,9 +444,12 @@ class NotificationService(
                     notifMessage = profMessage,
                     questionId = questionId,
                     honorQuietHours = true
-                )
+                )?.let { pushes.add(it) }
             }
+            pushes
         }
+
+        webPushService?.dispatchPushAsync(pendingPushes)
     }
 
     /**
@@ -422,7 +466,8 @@ class NotificationService(
         val recipients = (listOf(assignedProfessorId) + participatingProfessorIds).distinct()
         val safeTitle = "[$courseName] 학생이 질문을 삭제했습니다.".take(200)
         val safeMessage = "질문 작성자가 등록했던 질문을 삭제했습니다: \"$questionTitle\""
-        dbQuery(workerManager.notificationDispatcher) {
+        val pendingPushes = dbQuery(workerManager.notificationDispatcher) {
+            val pushes = mutableListOf<PendingPushJob>()
             for (recipientId in recipients) {
                 insertInAppNotification(
                     recipientId = recipientId,
@@ -431,48 +476,69 @@ class NotificationService(
                     notifMessage = safeMessage,
                     questionId = questionId,
                     honorQuietHours = false
-                )
+                )?.let { pushes.add(it) }
             }
+            pushes
         }
+
+        webPushService?.dispatchPushAsync(pendingPushes)
     }
 
     /**
      * Executed periodically by the background scheduler thread to proactively release
      * DND-held notifications whose recipients are no longer in quiet hours.
      */
-    suspend fun releaseHeldNotificationsBatch(): Int = dbQuery(workerManager.notificationDispatcher) {
-        val heldUserIds = NotificationsTable.slice(NotificationsTable.userId)
-            .select { NotificationsTable.isHeld eq true }
-            .withDistinct()
-            .map { it[NotificationsTable.userId] }
+    suspend fun releaseHeldNotificationsBatch(): Int {
+        val (totalReleased, releasedPushes) = dbQuery(workerManager.notificationDispatcher) {
+            val heldUserIds = NotificationsTable.slice(NotificationsTable.userId)
+                .select { NotificationsTable.isHeld eq true }
+                .withDistinct()
+                .map { it[NotificationsTable.userId] }
 
-        if (heldUserIds.isEmpty()) return@dbQuery 0
+            if (heldUserIds.isEmpty()) return@dbQuery 0 to emptyList<PendingPushJob>()
 
-        var totalReleased = 0
-        for (uid in heldUserIds) {
-            val profSetting = ProfessorNotificationSettingsTable.select {
-                ProfessorNotificationSettingsTable.professorId eq uid
-            }.singleOrNull()
+            var releasedCount = 0
+            val pushes = mutableListOf<PendingPushJob>()
+            for (uid in heldUserIds) {
+                val profSetting = ProfessorNotificationSettingsTable.select {
+                    ProfessorNotificationSettingsTable.professorId eq uid
+                }.singleOrNull()
 
-            val isCurrentlyQuiet = if (profSetting != null) {
-                isNowInQuietHours(
-                    profSetting[ProfessorNotificationSettingsTable.quietHoursEnabled],
-                    profSetting[ProfessorNotificationSettingsTable.quietHoursStart],
-                    profSetting[ProfessorNotificationSettingsTable.quietHoursEnd]
-                )
-            } else {
-                false
-            }
+                val isCurrentlyQuiet = if (profSetting != null) {
+                    isNowInQuietHours(
+                        profSetting[ProfessorNotificationSettingsTable.quietHoursEnabled],
+                        profSetting[ProfessorNotificationSettingsTable.quietHoursStart],
+                        profSetting[ProfessorNotificationSettingsTable.quietHoursEnd]
+                    )
+                } else {
+                    false
+                }
 
-            if (!isCurrentlyQuiet) {
-                totalReleased += NotificationsTable.update({
-                    (NotificationsTable.userId eq uid) and (NotificationsTable.isHeld eq true)
-                }) {
-                    it[isHeld] = false
+                if (!isCurrentlyQuiet) {
+                    val toRelease = NotificationsTable.select {
+                        (NotificationsTable.userId eq uid) and (NotificationsTable.isHeld eq true)
+                    }.map { row ->
+                        PendingPushJob(
+                            userId = uid,
+                            notificationId = row[NotificationsTable.id].value,
+                            title = row[NotificationsTable.title],
+                            message = row[NotificationsTable.message],
+                            questionId = row[NotificationsTable.referenceId]
+                        )
+                    }
+                    releasedCount += NotificationsTable.update({
+                        (NotificationsTable.userId eq uid) and (NotificationsTable.isHeld eq true)
+                    }) {
+                        it[isHeld] = false
+                    }
+                    pushes.addAll(toRelease)
                 }
             }
+            releasedCount to pushes
         }
-        totalReleased
+
+        webPushService?.dispatchPushAsync(releasedPushes)
+        return totalReleased
     }
 
     suspend fun getNotifications(userId: UUID): List<NotificationDto> = dbQuery {

@@ -66,7 +66,9 @@ object DatabaseFactory {
             AttachmentsTable,
             EmailLogsTable,
             EmailReplyTokensTable,
-            ProcessedInboundEmailsTable
+            ProcessedInboundEmailsTable,
+            WebPushKeysTable,
+            PushSubscriptionsTable
         )
 
         // 1. Create missing tables first in an isolated transaction

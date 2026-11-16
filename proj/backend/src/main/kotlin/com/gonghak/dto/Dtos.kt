@@ -557,6 +557,29 @@ data class NotificationDto(
 )
 
 @Serializable
+data class VapidPublicKeyDto(
+    val publicKey: String,
+    val enabled: Boolean = true
+)
+
+@Serializable
+data class PushSubscriptionKeysDto(
+    val p256dh: String,
+    val auth: String
+)
+
+@Serializable
+data class SubscribePushRequest(
+    val endpoint: String,
+    val keys: PushSubscriptionKeysDto
+)
+
+@Serializable
+data class UnsubscribePushRequest(
+    val endpoint: String
+)
+
+@Serializable
 data class AttachmentDto(
     val id: String,
     val questionId: String? = null,

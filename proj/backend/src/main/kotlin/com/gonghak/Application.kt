@@ -41,7 +41,8 @@ fun Application.module() {
     val workerManager = BackgroundWorkerManager()
     val similarityService = SimilarityService()
     val emailService = EmailService(workerManager)
-    val notificationService = NotificationService(emailService, workerManager)
+    val webPushService = WebPushService(workerManager = workerManager)
+    val notificationService = NotificationService(emailService, workerManager, webPushService)
     val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
     val aiRefineService = AiRefineService(geminiApiKey, workerManager)
     val userService = UserService()
@@ -69,6 +70,7 @@ fun Application.module() {
         AdminConsoleManager.stopConsoleListener()
         workerManager.shutdown()
         aiRefineService.close()
+        webPushService.close()
         DatabaseFactory.close(preserveInMemory = true)
     }
 
@@ -87,7 +89,7 @@ fun Application.module() {
             if (!call.request.path().startsWith("/api/attachments")) {
                 call.response.header(
                     "Content-Security-Policy",
-                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+                    "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
                 )
             }
             if (call.isSecureTransport()) {
@@ -299,7 +301,7 @@ fun Application.module() {
         courseRoutes(userService)
         aiRoutes(aiRefineService, userService)
         questionRoutes(questionService, userService)
-        notificationRoutes(notificationService, emailService, userService)
+        notificationRoutes(notificationService, emailService, userService, webPushService)
         attachmentRoutes(attachmentService, userService)
         adminRoutes(userService, questionService, emailService)
         webhookRoutes(emailReplyService)
