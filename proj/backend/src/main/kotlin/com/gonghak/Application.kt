@@ -82,6 +82,11 @@ fun Application.module() {
             call.response.header("X-Content-Type-Options", "nosniff")
             call.response.header("X-Frame-Options", "DENY")
             call.response.header("Referrer-Policy", "strict-origin-when-cross-origin")
+            call.response.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+            call.response.header("X-Permitted-Cross-Domain-Policies", "none")
+            if (call.isSecureTransport()) {
+                call.response.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+            }
         }
     }
 

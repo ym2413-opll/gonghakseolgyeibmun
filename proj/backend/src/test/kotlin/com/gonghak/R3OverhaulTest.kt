@@ -1244,7 +1244,7 @@ class R3OverhaulTest {
         }
         assertEquals(HttpStatusCode.Forbidden, hideAdminAttempt.status)
 
-        // 4. Help level (NONE, SOME, ALL) & exhibitionMode settings persistence
+        // 4. Help level (NONE, SOME, ALL) & admin-only exhibitionMode settings persistence
         val initialSettings = client.get("/api/user/settings") {
             header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
         }.body<ApiResponse<UserSettingDto>>().data!!
@@ -1253,22 +1253,44 @@ class R3OverhaulTest {
         val updatedHelp = client.put("/api/settings") {
             header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
             contentType(ContentType.Application.Json)
-            setBody(UpdateUnifiedSettingRequest(helpLevel = "ALL", exhibitionMode = true))
+            setBody(UpdateUnifiedSettingRequest(helpLevel = "ALL"))
         }.also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<UnifiedSettingDto>()
         assertEquals("ALL", updatedHelp.helpLevel)
-        assertTrue(updatedHelp.exhibitionMode)
+        assertFalse(updatedHelp.exhibitionMode)
+
+        val stuExhibitionUnifiedAttempt = client.put("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUnifiedSettingRequest(exhibitionMode = true))
+        }
+        assertEquals(HttpStatusCode.Forbidden, stuExhibitionUnifiedAttempt.status)
+
+        val stuExhibitionUserAttempt = client.put("/api/user/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserSettingRequest(exhibitionMode = true))
+        }
+        assertEquals(HttpStatusCode.Forbidden, stuExhibitionUserAttempt.status)
+
+        val adminUpdatedExhibition = client.put("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${adminProfAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUnifiedSettingRequest(exhibitionMode = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<UnifiedSettingDto>()
+        assertTrue(adminUpdatedExhibition.exhibitionMode)
 
         val fetchedHelp = client.get("/api/user/settings") {
             header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
         }.body<ApiResponse<UserSettingDto>>().data!!
         assertEquals("ALL", fetchedHelp.helpLevel)
-        assertTrue(fetchedHelp.exhibitionMode)
+        assertFalse(fetchedHelp.exhibitionMode)
 
-        val fetchedUnified = client.get("/api/settings") {
-            header(HttpHeaders.Authorization, "Bearer ${domStuAuth.token}")
+        val fetchedAdminUnified = client.get("/api/settings") {
+            header(HttpHeaders.Authorization, "Bearer ${adminProfAuth.token}")
         }.also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<UnifiedSettingDto>()
-        assertTrue(fetchedUnified.exhibitionMode)
+        assertTrue(fetchedAdminUnified.exhibitionMode)
     }
 }

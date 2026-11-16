@@ -133,6 +133,12 @@ const QuestionList = ({
       </div>
 
       {/* 포럼 검색 및 필터 컨트롤 바 */}
+      <HelpBubble
+        tier="ALL"
+        mode="inline"
+        text="검색어, 카테고리, 답변 상태, '내 토픽만' 필터로 원하는 질문만 빠르게 찾아요."
+        className="mb-help-bubble"
+      />
       <div className="filter-bar">
         <div className="search-input-wrap">
           <Search size={16} className="search-icon" />
@@ -190,6 +196,12 @@ const QuestionList = ({
       </div>
 
       {/* 서양식 포럼 토픽 테이블 헤더 */}
+      <HelpBubble
+        tier="ALL"
+        mode="inline"
+        text="질문 행을 클릭하면 전체 답변 스레드를 보고, 질문자 본인은 AI 교정 전 초안 확인 및 삭제가 가능해요."
+        className="mb-help-bubble"
+      />
       <div className="forum-table-header">
         <div className="forum-col-topic">Topic (질문 스레드)</div>
         <div className="forum-col-users">Participants</div>

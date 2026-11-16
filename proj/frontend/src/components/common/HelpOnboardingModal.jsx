@@ -16,14 +16,14 @@ const HELP_OPTIONS = [
     id: 'SOME',
     title: '조금',
     badge: '추천',
-    desc: '핵심 기능만 표시해요.',
+    desc: '새 질문·설정 등 핵심 화면 안내만 표시해요.',
     icon: SlidersHorizontal
   },
   {
     id: 'ALL',
     title: '모두',
     badge: '전체',
-    desc: '모든 기능에 표시해요.',
+    desc: '검색·필터·알림·#인용 등 세부 기능 안내까지 모두 표시해요.',
     icon: Sparkles
   }
 ];

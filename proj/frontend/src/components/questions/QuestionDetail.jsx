@@ -427,7 +427,7 @@ const QuestionDetail = ({
         <div className="forum-thread-actions-right">
           {canToggleThread && (
             <HelpBubble
-              tier="SOME"
+              tier="ALL"
               mode="floating"
               placement="bottom-end"
               text="스레드 열림/닫힘을 전환해요. 열림 상태면 공동교수·타 학생도 답변할 수 있어요."

@@ -1284,4 +1284,70 @@ class SecurityRegressionTest {
         }
         assertTrue(got429On13th, "Expected control-character variants of login username to share account rate-limit bucket and trigger 429 on 13th attempt")
     }
+
+    @Test
+    fun testHttpsHeadersSecureCookieCookieAuthAndQuestionRateLimit() = testApplication {
+        val client = createClient { install(ContentNegotiation) { json(json) } }
+        val suffix = (1000..9999).random()
+
+        // 1. Registration policy endpoint & HTTPS security headers
+        val policyRes = client.get("/api/auth/registration-policy") {
+            header("X-Forwarded-Proto", "https")
+        }
+        assertEquals(HttpStatusCode.OK, policyRes.status)
+        assertTrue((policyRes.headers["Strict-Transport-Security"] ?: "").contains("max-age="))
+        assertEquals("none", policyRes.headers["X-Permitted-Cross-Domain-Policies"])
+        assertEquals("camera=(), microphone=(), geolocation=()", policyRes.headers["Permissions-Policy"])
+
+        // 2. Register student over forwarded HTTPS -> Set-Cookie includes HttpOnly + Secure; cookie-only auth works
+        val regRes = client.post("/api/auth/register") {
+            header("X-Forwarded-Proto", "https")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "https_stu_$suffix",
+                    password = "password1234",
+                    name = "보안쿠키학생",
+                    department = "소프트웨어학과",
+                    identifier = "AUTO",
+                    entryYear = 2029
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, regRes.status)
+        val setCookie = regRes.headers.getAll(HttpHeaders.SetCookie)?.joinToString(";").orEmpty()
+        assertTrue(setCookie.contains(AUTH_COOKIE_NAME))
+        assertTrue(setCookie.contains("HttpOnly", ignoreCase = true))
+        assertTrue(setCookie.contains("Secure", ignoreCase = true))
+        val regData = regRes.body<ApiResponse<AuthResponse>>().data!!
+
+        val meCookieOnly = client.get("/api/auth/me") {
+            header(HttpHeaders.Cookie, "$AUTH_COOKIE_NAME=${regData.token}")
+        }
+        assertEquals(HttpStatusCode.OK, meCookieOnly.status)
+
+        // 3. Question creation rate limit (15 / min -> 16th returns 429 TooManyRequests)
+        var got429 = false
+        for (i in 1..16) {
+            val qRes = client.post("/api/questions") {
+                header(HttpHeaders.Cookie, "$AUTH_COOKIE_NAME=${regData.token}")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    CreateQuestionRequest(
+                        courseId = "course-001",
+                        category = QuestionCategory.LECTURE,
+                        title = "레이트리밋 테스트 $i",
+                        content = "스팸 방지 테스트 본문 $i"
+                    )
+                )
+            }
+            if (i <= 15) {
+                assertEquals(HttpStatusCode.Created, qRes.status, "Question #$i should succeed before 15/min cap")
+            } else if (qRes.status == HttpStatusCode.TooManyRequests) {
+                got429 = true
+            }
+        }
+        assertTrue(got429, "16th rapid question creation within 1 minute must trigger 429 TooManyRequests")
+    }
 }

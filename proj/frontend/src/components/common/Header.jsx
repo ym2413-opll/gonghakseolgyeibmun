@@ -199,18 +199,25 @@ const Header = ({
           {isAuthenticated ? (
             <>
               <div className="dropdown-wrapper" ref={notifRef}>
-                <button
-                  type="button"
-                  className="btn-icon notif-trigger"
-                  onClick={() => setShowNotifMenu((prev) => !prev)}
-                  title="알림 목록"
-                  aria-label="알림"
+                <HelpBubble
+                  tier="ALL"
+                  mode="floating"
+                  placement="bottom-end"
+                  text="새 질문·답변 내역 확인과 브라우저 OS 알림 권한을 설정해요."
                 >
-                  <Bell size={18} />
-                  {unreadCount > 0 && (
-                    <span className="notif-count">{unreadCount}</span>
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    className="btn-icon notif-trigger"
+                    onClick={() => setShowNotifMenu((prev) => !prev)}
+                    title="알림 목록"
+                    aria-label="알림"
+                  >
+                    <Bell size={18} />
+                    {unreadCount > 0 && (
+                      <span className="notif-count">{unreadCount}</span>
+                    )}
+                  </button>
+                </HelpBubble>
 
                 {showNotifMenu && (
                   <div className="dropdown-menu notif-dropdown">

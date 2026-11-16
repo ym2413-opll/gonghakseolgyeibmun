@@ -54,6 +54,11 @@ fun Route.userSettingRoutes(
 
     suspend fun applyUnifiedUpdate(user: UserDto, request: UpdateUnifiedSettingRequest): UnifiedSettingDto {
         val userId = UUID.fromString(user.id)
+        val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
+        if (request.exhibitionMode != null && !isAdmin) {
+            throw IllegalStateException("전시 모드 설정은 관리자 모드에서만 변경할 수 있습니다.")
+        }
+
         val mappedTheme = request.theme ?: request.themeMode
         val mappedFont = request.fontSize
         val mappedHelpLevel = request.helpLevel
@@ -112,6 +117,8 @@ fun Route.userSettingRoutes(
             try {
                 val updated = applyUnifiedUpdate(user, request)
                 call.respond(HttpStatusCode.OK, updated)
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }
@@ -123,6 +130,8 @@ fun Route.userSettingRoutes(
             try {
                 val updated = applyUnifiedUpdate(user, request)
                 call.respond(HttpStatusCode.OK, updated)
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }
@@ -139,6 +148,13 @@ fun Route.userSettingRoutes(
         put {
             val user = call.requireAuthenticatedUser(userService) ?: return@put
             val request = call.receive<UpdateUserSettingRequest>()
+            val isAdmin = user.isAdmin || user.role == UserRole.ADMIN
+            if (request.exhibitionMode != null && !isAdmin) {
+                return@put call.respond(
+                    HttpStatusCode.Forbidden,
+                    ApiResponse<String>(success = false, message = "전시 모드 설정은 관리자 모드에서만 변경할 수 있습니다.")
+                )
+            }
             try {
                 val updated = userService.updateUserSetting(UUID.fromString(user.id), request)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = updated))

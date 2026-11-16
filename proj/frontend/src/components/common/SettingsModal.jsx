@@ -15,13 +15,8 @@ const FONT_SIZE_OPTIONS = [
 
 const HELP_LEVEL_OPTIONS = [
   { id: 'NONE', label: '필요 없음', desc: '표시 안 함' },
-  { id: 'SOME', label: '조금', desc: '핵심만' },
-  { id: 'ALL', label: '모두', desc: '전체 표시' }
-];
-
-const EXHIBITION_MODE_OPTIONS = [
-  { id: 'off', value: false, label: '꺼짐', desc: '직접 입력' },
-  { id: 'on', value: true, label: '켜짐', desc: '무작위 생성 표시' }
+  { id: 'SOME', label: '조금', desc: '핵심 안내만 표시' },
+  { id: 'ALL', label: '모두', desc: '필터·알림·편집 팁 전체' }
 ];
 
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
@@ -29,11 +24,9 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
     theme,
     fontSize,
     helpLevel,
-    exhibitionMode,
     updateTheme,
     updateFontSize,
-    updateHelpLevel,
-    updateExhibitionMode
+    updateHelpLevel
   } = useTheme();
   const { currentUser, isStudent, isProfessor, allCourses, updateUserCourses } = useAuth();
   const { browserPermission, requestPermission, sendTestNotification } = useNotifications();
@@ -212,31 +205,6 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                     <div className="help-level-option-desc">{option.desc}</div>
                   </div>
                   {helpLevel === option.id && <Check size={16} className="text-primary" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="settings-divider" />
-
-          <div className="settings-section" style={canManageCourses ? undefined : { marginBottom: 0 }}>
-            <h4 className="settings-section-title">전시 모드</h4>
-            <p className="settings-section-desc">
-              회원가입 시 학번 무작위 생성 버튼을 노출합니다.
-            </p>
-            <div className="exhibition-option-list">
-              {EXHIBITION_MODE_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.id}
-                  className={`fontsize-option-item ${exhibitionMode === option.value ? 'active' : ''}`}
-                  onClick={() => updateExhibitionMode(option.value)}
-                >
-                  <div>
-                    <div className="fontsize-label">{option.label}</div>
-                    <div className="help-level-option-desc">{option.desc}</div>
-                  </div>
-                  {exhibitionMode === option.value && <Check size={16} className="text-primary" />}
                 </button>
               ))}
             </div>

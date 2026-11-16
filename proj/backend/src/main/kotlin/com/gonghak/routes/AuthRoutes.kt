@@ -1,8 +1,10 @@
 package com.gonghak.routes
 
+import com.gonghak.config.EnvConfig
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.LoginRequest
 import com.gonghak.dto.RegisterRequest
+import com.gonghak.dto.RegistrationPolicyDto
 import com.gonghak.service.PasswordSecurity
 import com.gonghak.service.UserService
 import io.ktor.http.*
@@ -18,6 +20,12 @@ fun Route.authRoutes(userService: UserService) {
     val nextIdIpLimiter = SlidingWindowRateLimiter(maxRequests = 60, windowMillis = 60_000L)
 
     route("/api/auth") {
+        // Public registration policy (exposes non-sensitive requirements such as invite code need)
+        get("/registration-policy") {
+            val required = !EnvConfig.get("PROFESSOR_INVITE_CODE").isNullOrBlank()
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = RegistrationPolicyDto(professorInviteRequired = required)))
+        }
+
         // Preview next auto-assigned / random 10-digit student ID: (YYYY)(DDD)(SSS)
         get("/next-student-id") {
             val ipKey = call.clientRateLimitKey()

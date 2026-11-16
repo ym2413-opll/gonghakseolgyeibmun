@@ -3,6 +3,7 @@ package com.gonghak.service
 import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.DatabaseFactory.dbQueryWithRetry
+import com.gonghak.config.EnvConfig
 import com.gonghak.dto.*
 import com.gonghak.models.*
 import org.jetbrains.exposed.sql.*
@@ -11,6 +12,8 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.notInList
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -119,6 +122,19 @@ class UserService {
         }
 
         val role = if (request.role == UserRole.PROFESSOR) UserRole.PROFESSOR else UserRole.STUDENT
+        if (role == UserRole.PROFESSOR) {
+            val requiredInviteCode = EnvConfig.get("PROFESSOR_INVITE_CODE")
+            if (!requiredInviteCode.isNullOrBlank()) {
+                val providedCode = request.professorInviteCode?.trim().orEmpty()
+                val matches = MessageDigest.isEqual(
+                    requiredInviteCode.toByteArray(StandardCharsets.UTF_8),
+                    providedCode.toByteArray(StandardCharsets.UTF_8)
+                )
+                if (!matches) {
+                    throw IllegalStateException("교수 가입 인증 코드가 올바르지 않습니다.")
+                }
+            }
+        }
         val passwordHash = PasswordSecurity.hashPassword(request.password)
         val newUserId = UUID.randomUUID()
 

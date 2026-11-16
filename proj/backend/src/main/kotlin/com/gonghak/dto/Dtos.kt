@@ -47,8 +47,14 @@ data class RegisterRequest(
     val entryYear: Int? = null,
     val isForeign: Boolean = false,
     val email: String? = null,      // 교수 이메일
+    val professorInviteCode: String? = null,
     val courseIds: List<String> = emptyList(),
     val courseNames: List<String> = emptyList()
+)
+
+@Serializable
+data class RegistrationPolicyDto(
+    val professorInviteRequired: Boolean = false
 )
 
 @Serializable

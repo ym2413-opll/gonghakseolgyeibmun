@@ -15,6 +15,11 @@ fun Route.questionRoutes(
     questionService: QuestionService,
     userService: UserService = UserService()
 ) {
+    val questionCreateLimiter = SlidingWindowRateLimiter(maxRequests = 15, windowMillis = 60_000L)
+    val answerCreateLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000L)
+    val followUpCreateLimiter = SlidingWindowRateLimiter(maxRequests = 20, windowMillis = 60_000L)
+    val similarSearchLimiter = SlidingWindowRateLimiter(maxRequests = 60, windowMillis = 60_000L)
+
     route("/api/questions") {
         // List questions
         get {
@@ -45,7 +50,11 @@ fun Route.questionRoutes(
 
         // Similar questions lookup (GET query parameters)
         get("/similar") {
-            call.requireAuthenticatedUser(userService) ?: return@get
+            val user = call.requireAuthenticatedUser(userService) ?: return@get
+            if (!similarSearchLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(HttpStatusCode.TooManyRequests, ApiResponse<String>(success = false, message = "유사 질문 검색 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."))
+                return@get
+            }
             val courseIdStr = call.request.queryParameters["courseId"]
             val categoryStr = call.request.queryParameters["category"]
             val queryText = call.request.queryParameters["query"]
@@ -83,7 +92,11 @@ fun Route.questionRoutes(
 
         // Similar questions lookup (POST JSON body for frontend api.js)
         post("/similar") {
-            call.requireAuthenticatedUser(userService) ?: return@post
+            val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!similarSearchLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(HttpStatusCode.TooManyRequests, ApiResponse<String>(success = false, message = "유사 질문 검색 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."))
+                return@post
+            }
             val request = call.receive<SimilarQuestionRequest>()
             if (request.category == QuestionCategory.GRADE) {
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = emptyList<SimilarQuestionDto>()))
@@ -106,6 +119,10 @@ fun Route.questionRoutes(
         // Create new question
         post {
             val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!questionCreateLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(HttpStatusCode.TooManyRequests, ApiResponse<String>(success = false, message = "질문 등록 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."))
+                return@post
+            }
             val userId = UUID.fromString(user.id)
             val request = call.receive<CreateQuestionRequest>()
 
@@ -168,6 +185,10 @@ fun Route.questionRoutes(
         // Post answer
         post("/{id}/answers") {
             val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!answerCreateLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(HttpStatusCode.TooManyRequests, ApiResponse<String>(success = false, message = "답변 등록 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."))
+                return@post
+            }
             val profId = UUID.fromString(user.id)
             val questionId = parseQuestionId(call.parameters["id"])
             val request = call.receive<CreateAnswerRequest>()
@@ -274,6 +295,10 @@ fun Route.questionRoutes(
         // Post student follow-up question in thread
         post("/{id}/followups") {
             val user = call.requireAuthenticatedUser(userService) ?: return@post
+            if (!followUpCreateLimiter.allow("${user.id}|${call.clientRateLimitKey()}")) {
+                call.respond(HttpStatusCode.TooManyRequests, ApiResponse<String>(success = false, message = "추가 질문 등록 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."))
+                return@post
+            }
             val studentId = UUID.fromString(user.id)
             val questionId = parseQuestionId(call.parameters["id"])
             val request = call.receive<CreateFollowUpRequest>()

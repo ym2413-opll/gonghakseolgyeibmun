@@ -1,5 +1,5 @@
 // src/components/common/AuthGateOverlay.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
@@ -42,10 +42,25 @@ const AuthGateOverlay = () => {
   const [entryYear, setEntryYear] = useState(2026);
   const [isForeign, setIsForeign] = useState(false);
   const [studentId, setStudentId] = useState('');
+  const [professorInviteCode, setProfessorInviteCode] = useState('');
+  const [professorInviteRequired, setProfessorInviteRequired] = useState(false);
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
 
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (viewMode !== 'register') return;
+    let active = true;
+    api.getRegistrationPolicy().then((policy) => {
+      if (active) {
+        setProfessorInviteRequired(Boolean(policy?.professorInviteRequired));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [viewMode]);
 
   const effectiveDepartment = department || departments[0]?.name || '';
 
@@ -100,6 +115,7 @@ const AuthGateOverlay = () => {
         isForeign: role === 'STUDENT' ? Boolean(isForeign) : false,
         identifier: role === 'STUDENT' ? cleanSid : null,
         email: null,
+        professorInviteCode: role === 'PROFESSOR' ? professorInviteCode.trim() : null,
         courseIds: selectedCourseIds,
         courseNames: selectedCourses.map((c) => c.name)
       });
@@ -320,6 +336,23 @@ const AuthGateOverlay = () => {
                 />
               </div>
             </div>
+
+            {role === 'PROFESSOR' && professorInviteRequired && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="reg-prof-invite">
+                  교수 가입 인증 코드 *
+                </label>
+                <input
+                  id="reg-prof-invite"
+                  type="password"
+                  className="form-input"
+                  placeholder="관리자로부터 안내받은 교수 인증 코드를 입력하세요"
+                  value={professorInviteCode}
+                  onChange={(e) => setProfessorInviteCode(e.target.value)}
+                  required
+                />
+              </div>
+            )}
 
             <div className="auth-form-grid-2">
               <div className="form-group">

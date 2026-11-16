@@ -206,6 +206,12 @@ const ProfessorDashboard = ({
       </div>
 
       {/* 필터 바 */}
+      <HelpBubble
+        tier="ALL"
+        mode="inline"
+        text="검색·카테고리·미답변 필터로 우선 답변할 질문을 좁히고, 상태 바에서 이메일·방해금지 설정을 확인해요."
+        className="mb-help-bubble"
+      />
       <div className="filter-bar">
         <div className="search-input-wrap">
           <Search size={16} className="search-icon" />

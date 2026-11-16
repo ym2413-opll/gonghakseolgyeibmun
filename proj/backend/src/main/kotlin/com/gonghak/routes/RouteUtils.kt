@@ -118,8 +118,14 @@ fun ApplicationCall.getVerifiedTokenClaims(): PasswordSecurity.VerifiedAuthToken
 
 fun ApplicationCall.getVerifiedTokenUserId(): UUID? = getVerifiedTokenClaims()?.userId
 
-private fun ApplicationCall.isSecureTransport(): Boolean {
-    val forwardedProto = request.headers["X-Forwarded-Proto"]?.trim()
+fun ApplicationCall.isSecureTransport(): Boolean {
+    if (EnvConfig.get("FORCE_HTTPS_COOKIES")?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    if (EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    val forwardedProto = request.headers["X-Forwarded-Proto"]?.split(",")?.firstOrNull()?.trim()
     if (!forwardedProto.isNullOrEmpty()) {
         return forwardedProto.equals("https", ignoreCase = true)
     }

@@ -136,13 +136,15 @@ export const ThemeProvider = ({ children }) => {
   };
 
   const updateExhibitionMode = async (enabled) => {
+    const isAdminUser = Boolean(currentUser?.isAdmin || currentUser?.role === 'admin');
+    if (!isAdminUser) {
+      throw new Error('전시 모드 설정은 관리자 모드에서만 변경할 수 있습니다.');
+    }
     const normalized = Boolean(enabled);
+    const updated = await api.updateSettings(currentUser.id, { exhibitionMode: normalized });
+    setSettings(updated);
     setExhibitionMode(normalized);
     localStorage.setItem('prof_qa_exhibition_mode', String(normalized));
-    if (currentUser?.id) {
-      const updated = await api.updateSettings(currentUser.id, { exhibitionMode: normalized });
-      setSettings(updated);
-    }
   };
 
   const updateAllSettings = async (partialSettings) => {

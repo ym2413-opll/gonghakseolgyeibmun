@@ -118,12 +118,12 @@ function replaceAiPlaceholders(
 }
 
 function getAuthHeaders() {
-  const token = (localStorage.getItem(STORAGE_KEY_TOKEN) || '').trim();
-  const headers = {};
-  if (token && token !== 'null' && token !== 'undefined') {
-    headers['Authorization'] = `Bearer ${token}`;
+  // Authentication is carried exclusively by the HttpOnly; Secure; SameSite=Lax cookie.
+  // Any legacy localStorage token is purged to prevent XSS token harvesting.
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_TOKEN)) {
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
   }
-  return headers;
+  return {};
 }
 
 function getCurrentUserId(overrideId) {
@@ -277,14 +277,29 @@ export const api = {
     return user && typeof user === 'object' && !Array.isArray(user) && user.id ? user : null;
   },
 
-  saveSession(user, token) {
+  saveSession(user) {
     if (user) {
       safeSetStorage(STORAGE_KEY_SESSION, user);
       localStorage.setItem('prof_qa_current_user_id', user.id);
     }
-    if (token) {
-      localStorage.setItem(STORAGE_KEY_TOKEN, token);
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
+  },
+
+  async getRegistrationPolicy() {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/auth/registration-policy`, {
+          credentials: 'include'
+        }, 2500);
+        if (res.ok) {
+          const body = await parseJsonSafe(res);
+          return body?.data || body || { professorInviteRequired: false };
+        }
+      } catch (e) {
+        console.warn('[API] Failed to fetch registration policy:', e);
+      }
     }
+    return { professorInviteRequired: false };
   },
 
   async getNextStudentId({ year = 2026, department = '', isForeign = false, random = false } = {}) {
@@ -410,6 +425,7 @@ export const api = {
             entryYear: payload.entryYear ? Number(payload.entryYear) : null,
             isForeign: Boolean(payload.isForeign),
             email: payload.email?.trim() || null,
+            professorInviteCode: payload.professorInviteCode?.trim() || null,
             courseIds: Array.isArray(payload.courseIds) ? payload.courseIds : [],
             courseNames: Array.isArray(payload.courseNames) ? payload.courseNames : []
           })
@@ -421,13 +437,12 @@ export const api = {
         }
 
         const authData = body.data || body;
-        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []), authData.token);
+        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []));
         const courses = await this.getCourses(authData.user.id);
         const normalized = normalizeUserObject(authData.user, courses);
-        this.saveSession(normalized, authData.token);
-        return { user: normalized, token: authData.token };
+        this.saveSession(normalized);
+        return { user: normalized };
       } catch (e) {
-        clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
           throw new Error('서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
         }
@@ -563,11 +578,11 @@ export const api = {
         }
 
         const authData = body.data || body;
-        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []), authData.token);
+        this.saveSession(normalizeUserObject(authData.user, authData.user?.courses || []));
         const courses = await this.getCourses(authData.user.id);
         const normalized = normalizeUserObject(authData.user, courses);
-        this.saveSession(normalized, authData.token);
-        return { user: normalized, token: authData.token };
+        this.saveSession(normalized);
+        return { user: normalized };
       } catch (e) {
         if (e.name === 'AbortError') {
           throw new Error('서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
@@ -655,7 +670,10 @@ export const api = {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
-        const res = await fetch(`${API_BASE_URL}/departments`, { signal: controller.signal });
+        const res = await fetch(`${API_BASE_URL}/departments`, {
+          credentials: 'include',
+          signal: controller.signal
+        });
         clearTimeout(timeoutId);
         if (res.ok) {
           const body = await res.json();
@@ -678,6 +696,7 @@ export const api = {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         const res = await fetch(`${API_BASE_URL}/courses?all=true&limit=2000`, {
+          credentials: 'include',
           headers: getAuthHeaders(),
           signal: controller.signal
         });
@@ -1234,6 +1253,7 @@ export const api = {
       try {
         const res = await fetch(`${API_BASE_URL}/admin/answers/${answerId}`, {
           method: 'DELETE',
+          credentials: 'include',
           headers: getAuthHeaders()
         });
         const body = await res.json().catch(() => ({}));
@@ -1324,6 +1344,12 @@ export const api = {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
+        if (res.status === 403 || res.status === 401) {
+          const body = await res.json().catch(() => ({}));
+          const authErr = new Error(body.message || '설정을 변경할 권한이 없습니다.');
+          authErr.isHttpError = true;
+          throw authErr;
+        }
         if (res.ok) {
           const body = await res.json().catch(() => ({}));
           const data = body?.data || body;
@@ -1336,6 +1362,7 @@ export const api = {
           }
         }
       } catch (e) {
+        if (e?.isHttpError) throw e;
         console.warn('[API] Remote updateSettings failed, using local storage', e);
       }
     }
@@ -1841,6 +1868,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 1200);
         const res = await fetch(`${API_BASE_URL}/questions/similar`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: queryText, category, courseId }),
           signal: controller.signal
@@ -1903,6 +1931,7 @@ export const api = {
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         const res = await fetch(`${API_BASE_URL}/ai/refine`, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             text: rawText,
