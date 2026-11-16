@@ -125,9 +125,11 @@ fun ApplicationCall.isSecureTransport(): Boolean {
     if (EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true) {
         return true
     }
-    val forwardedProto = request.headers["X-Forwarded-Proto"]?.split(",")?.firstOrNull()?.trim()
-    if (!forwardedProto.isNullOrEmpty()) {
-        return forwardedProto.equals("https", ignoreCase = true)
+    if (isTrustedProxyRemoteAddress(request.local.remoteAddress)) {
+        val forwardedProto = request.headers["X-Forwarded-Proto"]?.split(",")?.lastOrNull()?.trim()
+        if (!forwardedProto.isNullOrEmpty()) {
+            return forwardedProto.equals("https", ignoreCase = true)
+        }
     }
     return request.origin.scheme.equals("https", ignoreCase = true)
 }
@@ -210,9 +212,22 @@ suspend fun ApplicationCall.requireProfessorOrAdmin(userService: UserService): U
     return user
 }
 
+fun isTrustedProxyRemoteAddress(remote: String?): Boolean {
+    val clean = remote?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return false
+    if (clean == "127.0.0.1" || clean == "localhost" || clean == "::1" || clean == "0:0:0:0:0:0:0:1") {
+        return true
+    }
+    val extraTrusted = EnvConfig.get("TRUSTED_PROXY_IPS")
+        ?.split(",")
+        ?.map { it.trim().lowercase() }
+        ?.filter { it.isNotEmpty() }
+        ?: emptyList()
+    return clean in extraTrusted
+}
+
 fun ApplicationCall.clientRateLimitKey(): String {
     val remote = request.local.remoteAddress
-    val forwardedFor = if (remote == "127.0.0.1" || remote == "::1" || remote == "0:0:0:0:0:0:0:1") {
+    val forwardedFor = if (isTrustedProxyRemoteAddress(remote)) {
         // Prefer X-Real-IP set by the local reverse proxy, or the rightmost hop appended by the local proxy.
         request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: request.headers["X-Forwarded-For"]?.split(",")?.lastOrNull()?.trim()?.takeIf { it.isNotEmpty() }

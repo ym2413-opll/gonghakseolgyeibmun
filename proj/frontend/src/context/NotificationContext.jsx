@@ -23,6 +23,43 @@ const DEFAULT_PROF_SETTINGS = {
   }
 };
 
+const NOTIFIED_STORAGE_PREFIX = 'cistus_notified_ids_v1_';
+const RECENT_INITIAL_WINDOW_MS = 30 * 60 * 1000; // 최초 로그인/재접속 시 최근 30분 이내 미읽음 알림은 안내
+
+function getNotifiedStorageKey(userId) {
+  return `${NOTIFIED_STORAGE_PREFIX}${userId}`;
+}
+
+function hasPersistedNotifiedHistory(userId) {
+  if (!userId || typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(getNotifiedStorageKey(userId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function readPersistedNotifiedIds(userId) {
+  if (!userId || typeof localStorage === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(getNotifiedStorageKey(userId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writePersistedNotifiedIds(userId, idSet) {
+  if (!userId || typeof localStorage === 'undefined') return;
+  try {
+    const arr = Array.from(idSet).slice(-200);
+    localStorage.setItem(getNotifiedStorageKey(userId), JSON.stringify(arr));
+  } catch {
+    // Ignore storage quota issues
+  }
+}
+
 export function NotificationProvider({ children }) {
   const { currentUser, isProfessor } = useAuth();
   const { settings: themeSettings } = useTheme();
@@ -84,6 +121,13 @@ export function NotificationProvider({ children }) {
     }
   }, [effectiveProfSettings]);
 
+  const isProfessorRef = useRef(isProfessor);
+  const isCurrentlyInDndRef = useRef(isCurrentlyInDnd);
+  useEffect(() => {
+    isProfessorRef.current = isProfessor;
+    isCurrentlyInDndRef.current = isCurrentlyInDnd;
+  }, [isProfessor, isCurrentlyInDnd]);
+
   const markAsRead = useCallback(async (id) => {
     try {
       await api.markNotificationRead(id, currentUser?.id);
@@ -111,43 +155,57 @@ export function NotificationProvider({ children }) {
       setNotifications(safeList);
       setUnreadCount(safeList.filter(n => !n.isRead).length);
 
-      // 브라우저 시스템 알림 트리거 (새 미읽음 알림이 존재하고, 방해금지 시간대가 아닐 때)
-      if (triggerBrowser) {
-        const newUnreads = safeList.filter(n => !n.isRead && !notifiedIdsRef.current.has(n.id));
-        newUnreads.forEach(n => notifiedIdsRef.current.add(n.id));
+      const nowMs = Date.now();
+      const hadHistory = hasPersistedNotifiedHistory(currentUser.id);
+      const unnotifiedUnreads = safeList.filter(
+        n => !n.isRead && !notifiedIdsRef.current.has(n.id)
+      );
 
-        if (newUnreads.length > 0) {
-          window.dispatchEvent(
-            new CustomEvent('cistus:notifications-updated', { detail: { count: newUnreads.length } })
-          );
-          const inDnd = isProfessor ? isCurrentlyInDnd() : false;
-          if (!inDnd && getBrowserNotificationPermission() === 'granted') {
-            newUnreads.slice(0, 3).forEach((item) => {
-              sendBrowserNotification(item.title, {
-                body: item.message,
-                tag: item.id,
-                onClick: () => {
-                  void markAsRead(item.id);
-                  if (item.questionId) {
-                    window.dispatchEvent(
-                      new CustomEvent('cistus:open-question', { detail: { questionId: item.questionId } })
-                    );
-                  }
+      // 이전 세션 기록이 있는 사용자는 방해금지 해제 후 도착한 누적 알림(>30분)도 놓치지 않도록 즉시 안내하고,
+      // 최초 접속 기기에서만 최근 도착 알림(30분 이내)만 안내함
+      const toDispatch = triggerBrowser || hadHistory
+        ? unnotifiedUnreads
+        : unnotifiedUnreads.filter((n) => {
+            const ts = n.createdAt ? new Date(n.createdAt).getTime() : NaN;
+            return !Number.isNaN(ts) && Math.abs(nowMs - ts) <= RECENT_INITIAL_WINDOW_MS;
+          });
+
+      safeList.forEach(n => notifiedIdsRef.current.add(n.id));
+      writePersistedNotifiedIds(currentUser.id, notifiedIdsRef.current);
+
+      if (toDispatch.length > 0) {
+        const top = toDispatch[0];
+        window.dispatchEvent(
+          new CustomEvent('cistus:notifications-updated', {
+            detail: {
+              count: toDispatch.length,
+              latestTitle: top.title,
+              latestMessage: top.message
+            }
+          })
+        );
+        const inDnd = isProfessorRef.current ? isCurrentlyInDndRef.current() : false;
+        if (!inDnd && getBrowserNotificationPermission() === 'granted') {
+          toDispatch.slice(0, 3).forEach((item) => {
+            sendBrowserNotification(item.title, {
+              body: item.message,
+              tag: item.id,
+              onClick: () => {
+                void markAsRead(item.id);
+                if (item.questionId) {
+                  window.dispatchEvent(
+                    new CustomEvent('cistus:open-question', { detail: { questionId: item.questionId } })
+                  );
                 }
-              });
+              }
             });
-          }
+          });
         }
-      } else {
-        // 최초 로드 시에는 기존 알림들을 등록해 두어 중복 알림 방지
-        safeList.forEach(n => notifiedIdsRef.current.add(n.id));
       }
     } catch (err) {
       console.error('Failed to load notifications', err);
-      setNotifications([]);
-      setUnreadCount(0);
     }
-  }, [currentUser?.id, isProfessor, isCurrentlyInDnd, markAsRead]);
+  }, [currentUser?.id, markAsRead]);
 
   const loadProfSettings = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -169,26 +227,25 @@ export function NotificationProvider({ children }) {
   }, [currentUser?.id]);
 
   useEffect(() => {
-    // 유저 변경 시 이미 발송한 알림 목록 초기화
-    notifiedIdsRef.current = new Set();
     if (!currentUser?.id) {
+      notifiedIdsRef.current = new Set();
       return;
     }
+    notifiedIdsRef.current = readPersistedNotifiedIds(currentUser.id);
     void loadNotifications(false);
     if (isProfessor) {
       void loadProfSettings();
     }
 
+    // 백그라운드 탭에서도 새 답변/질문을 감지해 OS 브라우저 알림을 띄울 수 있도록 8초마다 폴링
     const pollInterval = setInterval(() => {
-      if (!document.hidden) {
-        void loadNotifications(true);
-      }
-    }, 15000);
+      void loadNotifications(true);
+    }, 8000);
 
     const handleWakePoll = () => {
       if (document.hidden) return;
       setBrowserPermission(getBrowserNotificationPermission());
-      if (Date.now() - lastPollAtRef.current >= 3000) {
+      if (Date.now() - lastPollAtRef.current >= 2000) {
         void loadNotifications(true);
       }
     };

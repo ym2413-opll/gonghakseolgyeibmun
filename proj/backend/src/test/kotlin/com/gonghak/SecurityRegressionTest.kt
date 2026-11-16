@@ -447,6 +447,26 @@ class SecurityRegressionTest {
             )
         }
         assertEquals(HttpStatusCode.Created, sameOriginRes.status)
+
+        // 4. Cross-site request with forged matching X-Forwarded-Host must STILL be blocked by CORS
+        val forgedCrossSiteRes = client.post("/api/auth/register") {
+            header(HttpHeaders.Origin, "https://evil.example.com")
+            header("Sec-Fetch-Site", "cross-site")
+            header("X-Forwarded-Proto", "https")
+            header("X-Forwarded-Host", "evil.example.com")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    username = "2026201904",
+                    password = "Password!1",
+                    role = UserRole.STUDENT,
+                    name = "위조차단학생",
+                    department = "전자공학과",
+                    identifier = "2026201904"
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Forbidden, forgedCrossSiteRes.status)
     }
 
     @Test
@@ -1298,6 +1318,10 @@ class SecurityRegressionTest {
         assertTrue((policyRes.headers["Strict-Transport-Security"] ?: "").contains("max-age="))
         assertEquals("none", policyRes.headers["X-Permitted-Cross-Domain-Policies"])
         assertEquals("camera=(), microphone=(), geolocation=()", policyRes.headers["Permissions-Policy"])
+        val csp = policyRes.headers["Content-Security-Policy"].orEmpty()
+        assertTrue(csp.contains("script-src 'self'"))
+        assertTrue(csp.contains("object-src 'none'"))
+        assertTrue(csp.contains("frame-ancestors 'none'"))
 
         // 2. Register student over forwarded HTTPS -> Set-Cookie includes HttpOnly + Secure; cookie-only auth works
         val regRes = client.post("/api/auth/register") {

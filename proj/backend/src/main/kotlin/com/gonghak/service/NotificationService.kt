@@ -130,8 +130,13 @@ class NotificationService(
         getProfessorNotificationSettingInternal(professorId)
     }
 
-    private fun dispatchToAssignedProfessor(
-        assignedProfessorId: UUID,
+    /**
+     * Inserts an in-app notification (honoring DND quiet hours) and optionally queues an
+     * email alert for a single professor (either the assigned professor or a co-professor).
+     */
+    private fun dispatchToProfessor(
+        professorId: UUID,
+        notificationType: NotificationType,
         courseName: String,
         questionId: UUID,
         questionTitle: String,
@@ -140,48 +145,49 @@ class NotificationService(
         category: QuestionCategory,
         questionContent: String,
         authorDisplay: String,
+        isCoProfessor: Boolean,
         emailsToDispatch: MutableList<PendingEmailJob>
     ) {
-        val assignedUser = UsersTable.select { UsersTable.id eq assignedProfessorId }.singleOrNull()
-        val assignedProfName = assignedUser?.get(UsersTable.name) ?: "교수"
-        val assignedSetting = ProfessorNotificationSettingsTable.select {
-            ProfessorNotificationSettingsTable.professorId eq assignedProfessorId
+        val profUser = UsersTable.select { UsersTable.id eq professorId }.singleOrNull()
+        val profName = profUser?.get(UsersTable.name) ?: "교수"
+        val profSetting = ProfessorNotificationSettingsTable.select {
+            ProfessorNotificationSettingsTable.professorId eq professorId
         }.singleOrNull()
 
-        val isAssignedQuiet = isNowInQuietHours(
-            assignedSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnabled) ?: false,
-            assignedSetting?.get(ProfessorNotificationSettingsTable.quietHoursStart) ?: "22:00",
-            assignedSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
+        val isQuiet = isNowInQuietHours(
+            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnabled) ?: false,
+            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursStart) ?: "22:00",
+            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
         )
 
         NotificationsTable.insert {
-            it[userId] = assignedProfessorId
-            it[type] = NotificationType.QUESTION_NEW.name
-            it[title] = notifTitle
+            it[userId] = professorId
+            it[type] = notificationType.name
+            it[title] = notifTitle.take(200)
             it[message] = notifMessage
             it[referenceId] = questionId
             it[isRead] = false
-            it[isHeld] = isAssignedQuiet
-            it[releaseAt] = if (isAssignedQuiet) assignedSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+            it[isHeld] = isQuiet
+            it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
         }
 
-        val assignedEmailEnabled = assignedSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
-        val assignedEmail = assignedSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
+        val emailEnabled = profSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
+        val targetEmail = profSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
             ?.takeIf { it.isNotBlank() }
-            ?: assignedUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
+            ?: profUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
 
-        if (assignedEmailEnabled && !assignedEmail.isNullOrBlank()) {
+        if (emailEnabled && !targetEmail.isNullOrBlank()) {
             emailService.enqueueQuestionEmail(
-                recipientEmail = assignedEmail,
-                professorId = assignedProfessorId,
-                professorName = assignedProfName,
+                recipientEmail = targetEmail,
+                professorId = professorId,
+                professorName = profName,
                 courseName = courseName,
                 questionId = questionId,
                 questionTitle = questionTitle,
                 questionContent = questionContent.ifBlank { questionTitle },
                 category = category,
                 authorDisplay = authorDisplay,
-                isCoProfessor = false
+                isCoProfessor = isCoProfessor
             )?.let { emailsToDispatch.add(it) }
         }
     }
@@ -200,8 +206,9 @@ class NotificationService(
             val emailsToDispatch = mutableListOf<PendingEmailJob>()
 
             // 1. Notify Assigned Professor
-            dispatchToAssignedProfessor(
-                assignedProfessorId = assignedProfessorId,
+            dispatchToProfessor(
+                professorId = assignedProfessorId,
+                notificationType = NotificationType.QUESTION_NEW,
                 courseName = courseName,
                 questionId = questionId,
                 questionTitle = questionTitle,
@@ -210,6 +217,7 @@ class NotificationService(
                 category = category,
                 questionContent = questionContent,
                 authorDisplay = authorDisplay,
+                isCoProfessor = false,
                 emailsToDispatch = emailsToDispatch
             )
 
@@ -220,50 +228,26 @@ class NotificationService(
                 }.map { it[CourseProfessorsTable.professorId] }
 
                 for (otherProfId in otherProfessors) {
-                    val otherUser = UsersTable.select { UsersTable.id eq otherProfId }.singleOrNull()
-                    val otherProfName = otherUser?.get(UsersTable.name) ?: "교수"
                     val otherSetting = ProfessorNotificationSettingsTable.select {
                         ProfessorNotificationSettingsTable.professorId eq otherProfId
                     }.singleOrNull()
 
                     val notifyOther = otherSetting?.get(ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions) ?: false
                     if (notifyOther) {
-                        val isOtherQuiet = isNowInQuietHours(
-                            otherSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnabled) ?: false,
-                            otherSetting?.get(ProfessorNotificationSettingsTable.quietHoursStart) ?: "22:00",
-                            otherSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
+                        dispatchToProfessor(
+                            professorId = otherProfId,
+                            notificationType = NotificationType.OTHER_PROFESSOR_QUESTION,
+                            courseName = courseName,
+                            questionId = questionId,
+                            questionTitle = questionTitle,
+                            notifTitle = "[$courseName] (공동과목) 새로운 강의 질문 등록",
+                            notifMessage = "다른 분반/교수 담당 질문: $questionTitle",
+                            category = category,
+                            questionContent = questionContent,
+                            authorDisplay = authorDisplay,
+                            isCoProfessor = true,
+                            emailsToDispatch = emailsToDispatch
                         )
-
-                        NotificationsTable.insert {
-                            it[userId] = otherProfId
-                            it[type] = NotificationType.OTHER_PROFESSOR_QUESTION.name
-                            it[title] = "[$courseName] (공동과목) 새로운 강의 질문 등록"
-                            it[message] = "다른 분반/교수 담당 질문: $questionTitle"
-                            it[referenceId] = questionId
-                            it[isRead] = false
-                            it[isHeld] = isOtherQuiet
-                            it[releaseAt] = if (isOtherQuiet) otherSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
-                        }
-
-                        val otherEmailEnabled = otherSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
-                        val otherEmail = otherSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
-                            ?.takeIf { it.isNotBlank() }
-                            ?: otherUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
-
-                        if (otherEmailEnabled && !otherEmail.isNullOrBlank()) {
-                            emailService.enqueueQuestionEmail(
-                                recipientEmail = otherEmail,
-                                professorId = otherProfId,
-                                professorName = otherProfName,
-                                courseName = courseName,
-                                questionId = questionId,
-                                questionTitle = questionTitle,
-                                questionContent = questionContent.ifBlank { questionTitle },
-                                category = category,
-                                authorDisplay = authorDisplay,
-                                isCoProfessor = true
-                            )?.let { emailsToDispatch.add(it) }
-                        }
                     }
                 }
             }
@@ -282,12 +266,14 @@ class NotificationService(
         questionTitle: String,
         category: QuestionCategory,
         followUpContent: String,
-        authorDisplay: String
+        authorDisplay: String,
+        participatingProfessorIds: List<UUID> = emptyList()
     ) {
         val pendingEmails = dbQuery(workerManager.notificationDispatcher) {
             val emailsToDispatch = mutableListOf<PendingEmailJob>()
-            dispatchToAssignedProfessor(
-                assignedProfessorId = assignedProfessorId,
+            dispatchToProfessor(
+                professorId = assignedProfessorId,
+                notificationType = NotificationType.QUESTION_NEW,
                 courseName = courseName,
                 questionId = questionId,
                 questionTitle = questionTitle,
@@ -296,12 +282,70 @@ class NotificationService(
                 category = category,
                 questionContent = followUpContent,
                 authorDisplay = authorDisplay,
+                isCoProfessor = false,
                 emailsToDispatch = emailsToDispatch
             )
+
+            // Also alert co-professors who previously participated in this thread so follow-ups are never missed.
+            for (coProfId in participatingProfessorIds.distinct()) {
+                if (coProfId == assignedProfessorId) continue
+                dispatchToProfessor(
+                    professorId = coProfId,
+                    notificationType = NotificationType.OTHER_PROFESSOR_QUESTION,
+                    courseName = courseName,
+                    questionId = questionId,
+                    questionTitle = questionTitle,
+                    notifTitle = "[$courseName] 답변 참여 스레드에 추가 질문(꼬리질문)이 등록되었습니다.",
+                    notifMessage = "$authorDisplay: \"${questionTitle}\"",
+                    category = category,
+                    questionContent = followUpContent,
+                    authorDisplay = authorDisplay,
+                    isCoProfessor = true,
+                    emailsToDispatch = emailsToDispatch
+                )
+            }
             emailsToDispatch
         }
 
         pendingEmails.forEach { emailService.dispatchEmailAsync(it) }
+    }
+
+    private fun insertInAppNotification(
+        recipientId: UUID,
+        notificationType: NotificationType,
+        notifTitle: String,
+        notifMessage: String,
+        questionId: UUID,
+        honorQuietHours: Boolean
+    ) {
+        val profSetting = if (honorQuietHours) {
+            ProfessorNotificationSettingsTable.select {
+                ProfessorNotificationSettingsTable.professorId eq recipientId
+            }.singleOrNull()
+        } else {
+            null
+        }
+
+        val isQuiet = if (honorQuietHours && profSetting != null) {
+            isNowInQuietHours(
+                profSetting[ProfessorNotificationSettingsTable.quietHoursEnabled],
+                profSetting[ProfessorNotificationSettingsTable.quietHoursStart],
+                profSetting[ProfessorNotificationSettingsTable.quietHoursEnd]
+            )
+        } else {
+            false
+        }
+
+        NotificationsTable.insert {
+            it[userId] = recipientId
+            it[type] = notificationType.name
+            it[title] = notifTitle.take(200)
+            it[message] = notifMessage
+            it[referenceId] = questionId
+            it[isRead] = false
+            it[isHeld] = isQuiet
+            it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+        }
     }
 
     suspend fun notifyNewAnswer(
@@ -309,42 +353,85 @@ class NotificationService(
         courseName: String,
         questionId: UUID,
         questionTitle: String,
-        professorName: String
+        professorName: String,
+        isProfessorAuthor: Boolean = true,
+        actorId: UUID? = null,
+        assignedProfessorId: UUID? = null,
+        participatingProfessorIds: List<UUID> = emptyList()
     ) {
+        val cleanAuthor = professorName.trim().ifBlank { "담당교수" }
+        val authorDisplay = if (isProfessorAuthor) {
+            if (cleanAuthor.endsWith("교수") || cleanAuthor.endsWith("교수님")) {
+                if (cleanAuthor.endsWith("님")) cleanAuthor else "${cleanAuthor}님"
+            } else {
+                "${cleanAuthor} 교수님"
+            }
+        } else {
+            "${cleanAuthor}님"
+        }
+        val safeTitle = "[$courseName] 질문에 답변이 등록되었습니다.".take(200)
+        val safeMessage = if (isProfessorAuthor) {
+            "${authorDisplay}이 답변을 남겼습니다: \"$questionTitle\""
+        } else {
+            "${authorDisplay}이 스레드에 답변을 남겼습니다: \"$questionTitle\""
+        }
+
+        val professorRecipients = (listOfNotNull(assignedProfessorId) + participatingProfessorIds)
+            .distinct()
+            .filter { it != actorId && it != studentId }
+        val profTitle = "[$courseName] 스레드에 새로운 답변이 등록되었습니다.".take(200)
+        val profMessage = "${authorDisplay}이 답변을 남겼습니다: \"$questionTitle\""
+
         dbQuery(workerManager.notificationDispatcher) {
-            NotificationsTable.insert {
-                it[userId] = studentId
-                it[type] = NotificationType.ANSWER_NEW.name
-                it[title] = "[$courseName] 질문에 답변이 등록되었습니다."
-                it[message] = "${professorName} 교수님이 답변을 남겼습니다: \"$questionTitle\""
-                it[referenceId] = questionId
-                it[isRead] = false
-                it[isHeld] = false
-                it[releaseAt] = null
+            if (actorId != studentId) {
+                insertInAppNotification(
+                    recipientId = studentId,
+                    notificationType = NotificationType.ANSWER_NEW,
+                    notifTitle = safeTitle,
+                    notifMessage = safeMessage,
+                    questionId = questionId,
+                    honorQuietHours = false
+                )
+            }
+
+            // Notify assigned/participating professors when another professor, admin, or peer student replies.
+            for (profRecipientId in professorRecipients) {
+                insertInAppNotification(
+                    recipientId = profRecipientId,
+                    notificationType = NotificationType.ANSWER_NEW,
+                    notifTitle = profTitle,
+                    notifMessage = profMessage,
+                    questionId = questionId,
+                    honorQuietHours = true
+                )
             }
         }
     }
 
     /**
-     * Notifies the assigned professor when the question author deletes their question so
-     * prior email or bell alerts have clear context in the dashboard.
+     * Notifies the assigned professor (and any participating co-professors) when the question
+     * author deletes their question so prior email or bell alerts have clear context.
      */
     suspend fun notifyQuestionDeletedByAuthor(
         assignedProfessorId: UUID,
         courseName: String,
         questionId: UUID,
-        questionTitle: String
+        questionTitle: String,
+        participatingProfessorIds: List<UUID> = emptyList()
     ) {
+        val recipients = (listOf(assignedProfessorId) + participatingProfessorIds).distinct()
+        val safeTitle = "[$courseName] 학생이 질문을 삭제했습니다.".take(200)
+        val safeMessage = "질문 작성자가 등록했던 질문을 삭제했습니다: \"$questionTitle\""
         dbQuery(workerManager.notificationDispatcher) {
-            NotificationsTable.insert {
-                it[userId] = assignedProfessorId
-                it[type] = NotificationType.QUESTION_DELETED.name
-                it[title] = "[$courseName] 학생이 질문을 삭제했습니다."
-                it[message] = "질문 작성자가 등록했던 질문을 삭제했습니다: \"$questionTitle\""
-                it[referenceId] = questionId
-                it[isRead] = false
-                it[isHeld] = false
-                it[releaseAt] = null
+            for (recipientId in recipients) {
+                insertInAppNotification(
+                    recipientId = recipientId,
+                    notificationType = NotificationType.QUESTION_DELETED,
+                    notifTitle = safeTitle,
+                    notifMessage = safeMessage,
+                    questionId = questionId,
+                    honorQuietHours = false
+                )
             }
         }
     }

@@ -190,15 +190,39 @@ export async function validateSecurity(file) {
   return { valid: true, extension, isImage };
 }
 
+function hasControlChars(str) {
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 export function isSafeAttachmentUrl(url) {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
-  return (
-    trimmed.startsWith('/api/') ||
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('blob:')
-  );
+  if (!trimmed || hasControlChars(trimmed)) return false;
+
+  if (trimmed.startsWith('/api/')) {
+    return !trimmed.startsWith('//');
+  }
+
+  if (/^blob:/i.test(trimmed)) {
+    if (typeof window === 'undefined' || !window.location?.origin) return true;
+    return trimmed.toLowerCase().startsWith(`blob:${window.location.origin.toLowerCase()}/`);
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    try {
+      const parsed = new URL(trimmed, window.location.origin);
+      const isHttpProto = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      return isHttpProto && parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 /**

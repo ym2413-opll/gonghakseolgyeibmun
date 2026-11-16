@@ -105,10 +105,14 @@ function MainApp() {
   }, [fetchQuestions, isAuthenticated, isAdmin]);
 
   useEffect(() => {
-    const handleNotifsUpdated = () => {
+    const handleNotifsUpdated = (e) => {
       void fetchQuestions();
       if (selectedQuestionId) {
         void fetchSelectedDetail(selectedQuestionId);
+      }
+      const latestTitle = e?.detail?.latestTitle;
+      if (latestTitle) {
+        showToast(latestTitle);
       }
     };
     const handleOpenQuestion = (e) => {
@@ -124,7 +128,7 @@ function MainApp() {
       window.removeEventListener('cistus:notifications-updated', handleNotifsUpdated);
       window.removeEventListener('cistus:open-question', handleOpenQuestion);
     };
-  }, [fetchQuestions, fetchSelectedDetail, selectedQuestionId]);
+  }, [fetchQuestions, fetchSelectedDetail, selectedQuestionId, showToast]);
 
   useEffect(() => {
     if (isAuthenticated && selectedQuestionId) {

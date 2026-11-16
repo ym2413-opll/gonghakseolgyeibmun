@@ -776,6 +776,14 @@ class R3OverhaulTest {
         }
         assertEquals(HttpStatusCode.Created, profFirstAnswerRes.status)
 
+        val stuAnswerNotifs = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(
+            stuAnswerNotifs.any { it.type == "ANSWER_NEW" && it.questionId == validStuQ.id && !it.isRead },
+            "Student author must receive unread ANSWER_NEW notification when professor posts an answer"
+        )
+
         val profFollowUpAttempt = client.post("/api/questions/${validStuQ.id}/followups") {
             header(HttpHeaders.Authorization, "Bearer ${adminReg.token}")
             contentType(ContentType.Application.Json)
@@ -1292,5 +1300,203 @@ class R3OverhaulTest {
         }.also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<UnifiedSettingDto>()
         assertTrue(fetchedAdminUnified.exhibitionMode)
+    }
+
+    @Test
+    fun testMultiPerspectiveNotifications() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // Admin creates a course with a very long (>200 chars) name to verify VARCHAR(200) safe truncation
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "notif_admin_prof",
+                    password = "adminpass123",
+                    name = "알림관리교수",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("notif_admin_prof", grant = true)
+
+        val longCourseName = "매우긴과목명_" + "공".repeat(90)
+        val longCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = longCourseName,
+                    code = "NTF-999",
+                    semester = "2026-2",
+                    scopeType = "ALL"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+
+        val assignedProf = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "notif_assigned_prof",
+                    password = "profpass1234",
+                    name = "담당박교수",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(longCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val coProf = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "notif_co_prof",
+                    password = "profpass1234",
+                    name = "공동이교수",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(longCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val authorStu = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "notif_author_stu",
+                    password = "stupass1234",
+                    name = "질문학생",
+                    department = "소프트웨어학과",
+                    identifier = "AUTO",
+                    courseIds = listOf(longCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val peerStu = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "notif_peer_stu",
+                    password = "stupass1234",
+                    name = "비밀실명학우",
+                    department = "소프트웨어학과",
+                    identifier = "AUTO",
+                    courseIds = listOf(longCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        // 1. Student posts a LECTURE question -> assigned prof + opted-in co-prof notified without length overflow
+        val qCreated = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${authorStu.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = longCourse.id,
+                    profId = assignedProf.user.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "다중 시점 알림 테스트 질문",
+                    rawContent = "열린 스레드에서 다양한 참여자의 알림 동작을 검증합니다."
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        client.patch("/api/questions/${qCreated.id}/thread-open") {
+            header(HttpHeaders.Authorization, "Bearer ${assignedProf.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val assignedAfterCreate = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${assignedProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(assignedAfterCreate.any { it.type == "QUESTION_NEW" && it.questionId == qCreated.id && (it.title?.length ?: 0) <= 200 })
+
+        val coProfAfterCreate = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(coProfAfterCreate.any { it.type == "OTHER_PROFESSOR_QUESTION" && it.questionId == qCreated.id && (it.title?.length ?: 0) <= 200 })
+
+        // 2. Co-professor posts an answer -> student author AND assigned professor both receive ANSWER_NEW
+        client.post("/api/questions/${qCreated.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "공동교수님의 첫 번째 답변입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val stuAfterCoProf = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${authorStu.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(stuAfterCoProf.any { it.type == "ANSWER_NEW" && it.questionId == qCreated.id })
+
+        val assignedAfterCoProf = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${assignedProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(assignedAfterCoProf.any { it.type == "ANSWER_NEW" && it.questionId == qCreated.id })
+
+        // 3. Peer student replies -> student author + both professors receive ANSWER_NEW, without exposing peer raw real name
+        client.post("/api/questions/${qCreated.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${peerStu.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateAnswerRequest(content = "다른 학우의 보충 의견입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val stuAfterPeer = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${authorStu.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(stuAfterPeer.any { it.type == "ANSWER_NEW" && it.questionId == qCreated.id && !(it.message ?: "").contains("비밀실명학우") })
+
+        val coProfAfterPeer = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(coProfAfterPeer.any { it.type == "ANSWER_NEW" && it.questionId == qCreated.id })
+
+        // 4. Student posts follow-up -> BOTH assigned prof and participating co-prof are notified
+        client.post("/api/questions/${qCreated.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${authorStu.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateFollowUpRequest(content = "추가 질문(꼬리질문)입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+
+        val assignedAfterFollowUp = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${assignedProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(assignedAfterFollowUp.any { it.type == "QUESTION_NEW" && it.questionId == qCreated.id && it.title?.contains("추가 질문") == true })
+
+        val coProfAfterFollowUp = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(coProfAfterFollowUp.any { it.type == "OTHER_PROFESSOR_QUESTION" && it.questionId == qCreated.id && it.title?.contains("추가 질문") == true })
+
+        // 5. Student deletes question -> BOTH assigned prof and participating co-prof receive QUESTION_DELETED
+        client.delete("/api/questions/${qCreated.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${authorStu.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val assignedAfterDelete = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${assignedProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(assignedAfterDelete.any { it.type == "QUESTION_DELETED" && it.questionId == qCreated.id })
+
+        val coProfAfterDelete = client.get("/api/notifications") {
+            header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
+        }.body<ApiResponse<List<NotificationDto>>>().data!!
+        assertTrue(coProfAfterDelete.any { it.type == "QUESTION_DELETED" && it.questionId == qCreated.id })
     }
 }

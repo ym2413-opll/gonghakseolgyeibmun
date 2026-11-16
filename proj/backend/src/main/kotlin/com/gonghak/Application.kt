@@ -14,10 +14,10 @@ import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.callloging.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.plugins.forwardedheaders.*
 import io.ktor.server.plugins.mutableOriginConnectionPoint
 import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.SerializationException
@@ -84,6 +84,12 @@ fun Application.module() {
             call.response.header("Referrer-Policy", "strict-origin-when-cross-origin")
             call.response.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
             call.response.header("X-Permitted-Cross-Domain-Policies", "none")
+            if (!call.request.path().startsWith("/api/attachments")) {
+                call.response.header(
+                    "Content-Security-Policy",
+                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+                )
+            }
             if (call.isSecureTransport()) {
                 call.response.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
             }
@@ -99,11 +105,7 @@ fun Application.module() {
         })
     }
 
-    install(XForwardedHeaders)
-    install(ForwardedHeaders)
-
-    // Align origin for same-origin requests coming through a reverse proxy (e.g. HTTPS Nginx -> HTTP Ktor)
-    // even if X-Forwarded-Proto/Host is omitted, while still rejecting cross-site origins.
+    // Normalize origin strictly from trusted proxy peers and never when Sec-Fetch-Site indicates cross-site.
     intercept(ApplicationCallPipeline.Plugins) {
         normalizeReverseProxyOrigin(call)
     }
@@ -121,11 +123,11 @@ fun Application.module() {
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
-        if (configuredOrigins.any { it == "*" }) {
+        if (!isProd && configuredOrigins.any { it == "*" }) {
             anyHost()
         } else {
-            val originsToAllow = if (configuredOrigins.isNotEmpty()) {
-                configuredOrigins
+            val originsToAllow = if (configuredOrigins.any { it != "*" }) {
+                configuredOrigins.filter { it != "*" }
             } else if (!isProd) {
                 listOf(
                     "http://localhost:5173",
@@ -324,18 +326,28 @@ private fun normalizeReverseProxyOrigin(call: ApplicationCall) {
         return
     }
 
+    // Only honor proxy/origin normalization when the socket peer is a trusted local/configured proxy,
+    // and never when the browser explicitly marks the request as cross-site/same-site.
+    if (!isTrustedProxyRemoteAddress(call.request.local.remoteAddress)) {
+        return
+    }
     val secFetchSite = call.request.headers["Sec-Fetch-Site"]?.trim()
+    if (secFetchSite != null && !secFetchSite.equals("same-origin", ignoreCase = true)) {
+        return
+    }
     val isBrowserSameOrigin = secFetchSite.equals("same-origin", ignoreCase = true)
+
+    // Use the rightmost proxy-appended value so client-injected leftmost headers cannot win.
     val explicitForwardedProto = call.request.headers["X-Forwarded-Proto"]
         ?.split(",")
-        ?.firstOrNull()
+        ?.lastOrNull()
         ?.trim()
         ?.lowercase()
         ?.takeIf { it.isNotEmpty() }
 
     val rawHostHeader = call.request.headers["X-Forwarded-Host"]
         ?.split(",")
-        ?.firstOrNull()
+        ?.lastOrNull()
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
         ?: call.request.headers[HttpHeaders.Host]?.trim()?.takeIf { it.isNotEmpty() }

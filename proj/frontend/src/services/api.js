@@ -44,6 +44,39 @@ function safeSetStorage(key, value) {
   }
 }
 
+function pushLocalNotification({ userId, type, title, message, questionId }) {
+  if (!userId) return;
+  const notifs = safeGetStorage(STORAGE_KEY_NOTIFS, INITIAL_NOTIFICATIONS);
+  notifs.unshift({
+    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    userId,
+    type,
+    title: String(title || '').slice(0, 200),
+    message: String(message || ''),
+    referenceId: questionId,
+    questionId,
+    isRead: false,
+    isHeld: false,
+    createdAt: new Date().toISOString()
+  });
+  safeSetStorage(STORAGE_KEY_NOTIFS, notifs);
+}
+
+function getLocalThreadProfRecipients(targetQ, excludeUserId = null) {
+  const assignedProfId = targetQ?.profId || targetQ?.assignedProfessorId || null;
+  const ids = new Set();
+  if (assignedProfId) ids.add(assignedProfId);
+  if (Array.isArray(targetQ?.answers)) {
+    for (const ans of targetQ.answers) {
+      if (ans?.authorRole === 'PROFESSOR' && ans?.authorId) {
+        ids.add(ans.authorId);
+      }
+    }
+  }
+  if (excludeUserId) ids.delete(excludeUserId);
+  return Array.from(ids);
+}
+
 async function parseJsonSafe(res) {
   try {
     const parsed = await res.json();
@@ -1245,6 +1278,15 @@ export const api = {
         : q
     );
     safeSetStorage(STORAGE_KEY_QUESTIONS, updated);
+    for (const profRecipientId of getLocalThreadProfRecipients(target, sessionUser.id)) {
+      pushLocalNotification({
+        userId: profRecipientId,
+        type: 'QUESTION_DELETED',
+        title: `[${target.courseName || '강의'}] 학생이 질문을 삭제했습니다.`,
+        message: `질문 작성자가 등록했던 질문을 삭제했습니다: "${target.title || ''}"`,
+        questionId
+      });
+    }
     return true;
   },
 
@@ -1666,6 +1708,16 @@ export const api = {
     });
     safeSetStorage(STORAGE_KEY_EMAIL_LOGS, emailLogs);
 
+    if (questionData.profId) {
+      pushLocalNotification({
+        userId: questionData.profId,
+        type: 'QUESTION_NEW',
+        title: `[${questionData.courseName || '강의'}] 새로운 질문 등록`,
+        message: `[${questionData.category || 'LECTURE'}] ${summaryTitle}`,
+        questionId: newQuestion.id
+      });
+    }
+
     return newQuestion;
   },
 
@@ -1778,6 +1830,34 @@ export const api = {
       targetQ.status = 'ANSWERED';
     }
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
+
+    const authorLabel = sessionUser.role === 'professor'
+      ? `${sessionUser.name} 교수님`
+      : sessionUser.isAdmin
+        ? `관리자 (${sessionUser.name})님`
+        : '다른 수강생님';
+
+    if (targetQ.studentId && targetQ.studentId !== sessionUser.id) {
+      pushLocalNotification({
+        userId: targetQ.studentId,
+        type: 'ANSWER_NEW',
+        title: `[${targetQ.courseName || '강의'}] 질문에 답변이 등록되었습니다.`,
+        message: `${authorLabel}이 답변을 남겼습니다: "${targetQ.title || ''}"`,
+        questionId
+      });
+    }
+
+    for (const profRecipientId of getLocalThreadProfRecipients(targetQ, sessionUser.id)) {
+      if (profRecipientId === targetQ.studentId) continue;
+      pushLocalNotification({
+        userId: profRecipientId,
+        type: 'ANSWER_NEW',
+        title: `[${targetQ.courseName || '강의'}] 스레드에 새로운 답변이 등록되었습니다.`,
+        message: `${authorLabel}이 답변을 남겼습니다: "${targetQ.title || ''}"`,
+        questionId
+      });
+    }
+
     return newAnswer;
   },
 
@@ -1854,6 +1934,23 @@ export const api = {
     targetQ.answers.push(newFollowUp);
     targetQ.status = 'OPEN';
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
+
+    const assignedProfId = targetQ.profId || targetQ.assignedProfessorId || null;
+    const followUpAuthorDisplay = targetQ.isAnonymous
+      ? `${targetQ.courseName || '강의'} 수강생`
+      : (sessionUser.displayTag || sessionUser.name);
+    for (const profRecipientId of getLocalThreadProfRecipients(targetQ, sessionUser.id)) {
+      const isAssigned = profRecipientId === assignedProfId;
+      pushLocalNotification({
+        userId: profRecipientId,
+        type: isAssigned ? 'QUESTION_NEW' : 'OTHER_PROFESSOR_QUESTION',
+        title: isAssigned
+          ? `[${targetQ.courseName || '강의'}] 질문에 추가 질문(꼬리질문)이 등록되었습니다.`
+          : `[${targetQ.courseName || '강의'}] 답변 참여 스레드에 추가 질문(꼬리질문)이 등록되었습니다.`,
+        message: `${followUpAuthorDisplay}: "${targetQ.title || ''}"`,
+        questionId
+      });
+    }
     return newFollowUp;
   },
 
@@ -2054,7 +2151,7 @@ export const api = {
         const res = await fetchWithTimeout(`${API_BASE_URL}/notifications?userId=${uid}`, {
           credentials: 'include',
           headers: getAuthHeaders(uid)
-        }, 1200);
+        }, 5000);
         if (res.status === 401 || res.status === 403) {
           return [];
         }

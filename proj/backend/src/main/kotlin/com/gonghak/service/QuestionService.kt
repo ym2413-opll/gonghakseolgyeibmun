@@ -35,14 +35,18 @@ class QuestionService(
     private data class CreatedAnswerResult(
         val dto: AnswerDto,
         val studentId: UUID,
+        val assignedProfId: UUID,
+        val participatingProfIds: List<UUID>,
         val courseName: String,
         val questionTitle: String,
-        val professorName: String
+        val professorName: String,
+        val isProfessorAuthor: Boolean = true
     )
 
     private data class CreatedFollowUpResult(
         val dto: AnswerDto,
         val assignedProfId: UUID,
+        val participatingProfIds: List<UUID>,
         val courseName: String,
         val questionTitle: String,
         val category: QuestionCategory,
@@ -52,6 +56,7 @@ class QuestionService(
     private data class AuthorDeleteResult(
         val attachmentNames: List<String>,
         val assignedProfId: UUID,
+        val participatingProfIds: List<UUID>,
         val courseName: String,
         val questionTitle: String
     )
@@ -68,6 +73,17 @@ class QuestionService(
         const val MAX_TITLE_LENGTH = 180
         const val MAX_CONTENT_LENGTH = 20_000
     }
+
+    private fun findParticipatingProfessorIds(questionId: UUID): List<UUID> =
+        AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
+            .slice(AnswersTable.professorId)
+            .select {
+                (AnswersTable.questionId eq questionId) and
+                    (AnswersTable.isHidden eq false) and
+                    (UsersTable.role eq UserRole.PROFESSOR.name)
+            }
+            .withDistinct()
+            .map { it[AnswersTable.professorId] }
 
     private fun validateContentLength(text: String?, label: String) {
         if (text != null && text.length > MAX_CONTENT_LENGTH) {
@@ -877,10 +893,12 @@ class QuestionService(
 
             val courseName = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }
                 .singleOrNull()?.get(CoursesTable.name) ?: "강의"
+            val participatingProfIds = findParticipatingProfessorIds(questionId)
 
             AuthorDeleteResult(
                 attachmentNames = attachmentNames,
                 assignedProfId = qRow[QuestionsTable.assignedProfessorId],
+                participatingProfIds = participatingProfIds,
                 courseName = courseName,
                 questionTitle = if (qRow[QuestionsTable.isHidden]) "관리자에 의해 가려진 질문입니다." else qRow[QuestionsTable.title]
             )
@@ -891,7 +909,8 @@ class QuestionService(
             assignedProfessorId = result.assignedProfId,
             courseName = result.courseName,
             questionId = questionId,
-            questionTitle = result.questionTitle
+            questionTitle = result.questionTitle,
+            participatingProfessorIds = result.participatingProfIds
         )
         return true
     }
@@ -1133,25 +1152,37 @@ class QuestionService(
                 hideOriginalDraft = (role == UserRole.PROFESSOR)
             )
 
+            val participatingProfIds = findParticipatingProfessorIds(questionId)
+            val answerAuthorDisplay = when {
+                isActorAdmin && role != UserRole.PROFESSOR -> "관리자 (${profUser[UsersTable.name]})"
+                role == UserRole.STUDENT -> "다른 수강생"
+                else -> profUser[UsersTable.name]
+            }
+
             CreatedAnswerResult(
                 dto = builtDto,
                 studentId = questionStudentId,
+                assignedProfId = assignedProfId,
+                participatingProfIds = participatingProfIds,
                 courseName = courseName,
                 questionTitle = qRow[QuestionsTable.title],
-                professorName = if (isActorAdmin && role != UserRole.PROFESSOR) "관리자 (${profUser[UsersTable.name]})" else profUser[UsersTable.name]
+                professorName = answerAuthorDisplay,
+                isProfessorAuthor = (role == UserRole.PROFESSOR)
             )
         }
 
-        // Dispatch notification on dedicated notification worker pool outside DB transaction
-        if (created.studentId != professorId) {
-            notificationService.notifyNewAnswer(
-                studentId = created.studentId,
-                courseName = created.courseName,
-                questionId = questionId,
-                questionTitle = created.questionTitle,
-                professorName = created.professorName
-            )
-        }
+        // Dispatch notifications on dedicated notification worker pool outside DB transaction
+        notificationService.notifyNewAnswer(
+            studentId = created.studentId,
+            courseName = created.courseName,
+            questionId = questionId,
+            questionTitle = created.questionTitle,
+            professorName = created.professorName,
+            isProfessorAuthor = created.isProfessorAuthor,
+            actorId = professorId,
+            assignedProfessorId = created.assignedProfId,
+            participatingProfessorIds = created.participatingProfIds
+        )
 
         return created.dto
     }
@@ -1260,9 +1291,12 @@ class QuestionService(
                 isAdminViewer = studentUser[UsersTable.isAdmin]
             )
 
+            val participatingProfIds = findParticipatingProfessorIds(questionId)
+
             CreatedFollowUpResult(
                 dto = dto,
                 assignedProfId = qRow[QuestionsTable.assignedProfessorId],
+                participatingProfIds = participatingProfIds,
                 courseName = courseName,
                 questionTitle = qRow[QuestionsTable.title],
                 category = QuestionCategory.valueOf(qRow[QuestionsTable.category]),
@@ -1277,7 +1311,8 @@ class QuestionService(
             questionTitle = created.questionTitle,
             category = created.category,
             followUpContent = cleanContent,
-            authorDisplay = created.authorDisplay
+            authorDisplay = created.authorDisplay,
+            participatingProfessorIds = created.participatingProfIds
         )
 
         return created.dto
