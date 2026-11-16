@@ -318,7 +318,7 @@ class NotificationService(
                     courseName = courseName,
                     questionId = questionId,
                     questionTitle = questionTitle,
-                    notifTitle = "[$courseName] 답변 참여 스레드에 추가 질문(꼬리질문)이 등록되었습니다.",
+                    notifTitle = "[$courseName] 답변한 질문에 추가 질문(꼬리질문)이 등록되었습니다.",
                     notifMessage = "$authorDisplay: \"${questionTitle}\"",
                     category = category,
                     questionContent = followUpContent,
@@ -413,13 +413,13 @@ class NotificationService(
         val safeMessage = if (isProfessorAuthor) {
             "${authorDisplay}이 답변을 남겼습니다: \"$questionTitle\""
         } else {
-            "${authorDisplay}이 스레드에 답변을 남겼습니다: \"$questionTitle\""
+            "${authorDisplay}이 질문에 답변을 남겼습니다: \"$questionTitle\""
         }
 
         val professorRecipients = (listOfNotNull(assignedProfessorId) + participatingProfessorIds)
             .distinct()
             .filter { it != actorId && it != studentId }
-        val profTitle = "[$courseName] 스레드에 새로운 답변이 등록되었습니다.".take(200)
+        val profTitle = "[$courseName] 참여한 질문에 새로운 답변이 등록되었습니다.".take(200)
         val profMessage = "${authorDisplay}이 답변을 남겼습니다: \"$questionTitle\""
 
         val pendingPushes = dbQuery(workerManager.notificationDispatcher) {

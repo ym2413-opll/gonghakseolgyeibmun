@@ -179,14 +179,14 @@ function MainApp() {
     setSelectedQuestionId(newQ.id);
     setCurrentView('detail');
     setRefreshTrigger((prev) => prev + 1);
-    showToast('새 포럼 질문 토픽이 등록되었습니다. (담당 교수님 이메일 알림 발송)');
+    showToast('새 질문이 등록되었습니다. (담당 교수님 이메일 알림 발송)');
   };
 
   const handleUpdateQuestion = async (questionId, updatedFields) => {
     const updated = await api.updateQuestion(questionId, updatedFields, currentUser?.id);
     await fetchQuestions();
     await fetchSelectedDetail(questionId);
-    showToast('토픽 내용이 수정되었습니다.');
+    showToast('질문 내용이 수정되었습니다.');
     return updated;
   };
 
@@ -195,7 +195,7 @@ function MainApp() {
     await fetchQuestions();
     await fetchSelectedDetail(questionId);
     setRefreshTrigger((prev) => prev + 1);
-    showToast('스레드 답변 포스트가 등록되었습니다.');
+    showToast('답변이 등록되었습니다.');
   };
 
   const handleAddFollowUp = async (questionId, followUpPayload) => {
@@ -216,9 +216,9 @@ function MainApp() {
       if (selectedQuestionId === questionId) {
         await fetchSelectedDetail(questionId);
       }
-      showToast(nextOpen ? '스레드가 열렸습니다.' : '스레드가 닫혔습니다.');
+      showToast(nextOpen ? '질문이 열림 상태로 전환되었습니다.' : '질문이 닫힘 상태로 전환되었습니다.');
     } catch (err) {
-      showToast(err.message || '스레드 상태 변경에 실패했습니다.');
+      showToast(err.message || '공개 상태 변경에 실패했습니다.');
     }
   };
 
@@ -231,8 +231,8 @@ function MainApp() {
       }
       showToast(
         !q.isHidden
-          ? '해당 질문 토픽이 가리기(비표시) 처리되었습니다.'
-          : '질문 토픽 가리기가 해제되었습니다.'
+          ? '해당 질문이 가리기(비표시) 처리되었습니다.'
+          : '질문 가리기가 해제되었습니다.'
       );
     } catch (err) {
       showToast(err.message || '질문 가리기 상태 변경에 실패했습니다.');
@@ -448,7 +448,10 @@ function MainApp() {
         onDeleteQuestion={handleDeleteQuestion}
       />
 
-      <HelpOnboardingModal />
+      <HelpOnboardingModal
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+      />
     </div>
   );
 }

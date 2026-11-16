@@ -153,7 +153,8 @@ object DatabaseFactory {
             "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS exhibition_mode BOOLEAN DEFAULT FALSE",
             "ALTER TABLE questions ADD COLUMN IF NOT EXISTS is_thread_open BOOLEAN DEFAULT FALSE",
             "ALTER TABLE questions ADD COLUMN IF NOT EXISTS last_sequence_number INTEGER DEFAULT 1",
-            "ALTER TABLE answers ADD COLUMN IF NOT EXISTS sequence_number INTEGER DEFAULT 2"
+            "ALTER TABLE answers ADD COLUMN IF NOT EXISTS sequence_number INTEGER DEFAULT 2",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS answer_id UUID NULL"
         ).forEach { alterStmt ->
             runCatching {
                 transaction { exec(alterStmt) }

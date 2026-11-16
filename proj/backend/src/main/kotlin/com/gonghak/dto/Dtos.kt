@@ -471,7 +471,9 @@ data class AnswerDto(
     val isHidden: Boolean = false,
     val sequenceNumber: Int = 2,
     val isAdminAuthor: Boolean = false,
-    val canModerate: Boolean = false
+    val canModerate: Boolean = false,
+    val attachmentCount: Int = 0,
+    val attachments: List<AttachmentDto> = emptyList()
 )
 
 @Serializable
@@ -563,14 +565,16 @@ data class CreateAnswerRequest(
     val authorId: String? = null,
     val authorName: String? = null,
     val authorTitle: String? = null,
-    val isPrimaryProf: Boolean? = null
+    val isPrimaryProf: Boolean? = null,
+    val attachmentIds: List<String> = emptyList()
 )
 
 @Serializable
 data class CreateFollowUpRequest(
     val content: String,
     val originalContent: String? = null,
-    val hasAiRefined: Boolean = false
+    val hasAiRefined: Boolean = false,
+    val attachmentIds: List<String> = emptyList()
 )
 
 @Serializable
@@ -643,6 +647,7 @@ data class UnsubscribePushRequest(
 data class AttachmentDto(
     val id: String,
     val questionId: String? = null,
+    val answerId: String? = null,
     val originalName: String,
     val savedName: String = "",
     val fileSize: Long,

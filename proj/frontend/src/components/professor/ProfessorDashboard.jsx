@@ -140,7 +140,7 @@ const ProfessorDashboard = ({
               <Inbox size={20} />
             </div>
             <div>
-              <span className="stat-label">내 담당 질문 토픽</span>
+              <span className="stat-label">내 담당 질문</span>
               <div className="stat-value-row">
                 <strong className="stat-value">{categorizedLists.myAssigned.length}</strong>
                 {unansweredAssignedCount > 0 && (
@@ -158,10 +158,10 @@ const ProfessorDashboard = ({
               <Users size={20} />
             </div>
             <div>
-              <span className="stat-label">공동 답변 가능 (열림 스레드)</span>
+              <span className="stat-label">공동 답변 가능 (열림)</span>
               <div className="stat-value-row">
                 <strong className="stat-value">{coProfAvailableCount}</strong>
-                <span className="stat-sub">열림 상태 미답변 토픽</span>
+                <span className="stat-sub">열린 미답변 질문</span>
               </div>
             </div>
           </div>
@@ -174,12 +174,12 @@ const ProfessorDashboard = ({
               <CheckCircle2 size={20} />
             </div>
             <div>
-              <span className="stat-label">담당 교과목 전체 토픽</span>
+              <span className="stat-label">담당 교과목 전체 질문</span>
               <div className="stat-value-row">
                 <strong className="stat-value">
                   {categorizedLists.allMyCourseQuestions.length}
                 </strong>
-                <span className="stat-sub">전체 아카이브</span>
+                <span className="stat-sub">전체 보관함</span>
               </div>
             </div>
           </div>
@@ -259,27 +259,27 @@ const ProfessorDashboard = ({
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="ALL">전체 상태</option>
-            <option value="UNANSWERED">미답변 토픽만</option>
-            <option value="ANSWERED">답변완료 토픽만</option>
+            <option value="UNANSWERED">미답변 질문만</option>
+            <option value="ANSWERED">답변완료 질문만</option>
           </select>
         </div>
       </div>
 
-      {/* 서양식 포럼 토픽 테이블 헤더 */}
+      {/* 질문 테이블 헤더 */}
       <div className="forum-table-header">
-        <div className="forum-col-topic">Topic (질문 스레드)</div>
-        <div className="forum-col-users">Participants</div>
-        <div className="forum-col-replies">Replies / Posts</div>
-        <div className="forum-col-activity">Activity</div>
+        <div className="forum-col-topic">질문</div>
+        <div className="forum-col-users">참여자</div>
+        <div className="forum-col-replies">답변 / 글</div>
+        <div className="forum-col-activity">최근 활동</div>
       </div>
 
-      {/* 토픽 목록 */}
+      {/* 질문 목록 */}
       <div className="forum-topic-list">
         {currentList.length === 0 ? (
           <div className="empty-state-box">
             <Clock size={36} className="text-muted" />
-            <h4>표시할 토픽이 없습니다</h4>
-            <p>현재 탭 또는 검색 조건에 해당하는 학생 질문 스레드가 없습니다.</p>
+            <h4>표시할 질문이 없습니다</h4>
+            <p>조건에 해당하는 학생 질문이 없습니다.</p>
           </div>
         ) : (
           currentList.map((q) => {

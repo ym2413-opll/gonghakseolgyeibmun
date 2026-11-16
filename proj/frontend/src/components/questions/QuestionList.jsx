@@ -132,11 +132,11 @@ const QuestionList = ({
         })}
       </div>
 
-      {/* 포럼 검색 및 필터 컨트롤 바 */}
+      {/* 검색 및 필터 컨트롤 바 */}
       <HelpBubble
         tier="ALL"
         mode="inline"
-        text="검색어, 카테고리, 답변 상태, '내 토픽만' 필터로 원하는 질문만 빠르게 찾아요."
+        text="검색어, 카테고리, 상태, '내 질문만' 필터로 원하는 질문을 찾아요."
         className="mb-help-bubble"
       />
       <div className="filter-bar">
@@ -145,7 +145,7 @@ const QuestionList = ({
           <input
             type="text"
             className="search-input"
-            placeholder="토픽 제목, 본문 키워드, 과목명, 담당교수 검색..."
+            placeholder="질문 제목, 본문, 과목명, 담당교수 검색..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -178,9 +178,9 @@ const QuestionList = ({
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
-              <option value="ALL">모든 토픽 상태</option>
+              <option value="ALL">모든 상태</option>
               <option value="UNANSWERED">진행 중 (미답변)</option>
-              <option value="ANSWERED">해결됨 (답변완료)</option>
+              <option value="ANSWERED">답변 완료</option>
             </select>
 
             <label className="mine-checkbox-label">
@@ -189,24 +189,24 @@ const QuestionList = ({
                 checked={onlyMine}
                 onChange={(e) => setOnlyMine(e.target.checked)}
               />
-              <span>내 토픽만</span>
+              <span>내 질문만</span>
             </label>
           </div>
         </div>
       </div>
 
-      {/* 서양식 포럼 토픽 테이블 헤더 */}
+      {/* 질문 테이블 헤더 */}
       <HelpBubble
         tier="ALL"
         mode="inline"
-        text="질문 행을 클릭하면 전체 답변 스레드를 보고, 질문자 본인은 AI 교정 전 초안 확인 및 삭제가 가능해요."
+        text="질문을 누르면 전체 답변을 보고, 작성자는 초안 확인·삭제를 할 수 있어요."
         className="mb-help-bubble"
       />
       <div className="forum-table-header">
-        <div className="forum-col-topic">Topic (질문 스레드)</div>
-        <div className="forum-col-users">Participants</div>
-        <div className="forum-col-replies">Replies / Posts</div>
-        <div className="forum-col-activity">Activity</div>
+        <div className="forum-col-topic">질문</div>
+        <div className="forum-col-users">참여자</div>
+        <div className="forum-col-replies">답변 / 글</div>
+        <div className="forum-col-activity">최근 활동</div>
       </div>
 
       {/* 토픽 스트림 리스트 */}

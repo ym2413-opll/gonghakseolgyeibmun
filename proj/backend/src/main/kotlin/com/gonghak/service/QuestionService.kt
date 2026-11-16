@@ -86,6 +86,61 @@ class QuestionService(
     companion object {
         const val MAX_TITLE_LENGTH = 180
         const val MAX_CONTENT_LENGTH = 20_000
+        const val MAX_POST_ATTACHMENTS = 5
+    }
+
+    private fun rowToAttachmentDto(attRow: ResultRow): AttachmentDto {
+        val attIdStr = attRow[AttachmentsTable.id].value.toString()
+        return AttachmentDto(
+            id = attIdStr,
+            questionId = attRow[AttachmentsTable.questionId]?.toString(),
+            answerId = attRow[AttachmentsTable.answerId]?.toString(),
+            originalName = attRow[AttachmentsTable.originalName],
+            savedName = attRow[AttachmentsTable.savedName],
+            fileSize = attRow[AttachmentsTable.fileSize],
+            originalSize = attRow[AttachmentsTable.originalSize],
+            mimeType = attRow[AttachmentsTable.mimeType],
+            isImage = attRow[AttachmentsTable.isImage],
+            isCompressed = attRow[AttachmentsTable.isCompressed],
+            compressionRatio = attRow[AttachmentsTable.compressionRatio],
+            url = "/api/attachments/$attIdStr",
+            downloadUrl = "/api/attachments/$attIdStr/download",
+            createdAt = attRow[AttachmentsTable.createdAt].toString()
+        )
+    }
+
+    private fun linkAttachmentsForPostInternal(
+        questionId: UUID,
+        answerId: UUID?,
+        attachmentIds: List<String>,
+        uploaderId: UUID
+    ): List<AttachmentDto> {
+        if (attachmentIds.isEmpty()) return emptyList()
+        val validUuids = attachmentIds
+            .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
+            .distinct()
+            .take(MAX_POST_ATTACHMENTS)
+        if (validUuids.isEmpty()) return emptyList()
+
+        AttachmentsTable.update({
+            (AttachmentsTable.id inList validUuids) and
+                (AttachmentsTable.uploaderId eq uploaderId) and
+                AttachmentsTable.questionId.isNull() and
+                AttachmentsTable.answerId.isNull()
+        }) {
+            it[AttachmentsTable.questionId] = questionId
+            it[AttachmentsTable.answerId] = answerId
+        }
+
+        return AttachmentsTable.select {
+            if (answerId != null) {
+                (AttachmentsTable.questionId eq questionId) and (AttachmentsTable.answerId eq answerId)
+            } else {
+                (AttachmentsTable.questionId eq questionId) and AttachmentsTable.answerId.isNull()
+            }
+        }
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .map(::rowToAttachmentDto)
     }
 
     private fun findParticipatingProfessorIds(questionId: UUID): List<UUID> =
@@ -254,20 +309,12 @@ class QuestionService(
             }
 
             // Link attachments if provided (must belong to currentUserId and not already linked)
-            if (request.attachmentIds.isNotEmpty()) {
-                val validUuids = request.attachmentIds.mapNotNull {
-                    try { UUID.fromString(it) } catch (_: Exception) { null }
-                }
-                if (validUuids.isNotEmpty()) {
-                    AttachmentsTable.update({
-                        (AttachmentsTable.id inList validUuids) and
-                            (AttachmentsTable.uploaderId eq currentUserId) and
-                            AttachmentsTable.questionId.isNull()
-                    }) {
-                        it[AttachmentsTable.questionId] = qId
-                    }
-                }
-            }
+            linkAttachmentsForPostInternal(
+                questionId = qId,
+                answerId = null,
+                attachmentIds = request.attachmentIds,
+                uploaderId = currentUserId
+            )
 
             val authorDisplayForMail = if (request.isAnonymous) {
                 "$courseName 수강생 (익명)"
@@ -349,8 +396,15 @@ class QuestionService(
 
         query.orderBy(QuestionsTable.createdAt to SortOrder.DESC)
 
-        val allAttachments = AttachmentsTable.selectAll().toList()
-        val attachmentsByQuestionId = allAttachments.groupBy { it[AttachmentsTable.questionId] }
+        val allAttachments = AttachmentsTable.selectAll()
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .toList()
+        val attachmentsByQuestionId = allAttachments
+            .filter { it[AttachmentsTable.answerId] == null }
+            .groupBy { it[AttachmentsTable.questionId] }
+        val attachmentsByAnswerId = allAttachments
+            .filter { it[AttachmentsTable.answerId] != null }
+            .groupBy { it[AttachmentsTable.answerId] }
 
         val allUsersMap = UsersTable.selectAll().associate { uRow ->
             uRow[UsersTable.id].value to toAuthorSummary(uRow)
@@ -407,6 +461,7 @@ class QuestionService(
             }
 
             val answerDtos = rawAnswers.map { aRow ->
+                val aId = aRow[AnswersTable.id].value
                 val aAuthorId = aRow[AnswersTable.professorId]
                 val authorSummary = allUsersMap[aAuthorId] ?: AuthorSummary(
                     name = "교수",
@@ -414,8 +469,9 @@ class QuestionService(
                     displayTag = "수강생",
                     department = ""
                 )
+                val ansAttDtos = attachmentsByAnswerId[aId]?.map(::rowToAttachmentDto) ?: emptyList()
                 buildAnswerDto(
-                    answerId = aRow[AnswersTable.id].value,
+                    answerId = aId,
                     questionId = qId,
                     questionStudentId = authorId,
                     authorUuid = aAuthorId,
@@ -436,7 +492,8 @@ class QuestionService(
                     isThreadOpen = isThreadOpen,
                     isQuestionDeleted = isQuestionDeleted,
                     isQuestionHidden = isQuestionHidden,
-                    hideOriginalDraft = isProfessor
+                    hideOriginalDraft = isProfessor,
+                    attachments = ansAttDtos
                 )
             }
 
@@ -447,24 +504,7 @@ class QuestionService(
             val visibleAttachments = if (maskedForHidden || isQuestionDeleted) {
                 emptyList()
             } else {
-                attachmentsByQuestionId[qId]?.map { attRow ->
-                    val attIdStr = attRow[AttachmentsTable.id].value.toString()
-                    AttachmentDto(
-                        id = attIdStr,
-                        questionId = qId.toString(),
-                        originalName = attRow[AttachmentsTable.originalName],
-                        savedName = attRow[AttachmentsTable.savedName],
-                        fileSize = attRow[AttachmentsTable.fileSize],
-                        originalSize = attRow[AttachmentsTable.originalSize],
-                        mimeType = attRow[AttachmentsTable.mimeType],
-                        isImage = attRow[AttachmentsTable.isImage],
-                        isCompressed = attRow[AttachmentsTable.isCompressed],
-                        compressionRatio = attRow[AttachmentsTable.compressionRatio],
-                        url = "/api/attachments/$attIdStr",
-                        downloadUrl = "/api/attachments/$attIdStr/download",
-                        createdAt = attRow[AttachmentsTable.createdAt].toString()
-                    )
-                } ?: emptyList()
+                attachmentsByQuestionId[qId]?.map(::rowToAttachmentDto) ?: emptyList()
             }
 
             QuestionListItemDto(
@@ -555,13 +595,21 @@ class QuestionService(
             else -> effectiveAuthorTag
         }
 
+        val allThreadAttachmentRows = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .toList()
+        val answerAttachmentsMap = allThreadAttachmentRows
+            .filter { it[AttachmentsTable.answerId] != null }
+            .groupBy({ it[AttachmentsTable.answerId]!! }, ::rowToAttachmentDto)
+
         // Answers & Follow-up questions
         val answersList = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
             .select { AnswersTable.questionId eq questionId }
             .orderBy(AnswersTable.sequenceNumber to SortOrder.ASC, AnswersTable.createdAt to SortOrder.ASC)
             .map { aRow ->
+                val ansId = aRow[AnswersTable.id].value
                 buildAnswerDto(
-                    answerId = aRow[AnswersTable.id].value,
+                    answerId = ansId,
                     questionId = questionId,
                     questionStudentId = qRow[QuestionsTable.studentId],
                     authorUuid = aRow[AnswersTable.professorId],
@@ -582,7 +630,8 @@ class QuestionService(
                     isThreadOpen = isThreadOpen,
                     isQuestionDeleted = isQuestionDeleted,
                     isQuestionHidden = isQuestionHidden,
-                    hideOriginalDraft = isProfessor
+                    hideOriginalDraft = isProfessor,
+                    attachments = answerAttachmentsMap[ansId] ?: emptyList()
                 )
             }
 
@@ -610,26 +659,9 @@ class QuestionService(
         val attachmentDtos = if (maskedForHidden || isQuestionDeleted) {
             emptyList()
         } else {
-            AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
-                .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
-                .map { attRow ->
-                    val attIdStr = attRow[AttachmentsTable.id].value.toString()
-                    AttachmentDto(
-                        id = attIdStr,
-                        questionId = questionId.toString(),
-                        originalName = attRow[AttachmentsTable.originalName],
-                        savedName = attRow[AttachmentsTable.savedName],
-                        fileSize = attRow[AttachmentsTable.fileSize],
-                        originalSize = attRow[AttachmentsTable.originalSize],
-                        mimeType = attRow[AttachmentsTable.mimeType],
-                        isImage = attRow[AttachmentsTable.isImage],
-                        isCompressed = attRow[AttachmentsTable.isCompressed],
-                        compressionRatio = attRow[AttachmentsTable.compressionRatio],
-                        url = "/api/attachments/$attIdStr",
-                        downloadUrl = "/api/attachments/$attIdStr/download",
-                        createdAt = attRow[AttachmentsTable.createdAt].toString()
-                    )
-                }
+            allThreadAttachmentRows
+                .filter { it[AttachmentsTable.answerId] == null }
+                .map(::rowToAttachmentDto)
         }
 
         val actualTitle = qRow[QuestionsTable.title]
@@ -712,7 +744,7 @@ class QuestionService(
         val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
             ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
         if (qRow[QuestionsTable.isDeletedByAuthor]) {
-            throw IllegalStateException("작성자에 의해 삭제된 질문의 스레드 상태는 변경할 수 없습니다.")
+            throw IllegalStateException("작성자가 삭제한 질문의 상태는 변경할 수 없습니다.")
         }
         val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
             ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
@@ -721,7 +753,7 @@ class QuestionService(
         val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
 
         if (!isAssignedProf && !isActorAdmin) {
-            throw IllegalStateException("담당교수 또는 관리자만 스레드 열림/닫힘 상태를 전환할 수 있습니다.")
+            throw IllegalStateException("담당교수 또는 관리자만 질문 열림/닫힘 상태를 전환할 수 있습니다.")
         }
 
         QuestionsTable.update({ QuestionsTable.id eq questionId }) {
@@ -767,6 +799,10 @@ class QuestionService(
             it[AnswersTable.isHidden] = isHidden
         }
 
+        val answerAtts = AttachmentsTable.select { AttachmentsTable.answerId eq answerId }
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .map(::rowToAttachmentDto)
+
         buildAnswerDto(
             answerId = answerId,
             questionId = questionId,
@@ -795,34 +831,39 @@ class QuestionService(
             isThreadOpen = qRow[QuestionsTable.isThreadOpen],
             isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor],
             isQuestionHidden = qRow[QuestionsTable.isHidden],
-            hideOriginalDraft = (actorRole == UserRole.PROFESSOR)
+            hideOriginalDraft = (actorRole == UserRole.PROFESSOR),
+            attachments = answerAtts
         )
     }
 
-    suspend fun deleteAnswerByModerator(questionId: UUID, answerId: UUID, actorId: UUID): UUID = dbQuery {
-        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
-            ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
-        val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
-            .select { (AnswersTable.id eq answerId) and (AnswersTable.questionId eq questionId) }
-            .singleOrNull() ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
-        val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
-            ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
+    suspend fun deleteAnswerByModerator(questionId: UUID, answerId: UUID, actorId: UUID): UUID {
+        val (deletedQuestionId, savedAttachmentNames) = dbQuery {
+            val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+                ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
+            val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
+                .select { (AnswersTable.id eq answerId) and (AnswersTable.questionId eq questionId) }
+                .singleOrNull() ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
+            val actorUser = UsersTable.select { UsersTable.id eq actorId }.singleOrNull()
+                ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
 
-        val actorRole = runCatching { UserRole.valueOf(actorUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
-        val isActorAdmin = actorUser[UsersTable.isAdmin] || actorRole == UserRole.ADMIN
-        val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
-        val answerAuthorRole = aRow[UsersTable.role]
-        val answerAuthorIsAdmin = aRow[UsersTable.isAdmin] || answerAuthorRole == UserRole.ADMIN.name
+            val actorRole = runCatching { UserRole.valueOf(actorUser[UsersTable.role]) }.getOrDefault(UserRole.STUDENT)
+            val isActorAdmin = actorUser[UsersTable.isAdmin] || actorRole == UserRole.ADMIN
+            val isAssignedProf = qRow[QuestionsTable.assignedProfessorId] == actorId
+            val answerAuthorRole = aRow[UsersTable.role]
+            val answerAuthorIsAdmin = aRow[UsersTable.isAdmin] || answerAuthorRole == UserRole.ADMIN.name
 
-        val isPeerStudentAnswer = answerAuthorRole == UserRole.STUDENT.name &&
-            !answerAuthorIsAdmin &&
-            aRow[AnswersTable.professorId] != qRow[QuestionsTable.studentId]
-        val allowed = isActorAdmin || (isAssignedProf && isPeerStudentAnswer)
-        if (!allowed) {
-            throw IllegalStateException("답변 삭제 권한이 없습니다.")
+            val isPeerStudentAnswer = answerAuthorRole == UserRole.STUDENT.name &&
+                !answerAuthorIsAdmin &&
+                aRow[AnswersTable.professorId] != qRow[QuestionsTable.studentId]
+            val allowed = isActorAdmin || (isAssignedProf && isPeerStudentAnswer)
+            if (!allowed) {
+                throw IllegalStateException("답변 삭제 권한이 없습니다.")
+            }
+
+            deleteAnswerInternal(answerId)
         }
-
-        deleteAnswerInternal(answerId)
+        attachmentService?.deleteStoredFiles(savedAttachmentNames)
+        return deletedQuestionId
     }
 
     suspend fun setAnswerHidden(answerId: UUID, isHidden: Boolean): AnswerDto = dbQuery {
@@ -838,6 +879,9 @@ class QuestionService(
             it[AnswersTable.isHidden] = isHidden
         }
 
+        val answerAtts = AttachmentsTable.select { AttachmentsTable.answerId eq answerId }
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .map(::rowToAttachmentDto)
         val authorRole = aRow[UsersTable.role]
         val isAdminAuthor = aRow[UsersTable.isAdmin] || authorRole == UserRole.ADMIN.name
         val adminNick = if (isAdminAuthor) aRow[UsersTable.nickname]?.trim()?.takeIf { it.isNotEmpty() } else null
@@ -855,6 +899,8 @@ class QuestionService(
             isHidden = isHidden,
             sequenceNumber = aRow[AnswersTable.sequenceNumber],
             isAdminAuthor = isAdminAuthor,
+            attachmentCount = answerAtts.size,
+            attachments = answerAtts,
             createdAt = aRow[AnswersTable.createdAt].toString()
         )
     }
@@ -944,16 +990,23 @@ class QuestionService(
         return true
     }
 
-    suspend fun deleteAnswer(answerId: UUID): UUID = dbQuery {
-        deleteAnswerInternal(answerId)
+    suspend fun deleteAnswer(answerId: UUID): UUID {
+        val (questionId, savedNames) = dbQuery {
+            deleteAnswerInternal(answerId)
+        }
+        attachmentService?.deleteStoredFiles(savedNames)
+        return questionId
     }
 
-    private fun deleteAnswerInternal(answerId: UUID): UUID {
+    private fun deleteAnswerInternal(answerId: UUID): Pair<UUID, List<String>> {
         val aRow = AnswersTable.select { AnswersTable.id eq answerId }.singleOrNull()
             ?: throw IllegalArgumentException("답변을 찾을 수 없습니다.")
         val questionId = aRow[AnswersTable.questionId]
+        val savedAttachmentNames = AttachmentsTable.select { AttachmentsTable.answerId eq answerId }
+            .map { it[AttachmentsTable.savedName] }
 
         NotificationsTable.deleteWhere { NotificationsTable.referenceId eq answerId }
+        AttachmentsTable.deleteWhere { AttachmentsTable.answerId eq answerId }
         AnswersTable.deleteWhere { AnswersTable.id eq answerId }
 
         val remainingPosts = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
@@ -966,7 +1019,7 @@ class QuestionService(
         QuestionsTable.update({ QuestionsTable.id eq questionId }) {
             it[QuestionsTable.status] = nextStatus.name
         }
-        return questionId
+        return questionId to savedAttachmentNames
     }
 
     suspend fun updateQuestion(
@@ -1116,9 +1169,9 @@ class QuestionService(
 
             if (!canAnswer) {
                 if (role == UserRole.STUDENT && !isThreadOpen) {
-                    throw IllegalStateException("스레드가 닫힘 상태여서 다른 학생은 답변을 작성할 수 없습니다.")
+                    throw IllegalStateException("질문이 닫힘 상태여서 다른 학생은 답변할 수 없습니다.")
                 } else if (role == UserRole.PROFESSOR && professorId != assignedProfId && !isThreadOpen) {
-                    throw IllegalStateException("스레드가 닫힘(질문자, 담당교수 외 닫힘) 상태여서 공동 교수가 답변할 수 없습니다.")
+                    throw IllegalStateException("질문이 닫힘(질문자, 담당교수 외 닫힘) 상태여서 공동 교수가 답변할 수 없습니다.")
                 } else if (isAssignedProfAnswered && professorId != assignedProfId) {
                     throw IllegalStateException("질문자의 담당교수가 이미 답변을 완료하여 추가 답변이 제한됩니다.")
                 } else {
@@ -1141,6 +1194,13 @@ class QuestionService(
                 it[isHidden] = false
                 it[createdAt] = now
             }
+
+            val linkedAttachments = linkAttachmentsForPostInternal(
+                questionId = questionId,
+                answerId = ansId,
+                attachmentIds = request.attachmentIds,
+                uploaderId = professorId
+            )
 
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
                 it[lastSequenceNumber] = nextSeq
@@ -1172,7 +1232,8 @@ class QuestionService(
                 isAssignedProfViewer = isAssigned,
                 isThreadOpen = isThreadOpen,
                 isQuestionDeleted = false,
-                hideOriginalDraft = (role == UserRole.PROFESSOR)
+                hideOriginalDraft = (role == UserRole.PROFESSOR),
+                attachments = linkedAttachments
             )
 
             val participatingProfIds = findParticipatingProfessorIds(questionId)
@@ -1284,6 +1345,13 @@ class QuestionService(
                 it[createdAt] = now
             }
 
+            val linkedAttachments = linkAttachmentsForPostInternal(
+                questionId = questionId,
+                answerId = followUpId,
+                attachmentIds = request.attachmentIds,
+                uploaderId = studentId
+            )
+
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
                 it[status] = QuestionStatus.OPEN.name
                 it[lastSequenceNumber] = nextSeq
@@ -1313,7 +1381,8 @@ class QuestionService(
                 isQuestionAnonymous = isAnonymous,
                 currentUserId = studentId,
                 isMyQuestion = true,
-                isAdminViewer = studentUser[UsersTable.isAdmin]
+                isAdminViewer = studentUser[UsersTable.isAdmin],
+                attachments = linkedAttachments
             )
 
             val participatingProfIds = findParticipatingProfessorIds(questionId)
@@ -1503,7 +1572,8 @@ class QuestionService(
         isThreadOpen: Boolean = false,
         isQuestionDeleted: Boolean = false,
         isQuestionHidden: Boolean = false,
-        hideOriginalDraft: Boolean = false
+        hideOriginalDraft: Boolean = false,
+        attachments: List<AttachmentDto> = emptyList()
     ): AnswerDto {
         val isStudentPost = authorSummary.role == UserRole.STUDENT.name && !authorSummary.isAdmin
         val isOriginalAuthorFollowUp = isStudentPost && authorUuid == questionStudentId
@@ -1534,6 +1604,7 @@ class QuestionService(
         val canModerate = isAdminViewer || (isAssignedProfViewer && isPeerStudentAnswer)
         val maskedByDeletion = isQuestionDeleted && isOriginalAuthorFollowUp
         val maskedByParentHidden = isQuestionHidden && !isAdminViewer && isOriginalAuthorFollowUp
+        val isMasked = maskedByDeletion || maskedByParentHidden || (isAnsHidden && !isAdminViewer)
         val safeContent = when {
             maskedByDeletion -> "작성자에 의해 삭제된 내용입니다."
             maskedByParentHidden || (isAnsHidden && !isAdminViewer) ->
@@ -1544,10 +1615,10 @@ class QuestionService(
             !isOriginalAuthorFollowUp -> ""
             hideOriginalDraft -> ""
             !isMyPost && !isAdminViewer -> ""
-            maskedByDeletion -> ""
-            maskedByParentHidden || (isAnsHidden && !isAdminViewer) -> ""
+            isMasked -> ""
             else -> originalDraftContent
         }
+        val visibleAttachments = if (isMasked) emptyList() else attachments
 
         return AnswerDto(
             id = answerId.toString(),
@@ -1567,6 +1638,8 @@ class QuestionService(
             sequenceNumber = sequenceNumber,
             isAdminAuthor = authorSummary.isAdmin,
             canModerate = canModerate,
+            attachmentCount = visibleAttachments.size,
+            attachments = visibleAttachments,
             createdAt = createdAt
         )
     }

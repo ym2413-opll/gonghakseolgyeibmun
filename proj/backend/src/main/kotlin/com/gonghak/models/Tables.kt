@@ -143,6 +143,7 @@ object NotificationsTable : UUIDTable("notifications") {
 
 object AttachmentsTable : UUIDTable("attachments") {
     val questionId = uuid("question_id").references(QuestionsTable.id).nullable()
+    val answerId = uuid("answer_id").references(AnswersTable.id).nullable()
     val uploaderId = uuid("uploader_id").references(UsersTable.id).nullable()
     val originalName = varchar("original_name", 255)
     val savedName = varchar("saved_name", 255)

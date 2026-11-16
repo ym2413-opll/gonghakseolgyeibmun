@@ -4,9 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
-import { validateSecurity, formatFileSize, isSafeAttachmentUrl, MAX_ATTACHMENTS_COUNT } from '../../utils/fileSecurity';
-import { compressImageClient } from '../../utils/imageCompression';
 import { generateSummaryTitle } from '../../utils/textSummary';
+import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import ProfessorNameList from '../common/ProfessorNameList';
 import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
@@ -15,25 +14,13 @@ import {
   Send,
   PenTool,
   Search,
-  EyeOff,
   AlertCircle,
-  CheckCircle2,
-  BookOpen,
-  Paperclip,
-  UploadCloud,
-  FileText,
-  Image as ImageIcon,
-  Trash2,
-  ShieldCheck,
-  Loader2,
-  FileCode,
-  FileArchive
+  CheckCircle2
 } from 'lucide-react';
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const { currentUser, isStudent, allCourses, refreshCurrentUser, refreshCatalog } = useAuth();
   const { profSettings } = useNotifications();
-  const fileInputRef = useRef(null);
   const contentTextareaRef = useRef(null);
 
   useEffect(() => {
@@ -56,8 +43,6 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   // 파일 첨부 관련 상태
   const [attachments, setAttachments] = useState([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
-  const [fileProcessStatus, setFileProcessStatus] = useState('');
-  const [dragActive, setDragActive] = useState(false);
 
   // 모달 및 제출 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -65,7 +50,6 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const [similarList, setSimilarList] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [securitySuccessMsg, setSecuritySuccessMsg] = useState('');
 
   const currentCourse = studentCourses.find((c) => c.id === selectedCourseId) || studentCourses[0] || {
     id: 'course-001',
@@ -118,144 +102,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     if (onCancel) onCancel();
   };
 
-  // 파일 선택 및 드래그 앤 드롭 처리 (엄격 보안 검증 + 이미지 압축)
-  const processFiles = async (files) => {
-    if (!files || files.length === 0) return;
-
-    if (attachments.length + files.length > MAX_ATTACHMENTS_COUNT) {
-      setErrorMsg(`파일은 최대 ${MAX_ATTACHMENTS_COUNT}개까지만 첨부할 수 있습니다.`);
-      return;
-    }
-
-    setIsProcessingFiles(true);
-    setErrorMsg('');
-    setSecuritySuccessMsg('');
-
-    const newAttachments = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setFileProcessStatus(`'${file.name}' 보안 검사 및 무결성 분석 중...`);
-
-      // 1. 엄격한 사전 보안 검사 (확장자, 다중확장자, 경로문자, 매직바이트)
-      const secResult = await validateSecurity(file);
-      if (!secResult.valid) {
-        setErrorMsg(`[보안 차단: ${file.name}] ${secResult.error}`);
-        setIsProcessingFiles(false);
-        setFileProcessStatus('');
-        return;
-      }
-
-      let fileToUpload = file;
-      let compressionMeta = {
-        isImage: secResult.isImage,
-        originalSize: file.size,
-        compressedSize: file.size,
-        isCompressed: false,
-        compressionRatio: 0,
-        previewUrl: ''
-      };
-
-      // 2. 이미지 파일인 경우 클라이언트단 압축 및 리사이징 적용
-      if (secResult.isImage) {
-        setFileProcessStatus(`'${file.name}' 고화질 이미지 최적화 및 압축 중...`);
-        try {
-          const compResult = await compressImageClient(file);
-          fileToUpload = compResult.compressedFile;
-          compressionMeta = {
-            isImage: true,
-            originalSize: compResult.originalSize,
-            compressedSize: compResult.compressedSize,
-            isCompressed: compResult.isCompressed,
-            compressionRatio: compResult.compressionRatio,
-            previewUrl: compResult.previewUrl
-          };
-        } catch (compErr) {
-          console.warn('Image compression fallback to original', compErr);
-        }
-      }
-
-      // 3. 백엔드 또는 로컬 스토리지에 파일 업로드
-      setFileProcessStatus(`'${file.name}' 서버 안전 업로드 중...`);
-      try {
-        const uploadRes = await api.uploadAttachment(fileToUpload, compressionMeta);
-        if (uploadRes && uploadRes.success) {
-          newAttachments.push(uploadRes.attachment);
-        }
-      } catch (uploadErr) {
-        setErrorMsg(`파일 업로드 실패: ${uploadErr.message}`);
-        setIsProcessingFiles(false);
-        setFileProcessStatus('');
-        return;
-      }
-    }
-
-    setAttachments((prev) => [...prev, ...newAttachments]);
-    setSecuritySuccessMsg(`${newAttachments.length}개 파일의 보안 검사 및 최적화가 완료되었습니다.`);
-    setIsProcessingFiles(false);
-    setFileProcessStatus('');
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const handleFileInputChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    processFiles(files);
-  };
-
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-      processFiles(Array.from(e.dataTransfer.files));
-    }
-  };
-
-  const handleRemoveAttachment = async (indexToRemove) => {
-    const item = attachments[indexToRemove];
-    if (item?.previewUrl && String(item.previewUrl).startsWith('blob:')) {
-      URL.revokeObjectURL(item.previewUrl);
-    }
-    if (item && item.id) {
-      try {
-        await api.deleteAttachment(item.id);
-      } catch (err) {
-        console.warn('Failed to delete remote attachment:', err);
-      }
-    }
-    setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-  };
-
   const handleInsertPhotoTag = (photoNum) => {
-    const tag = `[사진 ${photoNum}]`;
-    const textarea = contentTextareaRef.current;
-    if (!textarea || typeof textarea.selectionStart !== 'number') {
-      setContent((prev) => (prev ? `${prev}\n${tag}` : tag));
+    insertSnippetAtCursor(contentTextareaRef, content, setContent, `[사진 ${photoNum}]`, () => {
       if (hasAiRefined) setHasAiRefined(false);
-      return;
-    }
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd ?? start;
-    const nextValue = `${content.slice(0, start)}${tag}${content.slice(end)}`;
-    setContent(nextValue);
-    if (hasAiRefined) setHasAiRefined(false);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const nextPos = start + tag.length;
-      textarea.setSelectionRange(nextPos, nextPos);
     });
   };
 
@@ -327,18 +176,6 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  // 첨부 파일 아이콘 렌더링 헬퍼
-  const renderAttachmentIcon = (att) => {
-    if (att.isImage) {
-      return <ImageIcon size={20} className="file-icon-img" />;
-    }
-    const ext = att.originalName?.split('.').pop()?.toLowerCase();
-    if (ext === 'pdf') return <FileText size={20} className="file-icon-pdf" />;
-    if (['zip', 'rar', '7z'].includes(ext)) return <FileArchive size={20} className="file-icon-zip" />;
-    if (['c', 'cpp', 'py', 'java', 'js', 'html'].includes(ext)) return <FileCode size={20} className="file-icon-code" />;
-    return <FileText size={20} className="file-icon-doc" />;
   };
 
   if (!isStudent) {
@@ -522,130 +359,15 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
           </div>
 
           {/* 4. 파일 첨부 영역 */}
-          <div className="form-group attachment-section">
-            <div className="attachment-header-row">
-              <div className="attachment-label-wrap">
-                <label className="form-label">
-                  <Paperclip size={15} />
-                  첨부 파일 ({attachments.length}/{MAX_ATTACHMENTS_COUNT})
-                </label>
-              </div>
-            </div>
-            <HelpBubble
-              tier="ALL"
-              mode="inline"
-              text="파일을 첨부하고 [사진 1] 태그로 본문에 넣어요."
-              className="mb-help-bubble"
-            />
-
-            {/* 드래그 앤 드롭 업로드 박스 */}
-            <div
-              className={`file-dropzone ${dragActive ? 'drag-over' : ''} ${attachments.length >= MAX_ATTACHMENTS_COUNT ? 'dropzone-disabled' : ''}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => {
-                if (attachments.length < MAX_ATTACHMENTS_COUNT && !isProcessingFiles) {
-                  fileInputRef.current?.click();
-                }
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden-file-input"
-                onChange={handleFileInputChange}
-                accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.hwp,.hwpx,.txt,.zip"
-                disabled={attachments.length >= MAX_ATTACHMENTS_COUNT || isProcessingFiles}
-              />
-
-              {isProcessingFiles ? (
-                <div className="dropzone-processing">
-                  <Loader2 size={22} className="spin-icon" />
-                  <span className="processing-text">{fileProcessStatus}</span>
-                </div>
-              ) : (
-                <div className="dropzone-content">
-                  <UploadCloud size={24} className="upload-cloud-icon" />
-                  <div className="dropzone-text-group">
-                    <span className="dropzone-primary-text">
-                      파일 선택 또는 드래그 앤 드롭
-                    </span>
-                    <span className="dropzone-secondary-text">
-                      PDF, Office, HWP, TXT, ZIP, 이미지 (최대 15MB)
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 첨부된 파일 목록 */}
-            {attachments.length > 0 && (() => {
-              let photoCounter = 0;
-              return (
-                <div className="attached-files-list">
-                  {attachments.map((att, idx) => {
-                    const photoNum = att.isImage ? ++photoCounter : null;
-                    return (
-                      <div key={att.id || idx} className="attached-file-card">
-                        {att.isImage && isSafeAttachmentUrl(att.previewUrl || att.url) ? (
-                          <div className="attached-file-thumb">
-                            <img src={att.previewUrl || att.url} alt={att.originalName} />
-                          </div>
-                        ) : (
-                          <div className="attached-file-icon-box">{renderAttachmentIcon(att)}</div>
-                        )}
-
-                        <div className="attached-file-info">
-                          <div className="file-name-row">
-                            {photoNum && (
-                              <span className="photo-seq-tag">[사진 {photoNum}]</span>
-                            )}
-                            <span className="file-name" title={att.originalName}>
-                              {att.originalName}
-                            </span>
-                          </div>
-
-                          <div className="file-meta-row">
-                            <span className="file-size-badge normal">
-                              {formatFileSize(att.fileSize)}
-                            </span>
-                            {photoNum && (
-                              <button
-                                type="button"
-                                className="photo-insert-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleInsertPhotoTag(photoNum);
-                                }}
-                                title={`[사진 ${photoNum}] 삽입`}
-                              >
-                                [사진 {photoNum}] 삽입
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="btn-remove-attachment"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveAttachment(idx);
-                          }}
-                          title="삭제"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
+          <AttachmentUploader
+            attachments={attachments}
+            onChangeAttachments={setAttachments}
+            isProcessing={isProcessingFiles}
+            onProcessingChange={setIsProcessingFiles}
+            onInsertPhotoTag={handleInsertPhotoTag}
+            onError={setErrorMsg}
+            showHelpBubble
+          />
 
           {/* 5. 익명 질문 체크박스 */}
           <div className="form-group anonymous-group">

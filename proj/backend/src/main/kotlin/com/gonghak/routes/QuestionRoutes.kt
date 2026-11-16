@@ -225,7 +225,7 @@ fun Route.questionRoutes(
                     ApiResponse(
                         success = true,
                         data = updated,
-                        message = if (request.isThreadOpen) "스레드가 '열림' 상태로 전환되었습니다." else "스레드가 '질문자, 담당교수 외 닫힘' 상태로 전환되었습니다."
+                        message = if (request.isThreadOpen) "질문이 '열림' 상태로 전환되었습니다." else "질문이 '질문자, 담당교수 외 닫힘' 상태로 전환되었습니다."
                     )
                 )
             } catch (e: IllegalArgumentException) {

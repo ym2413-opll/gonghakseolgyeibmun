@@ -12,6 +12,7 @@ import java.util.UUID
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.request.forms.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.testing.*
@@ -2238,6 +2239,236 @@ class R3OverhaulTest {
         assertEquals(
             HttpStatusCode.BadRequest,
             client.delete("/api/admin/courses/${created.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            }.status
+        )
+    }
+
+    @Test
+    fun testAnswerAndFollowUpAttachmentsAndAccessControl() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+        val suffix = (10000..99999).random()
+
+        // Create tiny valid PNG bytes and PDF bytes
+        val img = java.awt.image.BufferedImage(40, 40, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        val imgBytes = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(img, "png", it) }.toByteArray()
+        val pdfBytes = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF".toByteArray(Charsets.UTF_8)
+
+        val courses = client.get("/api/courses?all=true&limit=10").body<ApiResponse<CourseListResponse>>().data!!.courses
+        val baseCourse = courses.first()
+
+        val profAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "att_prof_$suffix",
+                    password = "profpass1234",
+                    name = "첨부교수",
+                    department = "소프트웨어학부",
+                    courseIds = listOf(baseCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "att_stu_$suffix",
+                    password = "stupass1234",
+                    name = "첨부학생",
+                    department = "소프트웨어학부",
+                    entryYear = 2037,
+                    identifier = "AUTO",
+                    courseIds = listOf(baseCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        val peerStuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "att_peer_$suffix",
+                    password = "stupass1234",
+                    name = "타학생",
+                    department = "소프트웨어학부",
+                    entryYear = 2037,
+                    identifier = "AUTO",
+                    courseIds = listOf(baseCourse.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        // Promote another user as admin to test hidden answer attachment moderation
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "att_admin_$suffix",
+                    password = "adminpass1234",
+                    name = "첨부관리자",
+                    department = "소프트웨어학부"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("att_admin_$suffix", true)
+
+        suspend fun uploadFile(token: String, name: String, bytes: ByteArray, contentType: ContentType): AttachmentDto {
+            val res = client.submitFormWithBinaryData(
+                url = "/api/attachments/upload",
+                formData = formData {
+                    append(
+                        "file",
+                        bytes,
+                        Headers.build {
+                            append(HttpHeaders.ContentDisposition, "filename=\"$name\"")
+                            append(HttpHeaders.ContentType, contentType.toString())
+                        }
+                    )
+                }
+            ) {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            assertEquals(HttpStatusCode.Created, res.status)
+            return res.body<FileUploadResponse>().attachment
+        }
+
+        // 1. Create #1 Question with OP image
+        val qAtt = uploadFile(stuAuth.token, "op_diagram.png", imgBytes, ContentType.Image.PNG)
+        val createdQ = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = baseCourse.id,
+                    profId = profAuth.user.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "답변/꼬리질문 첨부 테스트_$suffix",
+                    rawContent = "원문 질문입니다. [사진 1]",
+                    attachmentIds = listOf(qAtt.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(1, createdQ.attachments.size)
+        assertNull(createdQ.attachments.first().answerId)
+
+        // 2. Professor replies (#2) with its own image + anchored reference `[#1 사진 1]` & `[사진 1]`
+        val ansAtt = uploadFile(profAuth.token, "prof_sol.png", imgBytes, ContentType.Image.PNG)
+        val createdAns = client.post("/api/questions/${createdQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateAnswerRequest(
+                    content = "[#1 사진 1] 참고하여 [사진 1]처럼 풀이하세요.",
+                    attachmentIds = listOf(ansAtt.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(2, createdAns.sequenceNumber)
+        assertEquals(1, createdAns.attachmentCount)
+        assertEquals(1, createdAns.attachments.size)
+        assertEquals(createdAns.id, createdAns.attachments.first().answerId)
+
+        // 3. Author student posts follow-up (#3) with PDF + PNG attachments + anchored reference `[#2 사진 1]`
+        val fuImgAtt = uploadFile(stuAuth.token, "followup_fig.png", imgBytes, ContentType.Image.PNG)
+        val fuPdfAtt = uploadFile(stuAuth.token, "followup_notes.pdf", pdfBytes, ContentType.Application.Pdf)
+        val createdFollowUp = client.post("/api/questions/${createdQ.id}/followups") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateFollowUpRequest(
+                    content = "[#2 사진 1] 단계 중 [사진 1]과 첨부 PDF 확인 부탁드립니다.",
+                    attachmentIds = listOf(fuImgAtt.id, fuPdfAtt.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(3, createdFollowUp.sequenceNumber)
+        assertEquals(2, createdFollowUp.attachmentCount)
+        assertEquals(2, createdFollowUp.attachments.size)
+        assertEquals(createdFollowUp.id, createdFollowUp.attachments.first().answerId)
+
+        // 4. Open thread -> Peer student posts (#4) trying to hijack student's unlinked attachment is ignored,
+        // while own attachment links cleanly
+        client.patch("/api/questions/${createdQ.id}/thread-open") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleThreadOpenRequest(isThreadOpen = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val stuUnlinkedAtt = uploadFile(stuAuth.token, "stu_private.png", imgBytes, ContentType.Image.PNG)
+        val peerOwnAtt = uploadFile(peerStuAuth.token, "peer_photo.png", imgBytes, ContentType.Image.PNG)
+        val peerAns = client.post("/api/questions/${createdQ.id}/answers") {
+            header(HttpHeaders.Authorization, "Bearer ${peerStuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateAnswerRequest(
+                    content = "저도 [#1 사진 1] 및 [사진 1]로 정리해봤습니다.",
+                    attachmentIds = listOf(stuUnlinkedAtt.id, peerOwnAtt.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AnswerDto>>().data!!
+        assertEquals(4, peerAns.sequenceNumber)
+        assertEquals(1, peerAns.attachments.size)
+        assertEquals(peerOwnAtt.id, peerAns.attachments.first().id)
+
+        // Question detail separates OP attachments vs per-answer attachments properly
+        val detail = client.get("/api/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(listOf(qAtt.id), detail.attachments.map { it.id })
+        assertEquals(listOf(ansAtt.id), detail.answers.first { it.sequenceNumber == 2 }.attachments.map { it.id })
+        assertEquals(listOf(fuImgAtt.id, fuPdfAtt.id), detail.answers.first { it.sequenceNumber == 3 }.attachments.map { it.id })
+        assertEquals(listOf(peerOwnAtt.id), detail.answers.first { it.sequenceNumber == 4 }.attachments.map { it.id })
+
+        // 5. Hiding peer answer masks its attachments for students & blocks /api/attachments/{id} for non-admins
+        client.patch("/api/questions/${createdQ.id}/answers/${peerAns.id}/hide") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(ToggleHideRequest(isHidden = true))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val maskedDetail = client.get("/api/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertTrue(maskedDetail.answers.first { it.id == peerAns.id }.attachments.isEmpty())
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/attachments/${peerOwnAtt.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/attachments/${peerOwnAtt.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            }.status
+        )
+
+        // 6. Deleting peer answer deletes its attached DB row & file cleanly
+        client.delete("/api/questions/${createdQ.id}/answers/${peerAns.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.NotFound,
+            client.get("/api/attachments/${peerOwnAtt.id}") {
                 header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
             }.status
         )

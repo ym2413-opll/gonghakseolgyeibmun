@@ -141,7 +141,7 @@ const QuestionCard = ({
                 className={question.isThreadOpen ? 'badge-thread-open' : 'badge-thread-closed'}
                 title={
                   question.isThreadOpen
-                    ? '열림 스레드 (공동교수·타 학생 참여 가능)'
+                    ? '열림 상태 (공동교수·타 학생 참여 가능)'
                     : '질문자, 담당교수 외 닫힘'
                 }
               >
@@ -180,7 +180,7 @@ const QuestionCard = ({
 
           <div className="forum-topic-submeta">
             <span className="forum-op-tag">
-              OP: <strong>{authorDisplay}</strong>
+              작성자: <strong>{authorDisplay}</strong>
               {question.isAnonymous && (
                 <span className="anon-tag">
                   <Shield size={11} /> 익명
@@ -251,8 +251,8 @@ const QuestionCard = ({
         </div>
       </div>
 
-      {/* 2. 중앙: 참여자 아바타 스택 (서양식 포럼 스타일) */}
-      <div className="forum-topic-participants" title="토픽 참여자">
+      {/* 2. 중앙: 참여자 아바타 */}
+      <div className="forum-topic-participants" title="질문 참여자">
         <div className="forum-avatar-stack">
           {participants.map((p, idx) => (
             <span
@@ -266,15 +266,15 @@ const QuestionCard = ({
         </div>
       </div>
 
-      {/* 3. 우측 통계: Replies / Posts */}
+      {/* 3. 우측 통계: 답변 / 글 */}
       <div className="forum-topic-stats">
         <div className={`forum-stat-replies ${answerCount > 0 ? 'has-replies' : ''}`}>
           <span className="stat-num">{answerCount}</span>
-          <span className="stat-label">Replies</span>
+          <span className="stat-label">답변</span>
         </div>
         <div className="forum-stat-posts">
           <span className="stat-num">{answerCount + 1}</span>
-          <span className="stat-label">Posts</span>
+          <span className="stat-label">전체 글</span>
         </div>
       </div>
 

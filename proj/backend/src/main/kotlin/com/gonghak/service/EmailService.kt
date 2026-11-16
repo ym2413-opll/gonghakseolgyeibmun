@@ -87,9 +87,9 @@ class EmailService(
             appendLine(questionContent)
             appendLine("--------------------------------------------------")
             if (replyRoute != null) {
-                appendLine("이 메일에 바로 답장을 보내시거나, 포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
+                appendLine("이 메일에 답장을 보내거나 포털에서 직접 답변을 작성할 수 있습니다.")
             } else {
-                appendLine("포털에 로그인하여 스레드에서 직접 답변을 작성하실 수 있습니다.")
+                appendLine("포털에 로그인해 직접 답변을 작성할 수 있습니다.")
             }
         }
 

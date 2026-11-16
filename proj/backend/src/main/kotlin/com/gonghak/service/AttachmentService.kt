@@ -3,6 +3,7 @@ package com.gonghak.service
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.EnvConfig
 import com.gonghak.dto.AttachmentDto
+import com.gonghak.models.AnswersTable
 import com.gonghak.models.AttachmentsTable
 import com.gonghak.models.QuestionCategory
 import com.gonghak.models.QuestionsTable
@@ -356,7 +357,9 @@ class AttachmentService(
         }
         if (validUuids.isNotEmpty()) {
             AttachmentsTable.update({
-                val baseCond = (AttachmentsTable.id inList validUuids) and AttachmentsTable.questionId.isNull()
+                val baseCond = (AttachmentsTable.id inList validUuids) and
+                    AttachmentsTable.questionId.isNull() and
+                    AttachmentsTable.answerId.isNull()
                 if (uploaderId != null) baseCond and (AttachmentsTable.uploaderId eq uploaderId) else baseCond
             }) {
                 it[AttachmentsTable.questionId] = questionId
@@ -368,13 +371,16 @@ class AttachmentService(
      * 특정 질문의 첨부파일 목록 조회
      */
     suspend fun getAttachmentsByQuestionId(questionId: UUID): List<AttachmentDto> = dbQuery {
-        AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+        AttachmentsTable.select {
+            (AttachmentsTable.questionId eq questionId) and AttachmentsTable.answerId.isNull()
+        }
             .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
             .map { row ->
                 val idStr = row[AttachmentsTable.id].value.toString()
                 AttachmentDto(
                     id = idStr,
                     questionId = questionId.toString(),
+                    answerId = row[AttachmentsTable.answerId]?.toString(),
                     originalName = row[AttachmentsTable.originalName],
                     savedName = row[AttachmentsTable.savedName],
                     fileSize = row[AttachmentsTable.fileSize],
@@ -391,7 +397,7 @@ class AttachmentService(
     }
 
     /**
-     * 첨부파일 메타데이터 및 물리 파일 조회 (작성자/숨김 질문 권한 검증 포함)
+     * 첨부파일 메타데이터 및 물리 파일 조회 (작성자/숨김 질문·답변 권한 검증 포함)
      */
     suspend fun getAccessibleAttachmentFile(
         attachmentId: UUID,
@@ -402,22 +408,31 @@ class AttachmentService(
             ?: return@dbQuery null
 
         val linkedQuestionId = row[AttachmentsTable.questionId]
+        val linkedAnswerId = row[AttachmentsTable.answerId]
         val uploaderId = row[AttachmentsTable.uploaderId]
 
-        if (linkedQuestionId == null) {
+        if (linkedQuestionId == null && linkedAnswerId == null) {
             if (!isAdmin && uploaderId != requesterId) {
                 throw IllegalStateException("접근 권한이 없는 첨부파일입니다.")
             }
         } else if (!isAdmin) {
-            val qRow = QuestionsTable.select { QuestionsTable.id eq linkedQuestionId }.singleOrNull()
-            if (qRow == null || qRow[QuestionsTable.isHidden] || qRow[QuestionsTable.isDeletedByAuthor]) {
-                throw IllegalStateException("관리자에 의해 가려졌거나 삭제된 게시물의 첨부파일에 접근할 수 없습니다.")
+            if (linkedQuestionId != null) {
+                val qRow = QuestionsTable.select { QuestionsTable.id eq linkedQuestionId }.singleOrNull()
+                if (qRow == null || qRow[QuestionsTable.isHidden] || qRow[QuestionsTable.isDeletedByAuthor]) {
+                    throw IllegalStateException("관리자에 의해 가려졌거나 삭제된 게시물의 첨부파일에 접근할 수 없습니다.")
+                }
+                if (qRow[QuestionsTable.category] == QuestionCategory.GRADE.name &&
+                    qRow[QuestionsTable.studentId] != requesterId &&
+                    qRow[QuestionsTable.assignedProfessorId] != requesterId
+                ) {
+                    throw IllegalStateException("성적 카테고리 질문의 첨부파일은 작성자와 담당교수만 열람할 수 있습니다.")
+                }
             }
-            if (qRow[QuestionsTable.category] == QuestionCategory.GRADE.name &&
-                qRow[QuestionsTable.studentId] != requesterId &&
-                qRow[QuestionsTable.assignedProfessorId] != requesterId
-            ) {
-                throw IllegalStateException("성적 카테고리 질문의 첨부파일은 작성자와 담당교수만 열람할 수 있습니다.")
+            if (linkedAnswerId != null) {
+                val aRow = AnswersTable.select { AnswersTable.id eq linkedAnswerId }.singleOrNull()
+                if (aRow == null || aRow[AnswersTable.isHidden]) {
+                    throw IllegalStateException("관리자에 의해 가려졌거나 삭제된 답변의 첨부파일에 접근할 수 없습니다.")
+                }
             }
         }
 
@@ -450,6 +465,7 @@ class AttachmentService(
         val dto = AttachmentDto(
             id = idStr,
             questionId = row[AttachmentsTable.questionId]?.toString(),
+            answerId = row[AttachmentsTable.answerId]?.toString(),
             originalName = row[AttachmentsTable.originalName],
             savedName = savedName,
             fileSize = row[AttachmentsTable.fileSize],
@@ -505,7 +521,9 @@ class AttachmentService(
         val cutoff = Instant.now().minusSeconds(maxAgeSeconds)
         val orphaned = dbQuery(workerManager.attachmentDispatcher) {
             val rows = AttachmentsTable.select {
-                AttachmentsTable.questionId.isNull() and (AttachmentsTable.createdAt less cutoff)
+                AttachmentsTable.questionId.isNull() and
+                    AttachmentsTable.answerId.isNull() and
+                    (AttachmentsTable.createdAt less cutoff)
             }.toList()
 
             if (rows.isEmpty()) return@dbQuery emptyList<String>()

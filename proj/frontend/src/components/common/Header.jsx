@@ -187,8 +187,8 @@ const Header = ({
                 type="button"
                 className="btn-icon"
                 onClick={onOpenSettings}
-                title="화면 테마, 글자 크기 및 도움말 설정"
-                aria-label="화면 설정"
+                title="화면 테마, 글자 크기, 알림 및 도움말 설정"
+                aria-label="화면 및 알림 설정"
               >
                 <Settings size={18} />
               </button>
@@ -200,22 +200,25 @@ const Header = ({
             <>
               <div className="dropdown-wrapper" ref={notifRef}>
                 <HelpBubble
-                  tier="ALL"
+                  tier="SOME"
                   mode="floating"
                   placement="bottom"
-                  text="새 질문·답변 내역 확인과 브라우저 OS 알림 권한을 설정해요."
+                  text="새 질문·답변 알림을 확인하고 알림 권한을 설정해요."
                 >
                   <button
                     type="button"
-                    className="btn-icon notif-trigger"
+                    className="btn btn-outline btn-sm notif-trigger"
                     onClick={() => setShowNotifMenu((prev) => !prev)}
-                    title="알림 목록"
+                    title="알림 목록 및 알림 설정"
                     aria-label="알림"
                   >
-                    <Bell size={18} />
-                    {unreadCount > 0 && (
+                    <Bell size={16} />
+                    <span className="hide-mobile">알림</span>
+                    {unreadCount > 0 ? (
                       <span className="notif-count">{unreadCount}</span>
-                    )}
+                    ) : browserPermission === 'default' ? (
+                      <span className="notif-setup-dot" title="브라우저 알림 설정 필요" />
+                    ) : null}
                   </button>
                 </HelpBubble>
 
@@ -223,15 +226,31 @@ const Header = ({
                   <div className="dropdown-menu notif-dropdown">
                     <div className="dropdown-header">
                       <span className="dropdown-title">알림 센터</span>
-                      {unreadCount > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            className="btn-text-xs"
+                            onClick={handleMarkAllRead}
+                          >
+                            <CheckCheck size={14} /> 모두 읽음
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn-text-xs"
-                          onClick={handleMarkAllRead}
+                          onClick={() => {
+                            setShowNotifMenu(false);
+                            if (isProfessor && onOpenProfSettings) {
+                              onOpenProfSettings();
+                            } else if (onOpenSettings) {
+                              onOpenSettings();
+                            }
+                          }}
                         >
-                          <CheckCheck size={14} /> 모두 읽음
+                          <Sliders size={13} /> 알림 설정
                         </button>
-                      )}
+                      </div>
                     </div>
 
                     {browserPermission === 'default' && (

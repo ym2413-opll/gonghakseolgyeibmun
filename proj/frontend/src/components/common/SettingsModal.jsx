@@ -91,7 +91,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
         <div className="modal-header">
           <div className="modal-title">
             <Type size={19} className="text-primary" />
-            <span>화면 설정</span>
+            <span>화면 · 알림 설정</span>
           </div>
           <button type="button" className="btn-icon" onClick={onClose} aria-label="닫기">
             <X size={18} />

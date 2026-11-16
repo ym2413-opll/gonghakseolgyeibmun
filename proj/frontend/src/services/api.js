@@ -1706,7 +1706,7 @@ export const api = {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.success === false) {
-        throw new Error(body.message || '스레드 상태 변경에 실패했습니다.');
+        throw new Error(body.message || '공개 상태 변경에 실패했습니다.');
       }
       return body.data;
     }
@@ -2458,7 +2458,7 @@ export const api = {
       pushLocalNotification({
         userId: profRecipientId,
         type: 'ANSWER_NEW',
-        title: `[${targetQ.courseName || '강의'}] 스레드에 새로운 답변이 등록되었습니다.`,
+        title: `[${targetQ.courseName || '강의'}] 질문에 새로운 답변이 등록되었습니다.`,
         message: `${authorLabel}이 답변을 남겼습니다: "${targetQ.title || ''}"`,
         questionId
       });
@@ -2483,7 +2483,8 @@ export const api = {
           body: JSON.stringify({
             content: followUpData?.content || '',
             originalContent: followUpData?.originalContent || null,
-            hasAiRefined: Boolean(followUpData?.hasAiRefined)
+            hasAiRefined: Boolean(followUpData?.hasAiRefined),
+            attachmentIds: Array.isArray(followUpData?.attachmentIds) ? followUpData.attachmentIds : []
           }),
           signal: controller.signal
         });
@@ -2521,6 +2522,7 @@ export const api = {
 
     const trimmedContent = (followUpData?.content || '').trim();
     const trimmedOriginal = (followUpData?.originalContent || '').trim() || trimmedContent;
+    const nextSeq = Math.max(targetQ.lastSequenceNumber || 1, 1) + 1;
     const newFollowUp = {
       id: `followup-${Date.now()}`,
       questionId,
@@ -2530,13 +2532,17 @@ export const api = {
       authorTitle: '질문자 추가 질문',
       isAssignedProfessor: false,
       isPrimaryProf: false,
+      sequenceNumber: nextSeq,
       content: trimmedContent,
       originalContent: trimmedOriginal,
+      attachmentIds: Array.isArray(followUpData?.attachmentIds) ? followUpData.attachmentIds : [],
+      attachments: Array.isArray(followUpData?.attachments) ? followUpData.attachments : [],
       createdAt: new Date().toISOString(),
       isHidden: false
     };
 
     if (!Array.isArray(targetQ.answers)) targetQ.answers = [];
+    targetQ.lastSequenceNumber = nextSeq;
     targetQ.answers.push(newFollowUp);
     targetQ.status = 'OPEN';
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
@@ -2552,7 +2558,7 @@ export const api = {
         type: isAssigned ? 'QUESTION_NEW' : 'OTHER_PROFESSOR_QUESTION',
         title: isAssigned
           ? `[${targetQ.courseName || '강의'}] 질문에 추가 질문(꼬리질문)이 등록되었습니다.`
-          : `[${targetQ.courseName || '강의'}] 답변 참여 스레드에 추가 질문(꼬리질문)이 등록되었습니다.`,
+          : `[${targetQ.courseName || '강의'}] 참여한 질문에 추가 질문(꼬리질문)이 등록되었습니다.`,
         message: `${followUpAuthorDisplay}: "${targetQ.title || ''}"`,
         questionId
       });
