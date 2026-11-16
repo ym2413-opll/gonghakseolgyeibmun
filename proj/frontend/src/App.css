@@ -4556,7 +4556,7 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
 
 .auth-form-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -5257,11 +5257,12 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
 
 .admin-catalog-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
 .admin-panel-card {
+  min-width: 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 16px;
@@ -5305,6 +5306,8 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
 }
 
 .admin-dept-chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 3px 9px;
   border-radius: var(--radius-full);
   background: var(--bg-card);
@@ -5797,6 +5800,7 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
 
 /* 폼 입력 / 셀렉트 / 텍스트에어리어 (AuthGate, AdminModal, QuestionDetail 등) */
 .form-group {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -7710,6 +7714,18 @@ body,
 .notif-dropdown,
 .dropdown-menu {
   max-width: calc(100vw - 20px);
+}
+
+/* 대형 데스크톱 와이드 화면 (>= 1280px): 관리 모드 3분할 대응 */
+@media (min-width: 1280px) {
+  .modal-container.admin-modal-container {
+    width: min(94vw, 1380px);
+    max-width: 1380px;
+  }
+
+  .admin-catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* 태블릿 및 Z Fold 펼침 화면 이하 (<= 1024px) */
