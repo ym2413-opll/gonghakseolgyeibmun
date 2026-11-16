@@ -194,13 +194,44 @@ fun Route.adminRoutes(
             }
         }
 
-        // Dynamic Course addition
+        // Dynamic Course addition, editing, & deletion
         post("/courses") {
             call.requireAdmin() ?: return@post
             val request = call.receive<CreateCourseRequest>()
+            call.respondServiceCall(HttpStatusCode.Created, "과목이 추가되었습니다.") {
+                userService.createCourse(request)
+            }
+        }
+
+        put("/courses/{id}") {
+            call.requireAdmin() ?: return@put
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@put
+            val request = call.receive<UpdateCourseRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "과목 정보가 수정되었습니다.") {
+                userService.updateCourse(courseUuid, request)
+            }
+        }
+
+        delete("/courses/{id}") {
+            call.requireAdmin() ?: return@delete
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@delete
             try {
-                val created = userService.createCourse(request)
-                call.respond(HttpStatusCode.Created, ApiResponse(success = true, data = created, message = "과목이 추가되었습니다."))
+                val (deletedQuestions, attachmentNames) = userService.deleteCourse(courseUuid)
+                questionService.purgeStoredFiles(attachmentNames)
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        message = "과목이 삭제되었습니다.",
+                        data = kotlinx.serialization.json.JsonObject(
+                            mapOf(
+                                "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
+                                "courseId" to kotlinx.serialization.json.JsonPrimitive(courseUuid.toString()),
+                                "deletedQuestions" to kotlinx.serialization.json.JsonPrimitive(deletedQuestions)
+                            )
+                        )
+                    )
+                )
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
             }

@@ -1445,6 +1445,33 @@ export const api = {
     });
   },
 
+  resolveLocalCourseOrganization(coursePayload, fallbackCourse = {}) {
+    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
+    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
+    const rawDept = coursePayload.department !== undefined ? coursePayload.department : (fallbackCourse.department || '');
+    const rawCol = coursePayload.college !== undefined ? coursePayload.college : (fallbackCourse.college || '');
+    const inferredScope = (
+      coursePayload.scopeType ||
+      (rawDept === '전체' || rawCol === '전체'
+        ? 'ALL'
+        : String(rawDept).endsWith(' 전체')
+          ? 'COLLEGE'
+          : 'DEPARTMENT')
+    ).toUpperCase();
+    const matchedCourseDept = resolveDepartmentEntry(depts, rawDept);
+    const rawCollege = rawCol || matchedCourseDept?.college || '';
+    const matchedCollegeObj = resolveCollegeEntry(colleges, rawCollege);
+    const resolvedCollege = inferredScope === 'ALL'
+      ? '전체'
+      : (matchedCollegeObj?.name || rawCollege || '광운대학교');
+    const resolvedDepartment = inferredScope === 'ALL'
+      ? '전체'
+      : inferredScope === 'COLLEGE'
+        ? (resolvedCollege && resolvedCollege !== '광운대학교' ? `${resolvedCollege} 전체` : '단과대 전체')
+        : (matchedCourseDept?.name || rawDept || '공통');
+    return { college: resolvedCollege, department: resolvedDepartment };
+  },
+
   async createCourse(coursePayload) {
     if (USE_REMOTE_BACKEND) {
       try {
@@ -1459,7 +1486,7 @@ export const api = {
         });
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.data) {
-          return body.data;
+          return mapCourseDto(body.data);
         }
         if (!res.ok) {
           const err = new Error(body.message || '과목 추가에 실패했습니다.');
@@ -1473,24 +1500,12 @@ export const api = {
     }
 
     const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
-    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
-    const colleges = safeGetStorage(STORAGE_KEY_COLLEGES, INITIAL_COLLEGES).map(normalizeCatalogEntry);
-    const scopeType = (coursePayload.scopeType || 'DEPARTMENT').toUpperCase();
-    const matchedCourseDept = resolveDepartmentEntry(depts, coursePayload.department);
-    const rawCollege = coursePayload.college || matchedCourseDept?.college || '';
-    const matchedCollegeObj = resolveCollegeEntry(colleges, rawCollege);
-    const resolvedCollege = scopeType === 'ALL'
-      ? '전체'
-      : (matchedCollegeObj?.name || rawCollege);
-    const resolvedDepartment = scopeType === 'ALL'
-      ? '전체'
-      : scopeType === 'COLLEGE'
-        ? (resolvedCollege ? `${resolvedCollege} 전체` : '단과대 전체')
-        : (matchedCourseDept?.name || coursePayload.department || '소프트웨어학부');
+    const { college: resolvedCollege, department: resolvedDepartment } =
+      this.resolveLocalCourseOrganization(coursePayload);
     const newCourse = {
       id: `course-${Date.now()}`,
-      code: coursePayload.code.trim().toUpperCase(),
-      name: coursePayload.name.trim(),
+      code: (coursePayload.code || '').trim().toUpperCase(),
+      name: (coursePayload.name || '').trim(),
       semester: coursePayload.semester || '2026-1',
       college: resolvedCollege,
       department: resolvedDepartment,
@@ -1505,6 +1520,94 @@ export const api = {
     courses.push(newCourse);
     safeSetStorage(STORAGE_KEY_COURSES, courses);
     return newCourse;
+  },
+
+  async updateCourse(courseId, coursePayload) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const data = await requestCatalogAdmin(
+          `/admin/courses/${encodeURIComponent(courseId)}`,
+          'PUT',
+          coursePayload,
+          '과목 수정에 실패했습니다.'
+        );
+        return data ? mapCourseDto(data) : data;
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote updateCourse fallback:', e);
+      }
+    }
+
+    const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+    const idx = courses.findIndex((c) => String(c.id) === String(courseId));
+    if (idx < 0) throw new Error('존재하지 않는 과목입니다.');
+    const cur = courses[idx];
+    const nextName = coursePayload.name !== undefined ? String(coursePayload.name).trim() : cur.name;
+    const nextCode = coursePayload.code !== undefined ? String(coursePayload.code).trim().toUpperCase() : cur.code;
+    if (!nextName || !nextCode) throw new Error('과목명과 학수번호를 모두 입력해 주세요.');
+    const { college: resolvedCollege, department: resolvedDepartment } =
+      this.resolveLocalCourseOrganization(coursePayload, cur);
+
+    const updated = {
+      ...cur,
+      name: nextName,
+      code: nextCode,
+      semester: (coursePayload.semester !== undefined ? String(coursePayload.semester).trim() : cur.semester) || cur.semester || '2026-1',
+      college: resolvedCollege,
+      department: resolvedDepartment
+    };
+    courses[idx] = updated;
+    safeSetStorage(STORAGE_KEY_COURSES, courses);
+
+    const syncUserCourses = (u) => ({
+      ...u,
+      courses: Array.isArray(u.courses)
+        ? u.courses.map((uc) => (String(uc.id) === String(courseId) ? updated : uc))
+        : u.courses
+    });
+    const users = safeGetStorage(STORAGE_KEY_USERS, []);
+    if (users.length > 0) safeSetStorage(STORAGE_KEY_USERS, users.map(syncUserCourses));
+    const curSession = this.getCurrentSessionUser();
+    if (curSession?.id) this.saveSession(syncUserCourses(curSession));
+
+    return updated;
+  },
+
+  async deleteCourse(courseId) {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        return await requestCatalogAdmin(
+          `/admin/courses/${encodeURIComponent(courseId)}`,
+          'DELETE',
+          undefined,
+          '과목 삭제에 실패했습니다.'
+        );
+      } catch (e) {
+        if (e?.isHttpError) throw e;
+        console.warn('[API] Remote deleteCourse fallback:', e);
+      }
+    }
+
+    const courses = safeGetStorage(STORAGE_KEY_COURSES, INITIAL_COURSES);
+    const idx = courses.findIndex((c) => String(c.id) === String(courseId));
+    if (idx < 0) throw new Error('존재하지 않는 과목입니다.');
+    safeSetStorage(STORAGE_KEY_COURSES, courses.filter((c) => String(c.id) !== String(courseId)));
+
+    const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
+    safeSetStorage(STORAGE_KEY_QUESTIONS, questions.filter((q) => String(q.courseId) !== String(courseId)));
+
+    const stripUserCourse = (u) => ({
+      ...u,
+      courses: Array.isArray(u.courses)
+        ? u.courses.filter((uc) => String(uc.id) !== String(courseId))
+        : u.courses
+    });
+    const users = safeGetStorage(STORAGE_KEY_USERS, []);
+    if (users.length > 0) safeSetStorage(STORAGE_KEY_USERS, users.map(stripUserCourse));
+    const curSession = this.getCurrentSessionUser();
+    if (curSession?.id) this.saveSession(stripUserCourse(curSession));
+
+    return { deleted: true, courseId };
   },
 
   async updateUserCourses(courseIds) {

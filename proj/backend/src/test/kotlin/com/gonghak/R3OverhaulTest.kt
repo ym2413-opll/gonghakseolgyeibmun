@@ -2095,4 +2095,151 @@ class R3OverhaulTest {
             .body<ApiResponse<CourseListResponse>>().data!!
         assertTrue(coursesAfterDeptRename.courses.any { it.department == newDeptName })
     }
+
+    @Test
+    fun testAdminCourseUpdateAndDeleteWithCascade() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+        val suffix = (10000..99999).random()
+
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "course_crud_admin_$suffix",
+                    password = "adminpass1234",
+                    name = "과목관리자",
+                    department = "소프트웨어학부"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("course_crud_admin_$suffix", true)
+
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "course_crud_stu_$suffix",
+                    password = "stupass1234",
+                    name = "과목학생",
+                    department = "소프트웨어학부",
+                    entryYear = 2036,
+                    identifier = "AUTO"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+
+        // 1. Create course
+        val created = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "초기교과목_$suffix",
+                    code = "INIT-$suffix",
+                    semester = "2026-1",
+                    scopeType = "DEPARTMENT",
+                    department = "소프트웨어학부",
+                    professorId = adminAuth.user.id
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+
+        // 2. Non-admin cannot update or delete courses (403)
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.put("/api/admin/courses/${created.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateCourseRequest(name = "탈취수정"))
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.delete("/api/admin/courses/${created.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            }.status
+        )
+
+        // 3. Admin updates course name, code, semester, and scope
+        val updated = client.put("/api/admin/courses/${created.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                UpdateCourseRequest(
+                    name = "수정교과목_$suffix",
+                    code = "UPD-$suffix",
+                    semester = "2026-2",
+                    scopeType = "ALL"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<CourseDto>>().data!!
+        assertEquals("수정교과목_$suffix", updated.name)
+        assertEquals("UPD-$suffix", updated.code)
+        assertEquals("2026-2", updated.semester)
+        assertEquals("전체", updated.college)
+        assertEquals("전체", updated.department)
+
+        // Blank course name rejected (400)
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.put("/api/admin/courses/${created.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+                contentType(ContentType.Application.Json)
+                setBody(UpdateCourseRequest(name = "   "))
+            }.status
+        )
+
+        // 4. Enroll student & create a question on the course to test FK cascade delete
+        client.put("/api/courses/my") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(UpdateUserCoursesRequest(courseIds = listOf(created.id)))
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        val createdQuestion = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = created.id,
+                    profId = adminAuth.user.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "과목 삭제 테스트_$suffix",
+                    rawContent = "삭제 테스트용 질문입니다_$suffix",
+                    isAnonymous = false
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<QuestionDetailDto>>().data!!
+
+        // 5. Delete course & verify course, enrollment, and question are cleanly removed
+        client.delete("/api/admin/courses/${created.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+
+        assertEquals(
+            HttpStatusCode.NotFound,
+            client.get("/api/courses/${created.id}").status
+        )
+        assertEquals(
+            HttpStatusCode.NotFound,
+            client.get("/api/questions/${createdQuestion.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.delete("/api/admin/courses/${created.id}") {
+                header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            }.status
+        )
+    }
 }

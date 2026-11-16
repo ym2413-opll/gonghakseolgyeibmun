@@ -180,6 +180,66 @@ const CatalogChipList = ({
   </div>
 );
 
+const CourseScopeTargetField = ({
+  scopeType,
+  college,
+  department,
+  collegeOptions,
+  departments,
+  onChangeCollege,
+  onChangeDepartment
+}) => {
+  const hasExtraCollege = Boolean(college && !collegeOptions.includes(college));
+  const hasExtraDept = Boolean(department && !departments.some((d) => d.name === department));
+
+  return (
+    <div className="form-group">
+      <label className="form-label">
+        {scopeType === 'ALL'
+          ? '적용 대상'
+          : scopeType === 'COLLEGE'
+            ? '주관 단과대'
+            : '주관 학과'}
+      </label>
+      {scopeType === 'ALL' ? (
+        <input
+          type="text"
+          className="form-input"
+          value="전체 (모든 단과대·학과)"
+          readOnly
+          disabled
+        />
+      ) : scopeType === 'COLLEGE' ? (
+        <select
+          className="form-select"
+          value={college}
+          onChange={(e) => onChangeCollege(e.target.value)}
+        >
+          {hasExtraCollege && <option value={college}>{college} 전체</option>}
+          {collegeOptions.map((col) => (
+            <option key={col} value={col}>
+              {col} 전체
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select
+          className="form-select"
+          value={department}
+          onChange={(e) => onChangeDepartment(e.target.value)}
+        >
+          {hasExtraDept && <option value={department}>{department}</option>}
+          {departments.map((d) => (
+            <option key={d.id || d.name} value={d.name}>
+              {d.name}{d.college ? ` (${d.college})` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+};
+
 const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQuestion }) => {
   const { colleges = [], departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
   const { exhibitionMode, updateExhibitionMode } = useTheme();
@@ -214,6 +274,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const [courseScopeType, setCourseScopeType] = useState('DEPARTMENT');
   const [courseCollege, setCourseCollege] = useState('');
   const [courseDept, setCourseDept] = useState('');
+  const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department }
+  const [courseSearchQuery, setCourseSearchQuery] = useState('');
+  const [courseListLimit, setCourseListLimit] = useState(24);
 
   const availableColleges = Array.from(
     new Set(
@@ -262,6 +325,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       setEditingDept(null);
       setEditingCollege(null);
       setEditingAlias(null);
+      setEditingCourse(null);
+      setCourseSearchQuery('');
+      setCourseListLimit(24);
       return;
     }
     loadAdminData();
@@ -433,6 +499,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     }
   };
 
+  const resolveScopeOrganization = (scopeType, selectedCollege, selectedDept) => {
+    if (scopeType === 'ALL') {
+      return { college: '전체', department: '전체' };
+    }
+    if (scopeType === 'COLLEGE') {
+      const targetCol = selectedCollege || effectiveCourseCollege || '';
+      return { college: targetCol, department: targetCol ? `${targetCol} 전체` : '단과대 전체' };
+    }
+    const targetDept = selectedDept || effectiveCourseDept || '공통';
+    const matchedDept = departments.find((d) => d.name === targetDept);
+    return {
+      college: matchedDept?.college || (targetDept === '공통' ? '광운대학교' : selectedCollege || effectiveCourseCollege || ''),
+      department: targetDept
+    };
+  };
+
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!courseCode.trim() || !courseName.trim()) return;
@@ -445,19 +527,11 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       return;
     }
 
-    const matchedDept = departments.find((d) => d.name === effectiveCourseDept);
-    const resolvedCollege =
-      courseScopeType === 'ALL'
-        ? '전체'
-        : courseScopeType === 'COLLEGE'
-          ? effectiveCourseCollege
-          : (matchedDept?.college || effectiveCourseCollege || '');
-    const resolvedDepartment =
-      courseScopeType === 'ALL'
-        ? '전체'
-        : courseScopeType === 'COLLEGE'
-          ? `${effectiveCourseCollege} 전체`
-          : effectiveCourseDept;
+    const { college: resolvedCollege, department: resolvedDepartment } = resolveScopeOrganization(
+      courseScopeType,
+      effectiveCourseCollege,
+      effectiveCourseDept
+    );
 
     const addedName = courseName.trim();
     const addedCode = courseCode.trim();
@@ -477,6 +551,89 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       notifySuccess(`과목 '${addedName} (${addedCode})'이(가) 동적으로 추가되었습니다.`);
     } catch (err) {
       notifyError(err.message || '과목 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleStartEditCourse = (course) => {
+    const rawDept = (course.department || '').trim();
+    const rawCollege = (course.college || '').trim();
+    const inferredScope =
+      rawDept === '전체' || rawCollege === '전체'
+        ? 'ALL'
+        : rawDept.endsWith(' 전체')
+          ? 'COLLEGE'
+          : 'DEPARTMENT';
+    const inferredCollege =
+      inferredScope === 'COLLEGE'
+        ? rawCollege || rawDept.replace(/ 전체$/, '').trim() || collegeOptions[0] || ''
+        : rawCollege || collegeOptions[0] || '';
+    const inferredDept =
+      inferredScope === 'DEPARTMENT'
+        ? rawDept || effectiveCourseDept || '공통'
+        : effectiveCourseDept || departments[0]?.name || '공통';
+
+    setEditingCourse({
+      id: course.id,
+      name: course.name || '',
+      code: course.code || '',
+      semester: course.semester || '2026-1',
+      scopeType: inferredScope,
+      college: inferredCollege,
+      department: inferredDept
+    });
+  };
+
+  const handleSaveEditedCourse = async (e) => {
+    e.preventDefault();
+    if (!editingCourse) return;
+    const cleanName = editingCourse.name.trim();
+    const cleanCode = editingCourse.code.trim();
+    if (!cleanName || !cleanCode) {
+      notifyError('교과목명과 학수번호를 모두 입력해 주세요.');
+      return;
+    }
+    const { college: resolvedCollege, department: resolvedDepartment } = resolveScopeOrganization(
+      editingCourse.scopeType,
+      editingCourse.college,
+      editingCourse.department
+    );
+    try {
+      const updated = await api.updateCourse(editingCourse.id, {
+        name: cleanName,
+        code: cleanCode,
+        semester: editingCourse.semester.trim() || '2026-1',
+        scopeType: editingCourse.scopeType,
+        college: resolvedCollege,
+        department: resolvedDepartment
+      });
+      setEditingCourse(null);
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`과목 '${updated?.name || cleanName} (${updated?.code || cleanCode})' 정보가 수정되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 수정 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleDeleteCourse = async (course) => {
+    if (!course?.id) return;
+    if (
+      !window.confirm(
+        `'${course.name} (${course.code})' 과목을 삭제하시겠습니까?\n이 과목에 등록된 질문·답변 및 수강 내역도 함께 삭제됩니다.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deleteCourse(course.id);
+      if (editingCourse && String(editingCourse.id) === String(course.id)) {
+        setEditingCourse(null);
+      }
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`과목 '${course.name} (${course.code})'이(가) 삭제되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 삭제 중 오류가 발생했습니다.');
     }
   };
 
@@ -891,48 +1048,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                         <option value="ALL">전체 (전교 공통)</option>
                       </select>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">
-                        {courseScopeType === 'ALL'
-                          ? '적용 대상'
-                          : courseScopeType === 'COLLEGE'
-                            ? '주관 단과대'
-                            : '주관 학과'}
-                      </label>
-                      {courseScopeType === 'ALL' ? (
-                        <input
-                          type="text"
-                          className="form-input"
-                          value="전체 (모든 단과대·학과)"
-                          readOnly
-                          disabled
-                        />
-                      ) : courseScopeType === 'COLLEGE' ? (
-                        <select
-                          className="form-select"
-                          value={effectiveCourseCollege}
-                          onChange={(e) => setCourseCollege(e.target.value)}
-                        >
-                          {collegeOptions.map((col) => (
-                            <option key={col} value={col}>
-                              {col} 전체
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <select
-                          className="form-select"
-                          value={effectiveCourseDept}
-                          onChange={(e) => setCourseDept(e.target.value)}
-                        >
-                          {departments.map((d) => (
-                            <option key={d.id || d.name} value={d.name}>
-                              {d.name}{d.college ? ` (${d.college})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
+                    <CourseScopeTargetField
+                      scopeType={courseScopeType}
+                      college={effectiveCourseCollege}
+                      department={effectiveCourseDept}
+                      collegeOptions={collegeOptions}
+                      departments={departments}
+                      onChangeCollege={setCourseCollege}
+                      onChangeDepartment={setCourseDept}
+                    />
                   </div>
 
                   <button type="submit" className="btn btn-primary btn-sm">
@@ -941,22 +1065,168 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                   </button>
                 </form>
 
-                <div className="admin-chip-list-wrap">
-                  <div className="admin-chip-header">등록된 교과목 ({allCourses.length}개)</div>
-                  <div className="admin-chip-list">
-                    {allCourses.slice(0, 24).map((c) => (
-                      <span key={c.id} className="admin-dept-chip">
-                        {c.name}{' '}
-                        <small>
-                          ({c.code}
-                          {c.department ? ` · ${c.department}` : ''}
-                          {' · 담당: '}
-                          <ProfessorNameList course={c} mode="all" />)
-                        </small>
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                {(() => {
+                  const trimmedQ = courseSearchQuery.trim().toLowerCase();
+                  const filteredCourses = trimmedQ
+                    ? allCourses.filter((c) => {
+                        const profNames = (c.professors || []).map((p) => p.name || '').join(' ');
+                        return [c.name, c.code, c.department, c.college, c.profName, profNames]
+                          .filter(Boolean)
+                          .some((field) => String(field).toLowerCase().includes(trimmedQ));
+                      })
+                    : allCourses;
+                  const visibleCourses = filteredCourses.slice(0, courseListLimit);
+                  const remainingCount = Math.max(0, filteredCourses.length - visibleCourses.length);
+
+                  return (
+                    <div className="admin-chip-list-wrap">
+                      <div className="admin-chip-header">
+                        등록된 교과목 ({allCourses.length}개{trimmedQ ? ` · 검색 결과 ${filteredCourses.length}개` : ''}) · 연필/휴지통으로 수정·삭제
+                      </div>
+                      <input
+                        type="search"
+                        className="form-input admin-course-search-input"
+                        placeholder="과목명 · 학수번호 · 학과 · 교수명 검색..."
+                        value={courseSearchQuery}
+                        onChange={(e) => {
+                          setCourseSearchQuery(e.target.value);
+                          setCourseListLimit(24);
+                        }}
+                      />
+
+                      {editingCourse && (
+                        <form onSubmit={handleSaveEditedCourse} className="admin-compact-form admin-inline-edit-box">
+                          <div className="auth-form-grid-2">
+                            <div className="form-group">
+                              <label className="form-label">수정할 교과목명 *</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                value={editingCourse.name}
+                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, name: e.target.value }))}
+                                required
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label className="form-label">학수번호(코드) *</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                value={editingCourse.code}
+                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, code: e.target.value }))}
+                                required
+                              />
+                            </div>
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">개설 학기</label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              value={editingCourse.semester}
+                              onChange={(e) => setEditingCourse((prev) => ({ ...prev, semester: e.target.value }))}
+                            />
+                          </div>
+                          <div className="auth-form-grid-2">
+                            <div className="form-group">
+                              <label className="form-label">주관 단위</label>
+                              <select
+                                className="form-select"
+                                value={editingCourse.scopeType}
+                                onChange={(e) =>
+                                  setEditingCourse((prev) => ({
+                                    ...prev,
+                                    scopeType: e.target.value,
+                                    college: prev.college || collegeOptions[0] || '',
+                                    department: prev.department || effectiveCourseDept || '공통'
+                                  }))
+                                }
+                              >
+                                <option value="DEPARTMENT">학과 단위</option>
+                                <option value="COLLEGE">단과대 단위</option>
+                                <option value="ALL">전체 (전교 공통)</option>
+                              </select>
+                            </div>
+                            <CourseScopeTargetField
+                              scopeType={editingCourse.scopeType}
+                              college={editingCourse.college}
+                              department={editingCourse.department}
+                              collegeOptions={collegeOptions}
+                              departments={departments}
+                              onChangeCollege={(val) => setEditingCourse((prev) => ({ ...prev, college: val }))}
+                              onChangeDepartment={(val) => setEditingCourse((prev) => ({ ...prev, department: val }))}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button type="submit" className="btn btn-primary btn-xs">저장</button>
+                            <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingCourse(null)}>취소</button>
+                          </div>
+                        </form>
+                      )}
+
+                      {visibleCourses.length === 0 ? (
+                        <div className="text-xs text-muted" style={{ padding: '8px 0' }}>
+                          검색 조건과 일치하는 과목이 없습니다.
+                        </div>
+                      ) : (
+                        <div className="admin-chip-list admin-course-chip-list">
+                          {visibleCourses.map((c) => (
+                            <span key={c.id} className="admin-dept-chip">
+                              {c.name}{' '}
+                              <small>
+                                ({c.code}
+                                {c.department ? ` · ${c.department}` : ''}
+                                {' · 담당: '}
+                                <ProfessorNameList course={c} mode="all" />)
+                              </small>
+                              <button
+                                type="button"
+                                className="admin-chip-action-btn"
+                                title={`${c.name} 과목 수정`}
+                                aria-label={`${c.name} 과목 수정`}
+                                onClick={() => handleStartEditCourse(c)}
+                              >
+                                <Pencil size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-chip-action-btn is-danger"
+                                title={`${c.name} 과목 삭제`}
+                                aria-label={`${c.name} 과목 삭제`}
+                                onClick={() => handleDeleteCourse(c)}
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {(remainingCount > 0 || courseListLimit > 24) && (
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                          {remainingCount > 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => setCourseListLimit((prev) => prev + 40)}
+                            >
+                              더 보기 (+{Math.min(40, remainingCount)}개 / 남은 {remainingCount}개)
+                            </button>
+                          )}
+                          {courseListLimit > 24 && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => setCourseListLimit(24)}
+                            >
+                              목록 접기
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>

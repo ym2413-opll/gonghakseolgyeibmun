@@ -5316,6 +5316,47 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
   font-weight: 600;
 }
 
+.admin-course-search-input {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.admin-course-chip-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.admin-inline-edit-box {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+
+.admin-chip-action-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 3px;
+  margin-left: 4px;
+  color: inherit;
+  opacity: 0.75;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+}
+
+.admin-chip-action-btn:hover {
+  opacity: 1;
+}
+
+.admin-chip-action-btn.is-danger:hover {
+  color: var(--danger-color);
+}
+
 .admin-sanction-toolbar {
   display: flex;
   align-items: center;

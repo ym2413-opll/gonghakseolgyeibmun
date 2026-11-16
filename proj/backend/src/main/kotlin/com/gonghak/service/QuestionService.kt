@@ -883,6 +883,12 @@ class QuestionService(
         return true
     }
 
+    suspend fun purgeStoredFiles(savedNames: List<String>) {
+        if (savedNames.isNotEmpty()) {
+            attachmentService?.deleteStoredFiles(savedNames)
+        }
+    }
+
     /**
      * Soft-deletes a question by its student author: hides it from students and similarity
      * search, purges stored attachments, blocks further replies, and notifies the assigned

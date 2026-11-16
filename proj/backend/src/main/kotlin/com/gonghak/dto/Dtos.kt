@@ -268,6 +268,19 @@ data class CreateCourseRequest(
 )
 
 @Serializable
+data class UpdateCourseRequest(
+    val name: String? = null,
+    val code: String? = null,
+    val semester: String? = null,
+    val scopeType: String? = null, // "DEPARTMENT" | "COLLEGE" | "ALL"
+    val college: String? = null,
+    val department: String? = null,
+    val major: String? = null,
+    val completionType: String? = null,
+    val credit: Int? = null
+)
+
+@Serializable
 data class UpdateUserCoursesRequest(
     val courseIds: List<String> = emptyList()
 )

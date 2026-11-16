@@ -1031,14 +1031,14 @@ class UserService {
         rowToDepartmentDto(deptRow, mapOf(departmentId to aliases))
     }
 
-    suspend fun createCourse(request: CreateCourseRequest): CourseDto = dbQuery {
-        val cleanName = PasswordSecurity.sanitizeInput(request.name)
-        if (cleanName.isBlank()) {
-            throw IllegalArgumentException("과목명을 입력해 주세요.")
-        }
-        val rawScope = request.scopeType?.trim()?.uppercase()
-        val rawDept = PasswordSecurity.sanitizeInput(request.department)
-        val rawCollege = PasswordSecurity.sanitizeInput(request.college)
+    private fun resolveCourseOrganizationInternal(
+        rawScopeType: String?,
+        rawCollegeInput: String,
+        rawDeptInput: String
+    ): Triple<String, String, String> {
+        val rawScope = rawScopeType?.trim()?.uppercase()
+        val rawDept = PasswordSecurity.sanitizeInput(rawDeptInput).take(100)
+        val rawCollege = PasswordSecurity.sanitizeInput(rawCollegeInput).take(100)
 
         val effectiveScope = when {
             rawScope in setOf("ALL", "COLLEGE", "DEPARTMENT") -> rawScope!!
@@ -1050,25 +1050,26 @@ class UserService {
         val (finalCollege, finalDept) = when (effectiveScope) {
             "ALL" -> "전체" to "전체"
             "COLLEGE" -> {
-                val rawTargetCollege = rawCollege.takeIf { it.isNotBlank() && it != "전체" }
-                    ?: rawDept.removeSuffix(" 전체").trim().takeIf { it.isNotBlank() }
+                val rawTargetCollege = rawCollege.takeIf { it.isNotBlank() && it != "전체" && it != "광운대학교" }
+                    ?: rawDept.removeSuffix(" 전체").trim().takeIf { it.isNotBlank() && it != "전체" }
                     ?: throw IllegalArgumentException("주관 단과대를 선택해 주세요.")
                 val targetCollege = DatabaseFactory.ensureCollegeExistsInternal(rawTargetCollege)
                 targetCollege to "$targetCollege 전체"
             }
             else -> {
-                val targetDept = if (rawDept.isBlank()) "공통" else DatabaseFactory.resolveCanonicalDepartmentName(rawDept)
+                val targetDept = if (rawDept.isBlank() || rawDept == "전체" || rawDept.endsWith(" 전체")) {
+                    "공통"
+                } else {
+                    DatabaseFactory.resolveCanonicalDepartmentName(rawDept)
+                }
                 val matchedCollege = DatabaseFactory.resolveDepartmentRow(targetDept)?.get(DepartmentsTable.college)
-                val rawTargetCollege = rawCollege.takeIf { it.isNotBlank() && it != "광운대학교" }
+                val rawTargetCollege = rawCollege.takeIf { it.isNotBlank() && it != "광운대학교" && it != "전체" }
                     ?: matchedCollege?.takeIf { it.isNotBlank() }
                     ?: "광운대학교"
                 val targetCollege = DatabaseFactory.ensureCollegeExistsInternal(rawTargetCollege)
                 targetCollege to targetDept
             }
         }
-
-        val cleanCode = PasswordSecurity.sanitizeInput(request.code).ifBlank { "KW-${(1000..9999).random()}" }
-        val cleanSemester = PasswordSecurity.sanitizeInput(request.semester).ifBlank { "2026-2" }
 
         // Only auto-register real department names (never "전체", "공통", "<단과대> 전체", or already-aliased names)
         if (effectiveScope == "DEPARTMENT" &&
@@ -1084,6 +1085,22 @@ class UserService {
             }
         }
 
+        return Triple(effectiveScope, finalCollege, finalDept)
+    }
+
+    suspend fun createCourse(request: CreateCourseRequest): CourseDto = dbQuery {
+        val cleanName = PasswordSecurity.sanitizeInput(request.name).take(100)
+        if (cleanName.isBlank()) {
+            throw IllegalArgumentException("과목명을 입력해 주세요.")
+        }
+        val (_, finalCollege, finalDept) = resolveCourseOrganizationInternal(
+            request.scopeType,
+            request.college,
+            request.department
+        )
+        val cleanCode = PasswordSecurity.sanitizeInput(request.code).take(50).ifBlank { "KW-${(1000..9999).random()}" }
+        val cleanSemester = PasswordSecurity.sanitizeInput(request.semester).take(20).ifBlank { "2026-2" }
+
         val newCourseId = UUID.randomUUID()
         CoursesTable.insert {
             it[id] = newCourseId
@@ -1092,8 +1109,8 @@ class UserService {
             it[semester] = cleanSemester
             it[college] = finalCollege
             it[department] = finalDept
-            it[major] = request.major.trim()
-            it[completionType] = request.completionType.trim().ifBlank { "전선" }
+            it[major] = PasswordSecurity.sanitizeInput(request.major).take(100)
+            it[completionType] = PasswordSecurity.sanitizeInput(request.completionType).take(50).ifBlank { "전선" }
             it[credit] = request.credit.coerceIn(1, 6)
         }
 
@@ -1110,6 +1127,101 @@ class UserService {
         }
 
         getCourseByIdInternal(newCourseId)!!
+    }
+
+    suspend fun updateCourse(courseId: UUID, request: UpdateCourseRequest): CourseDto = dbQuery {
+        val existing = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
+            ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+
+        val nextName = request.name?.let { PasswordSecurity.sanitizeInput(it).take(100) } ?: existing[CoursesTable.name]
+        if (nextName.isBlank()) {
+            throw IllegalArgumentException("과목명을 입력해 주세요.")
+        }
+
+        val nextCode = request.code?.let { PasswordSecurity.sanitizeInput(it).take(50) } ?: existing[CoursesTable.code]
+        if (nextCode.isBlank()) {
+            throw IllegalArgumentException("학수번호(코드)를 입력해 주세요.")
+        }
+
+        val nextSemester = request.semester?.let {
+            PasswordSecurity.sanitizeInput(it).take(20).ifBlank { existing[CoursesTable.semester] }
+        } ?: existing[CoursesTable.semester]
+
+        val orgChanged = request.scopeType != null || request.college != null || request.department != null
+        val (nextCollege, nextDept) = if (orgChanged) {
+            val existingDept = existing[CoursesTable.department]
+            val existingCollege = existing[CoursesTable.college]
+            val inferredExistingScope = when {
+                existingDept == "전체" || existingCollege == "전체" -> "ALL"
+                existingDept.endsWith(" 전체") -> "COLLEGE"
+                else -> "DEPARTMENT"
+            }
+            val (_, resolvedCollege, resolvedDept) = resolveCourseOrganizationInternal(
+                request.scopeType ?: inferredExistingScope,
+                request.college ?: existingCollege,
+                request.department ?: existingDept
+            )
+            resolvedCollege to resolvedDept
+        } else {
+            existing[CoursesTable.college] to existing[CoursesTable.department]
+        }
+
+        val nextMajor = request.major?.let { PasswordSecurity.sanitizeInput(it).take(100) } ?: existing[CoursesTable.major]
+        val nextCompletionType = request.completionType?.let {
+            PasswordSecurity.sanitizeInput(it).take(50).ifBlank { "전선" }
+        } ?: existing[CoursesTable.completionType]
+        val nextCredit = request.credit?.coerceIn(1, 6) ?: existing[CoursesTable.credit]
+
+        CoursesTable.update({ CoursesTable.id eq courseId }) {
+            it[name] = nextName
+            it[code] = nextCode
+            it[semester] = nextSemester
+            it[college] = nextCollege
+            it[department] = nextDept
+            it[major] = nextMajor
+            it[completionType] = nextCompletionType
+            it[credit] = nextCredit
+        }
+
+        getCourseByIdInternal(courseId)!!
+    }
+
+    suspend fun deleteCourse(courseId: UUID): Pair<Int, List<String>> = dbQuery {
+        val exists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
+        if (!exists) {
+            throw IllegalArgumentException("존재하지 않는 과목입니다.")
+        }
+
+        val questionIds = QuestionsTable.select { QuestionsTable.courseId eq courseId }
+            .map { it[QuestionsTable.id].value }
+        val answerIds = if (questionIds.isNotEmpty()) {
+            AnswersTable.select { AnswersTable.questionId inList questionIds }
+                .map { it[AnswersTable.id].value }
+        } else {
+            emptyList()
+        }
+        val attachmentNames = if (questionIds.isNotEmpty()) {
+            AttachmentsTable.select { AttachmentsTable.questionId inList questionIds }
+                .map { it[AttachmentsTable.savedName] }
+        } else {
+            emptyList()
+        }
+
+        if (questionIds.isNotEmpty()) {
+            NotificationsTable.deleteWhere { NotificationsTable.referenceId inList questionIds }
+            if (answerIds.isNotEmpty()) {
+                NotificationsTable.deleteWhere { NotificationsTable.referenceId inList answerIds }
+            }
+            AttachmentsTable.deleteWhere { AttachmentsTable.questionId inList questionIds }
+            AnswersTable.deleteWhere { AnswersTable.questionId inList questionIds }
+            QuestionsTable.deleteWhere { QuestionsTable.courseId eq courseId }
+        }
+        ProfessorCategorySettingsTable.deleteWhere { ProfessorCategorySettingsTable.courseId eq courseId }
+        EnrollmentsTable.deleteWhere { EnrollmentsTable.courseId eq courseId }
+        CourseProfessorsTable.deleteWhere { CourseProfessorsTable.courseId eq courseId }
+        CoursesTable.deleteWhere { CoursesTable.id eq courseId }
+
+        questionIds.size to attachmentNames
     }
 
     suspend fun getAllDemoUsers(): List<UserDto> = dbQuery {
