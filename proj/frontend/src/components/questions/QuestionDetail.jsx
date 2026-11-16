@@ -429,7 +429,7 @@ const QuestionDetail = ({
             <HelpBubble
               tier="ALL"
               mode="floating"
-              placement="bottom-end"
+              placement="bottom"
               text="스레드 열림/닫힘을 전환해요. 열림 상태면 공동교수·타 학생도 답변할 수 있어요."
             >
               <button

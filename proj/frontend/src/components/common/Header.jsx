@@ -202,7 +202,7 @@ const Header = ({
                 <HelpBubble
                   tier="ALL"
                   mode="floating"
-                  placement="bottom-end"
+                  placement="bottom"
                   text="새 질문·답변 내역 확인과 브라우저 OS 알림 권한을 설정해요."
                 >
                   <button
