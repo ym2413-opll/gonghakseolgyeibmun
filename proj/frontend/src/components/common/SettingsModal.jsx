@@ -2,8 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 import CoursePicker from './CoursePicker';
-import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save } from 'lucide-react';
+import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell } from 'lucide-react';
 
 const FONT_SIZE_OPTIONS = [
   { id: 'sm', label: '작게', sample: '가나다' },
@@ -35,10 +36,12 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
     updateExhibitionMode
   } = useTheme();
   const { currentUser, isStudent, isProfessor, allCourses, updateUserCourses } = useAuth();
+  const { browserPermission, requestPermission, sendTestNotification } = useNotifications();
 
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
   const [courseSaving, setCourseSaving] = useState(false);
   const [courseStatus, setCourseStatus] = useState({ type: '', text: '' });
+  const [notifTestStatus, setNotifTestStatus] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -51,6 +54,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   useEffect(() => {
     if (isOpen) {
       setCourseStatus({ type: '', text: '' });
+      setNotifTestStatus('');
     }
   }, [isOpen]);
 
@@ -236,6 +240,88 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="settings-divider" />
+
+          <div className="settings-section" style={canManageCourses ? undefined : { marginBottom: 0 }}>
+            <div className="settings-title-group" style={{ marginBottom: 8 }}>
+              <Bell size={17} className="text-primary" />
+              <div>
+                <h4 className="settings-section-title">브라우저 알림</h4>
+                <p className="settings-section-desc">
+                  새 질문·추가 질문·답변 도착 시 운영체제(OS) 알림 팝업을 표시합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="browser-notif-setting-box">
+              <div className="notif-status-info">
+                <span className="status-label">권한 상태:</span>
+                {browserPermission === 'granted' ? (
+                  <span className="badge-notif-granted">허용됨</span>
+                ) : browserPermission === 'denied' ? (
+                  <span className="badge-notif-denied">차단됨</span>
+                ) : browserPermission === 'insecure' ? (
+                  <span className="badge-notif-denied">HTTPS 필요 (현재 HTTP)</span>
+                ) : browserPermission === 'unsupported' ? (
+                  <span className="badge-notif-denied">브라우저 미지원</span>
+                ) : (
+                  <span className="badge-notif-default">미설정</span>
+                )}
+              </div>
+
+              {browserPermission === 'default' && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={async () => {
+                    const perm = await requestPermission();
+                    if (perm === 'granted') {
+                      sendTestNotification();
+                      setNotifTestStatus('알림 권한이 허용되었고 테스트 알림을 전송했습니다.');
+                    } else if (perm === 'denied') {
+                      setNotifTestStatus('권한 요청이 차단되었습니다. 브라우저 주소창 권한 설정을 확인해 주세요.');
+                    }
+                  }}
+                >
+                  권한 허용
+                </button>
+              )}
+
+              {browserPermission === 'granted' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const sent = sendTestNotification();
+                    setNotifTestStatus(
+                      sent
+                        ? '테스트 브라우저 알림을 전송했습니다. (OS 방해금지 모드가 켜져 있으면 숨겨질 수 있습니다.)'
+                        : '브라우저 알림 생성에 실패했습니다.'
+                    );
+                  }}
+                >
+                  테스트 알림 보내기
+                </button>
+              )}
+            </div>
+
+            {browserPermission === 'denied' && (
+              <p className="settings-section-desc" style={{ marginTop: 6 }}>
+                브라우저 주소창 왼쪽 자물쇠/사이트 설정 아이콘에서 알림을 &quot;허용&quot;으로 변경한 뒤 다시 시도해 주세요.
+              </p>
+            )}
+            {browserPermission === 'insecure' && (
+              <p className="settings-section-desc" style={{ marginTop: 6 }}>
+                Chrome 등 브라우저는 보안상 HTTPS(또는 localhost) 주소에서만 Web Notification 알림을 허용합니다.
+              </p>
+            )}
+            {notifTestStatus && (
+              <div className="settings-inline-status is-success" style={{ marginTop: 8 }}>
+                {notifTestStatus}
+              </div>
+            )}
           </div>
 
           {canManageCourses && (

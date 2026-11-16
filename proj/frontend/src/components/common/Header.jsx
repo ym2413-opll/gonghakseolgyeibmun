@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { api } from '../../services/api';
+import { useNotifications } from '../../context/NotificationContext';
 import HelpBubble from './HelpBubble';
 import {
   Bell,
@@ -36,27 +36,28 @@ const Header = ({
     setAuthModalMode
   } = useAuth();
   const { isGreen, isDark, toggleColorScheme, toggleBrightness, settings } = useTheme();
+  const {
+    notifications,
+    unreadCount,
+    loadNotifications,
+    markAsRead,
+    markAllAsRead,
+    isCurrentlyInDnd,
+    profSettings,
+    browserPermission,
+    requestPermission,
+    sendTestNotification
+  } = useNotifications();
 
-  const [notifications, setNotifications] = useState([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
 
   const notifRef = useRef(null);
 
   useEffect(() => {
-    let mounted = true;
-    async function loadNotifs() {
-      if (!isAuthenticated || !currentUser?.id) {
-        if (mounted) setNotifications([]);
-        return;
-      }
-      const list = await api.getNotifications(currentUser.id);
-      if (mounted) setNotifications(list);
+    if (refreshTrigger > 0 && isAuthenticated && currentUser?.id) {
+      void loadNotifications(false);
     }
-    loadNotifs();
-    return () => {
-      mounted = false;
-    };
-  }, [isAuthenticated, currentUser?.id, refreshTrigger]);
+  }, [refreshTrigger, isAuthenticated, currentUser?.id, loadNotifications]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -68,13 +69,10 @@ const Header = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const inDnd = Boolean(isProfessor && isCurrentlyInDnd());
 
   const handleNotifClick = async (notif) => {
-    await api.markNotificationRead(notif.id, currentUser?.id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
-    );
+    await markAsRead(notif.id);
     setShowNotifMenu(false);
     if (notif.questionId && onSelectQuestion) {
       onSelectQuestion(notif.questionId);
@@ -82,12 +80,7 @@ const Header = ({
   };
 
   const handleMarkAllRead = async () => {
-    for (const n of notifications) {
-      if (!n.isRead) {
-        await api.markNotificationRead(n.id, currentUser?.id);
-      }
-    }
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    await markAllAsRead();
   };
 
   const colorSchemeTooltip = isGreen
@@ -233,6 +226,53 @@ const Header = ({
                         </button>
                       )}
                     </div>
+
+                    {browserPermission === 'default' && (
+                      <div className="browser-notif-bar">
+                        <span>OS 브라우저 알림 권한이 꺼져 있습니다.</span>
+                        <button
+                          type="button"
+                          className="btn-enable-browser-notif"
+                          onClick={requestPermission}
+                        >
+                          허용
+                        </button>
+                      </div>
+                    )}
+                    {browserPermission === 'denied' && (
+                      <div className="browser-notif-bar is-warn">
+                        <span>브라우저 알림이 차단됨 — 주소창 권한 설정에서 허용해 주세요.</span>
+                      </div>
+                    )}
+                    {browserPermission === 'insecure' && (
+                      <div className="browser-notif-bar is-warn">
+                        <span>HTTP(비보안 연결)에서는 브라우저 보안 정책상 알림이 차단됩니다. (HTTPS 필요)</span>
+                      </div>
+                    )}
+                    {browserPermission === 'granted' && (
+                      <div className="browser-notif-active-bar">
+                        <span className="dot-active">●</span>
+                        <span>브라우저 OS 알림 켜짐</span>
+                        <button
+                          type="button"
+                          className="btn-text-xs"
+                          style={{ marginLeft: 'auto' }}
+                          onClick={sendTestNotification}
+                        >
+                          테스트
+                        </button>
+                      </div>
+                    )}
+                    {inDnd && (
+                      <div className="dnd-notice-banner">
+                        <div>
+                          <strong>방해 금지 시간대 작동 중</strong>
+                          <span style={{ display: 'block', fontSize: '0.74rem' }}>
+                            ({profSettings?.dndStartTime} ~ {profSettings?.dndEndTime}) 알림이 조용히 누적됩니다.
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="notif-list">
                       {notifications.length === 0 ? (

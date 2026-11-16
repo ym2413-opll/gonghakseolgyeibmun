@@ -105,6 +105,28 @@ function MainApp() {
   }, [fetchQuestions, isAuthenticated, isAdmin]);
 
   useEffect(() => {
+    const handleNotifsUpdated = () => {
+      void fetchQuestions();
+      if (selectedQuestionId) {
+        void fetchSelectedDetail(selectedQuestionId);
+      }
+    };
+    const handleOpenQuestion = (e) => {
+      const qid = e?.detail?.questionId;
+      if (qid) {
+        setSelectedQuestionId(qid);
+        setCurrentView('detail');
+      }
+    };
+    window.addEventListener('cistus:notifications-updated', handleNotifsUpdated);
+    window.addEventListener('cistus:open-question', handleOpenQuestion);
+    return () => {
+      window.removeEventListener('cistus:notifications-updated', handleNotifsUpdated);
+      window.removeEventListener('cistus:open-question', handleOpenQuestion);
+    };
+  }, [fetchQuestions, fetchSelectedDetail, selectedQuestionId]);
+
+  useEffect(() => {
     if (isAuthenticated && selectedQuestionId) {
       fetchSelectedDetail(selectedQuestionId);
     } else {

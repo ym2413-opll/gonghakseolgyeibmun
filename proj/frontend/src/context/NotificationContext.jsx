@@ -2,8 +2,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { useAuth } from './AuthContext';
+import { useTheme } from './ThemeContext';
 import {
-  isBrowserNotificationSupported,
   getBrowserNotificationPermission,
   requestBrowserNotificationPermission,
   sendBrowserNotification
@@ -25,15 +25,18 @@ const DEFAULT_PROF_SETTINGS = {
 
 export function NotificationProvider({ children }) {
   const { currentUser, isProfessor } = useAuth();
+  const { settings: themeSettings } = useTheme();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [browserPermission, setBrowserPermission] = useState(getBrowserNotificationPermission());
 
   // 마지막으로 브라우저 시스템 알림을 띄운 알림 ID 목록 추적 (중복 발송 방지)
   const notifiedIdsRef = useRef(new Set());
+  const lastPollAtRef = useRef(0);
 
   // 교수 전용 알림 & 카테고리 환경설정
   const [profSettings, setProfSettings] = useState(DEFAULT_PROF_SETTINGS);
+  const effectiveProfSettings = themeSettings || profSettings;
 
   // 브라우저 권한 요청 함수
   const requestPermission = async () => {
@@ -42,17 +45,26 @@ export function NotificationProvider({ children }) {
     return result;
   };
 
+  const sendTestNotification = useCallback(() => {
+    setBrowserPermission(getBrowserNotificationPermission());
+    return sendBrowserNotification('교수질문센터 테스트 알림', {
+      body: '새 질문·꼬리질문·답변이 등록되면 이와 같이 브라우저 알림이 표시됩니다.',
+      tag: `cistus-test-${Date.now()}`
+    });
+  }, []);
+
   // 현재 시각이 방해금지 시간대에 해당하는지 안전하게 검사
   const isCurrentlyInDnd = useCallback(() => {
-    if (!profSettings?.dndEnabled) return false;
-    if (!profSettings?.dndStartTime || !profSettings?.dndEndTime) return false;
+    const activeSettings = effectiveProfSettings;
+    if (!activeSettings?.dndEnabled) return false;
+    if (!activeSettings?.dndStartTime || !activeSettings?.dndEndTime) return false;
 
     try {
       const now = new Date();
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-      const [startH, startM] = profSettings.dndStartTime.split(':').map(Number);
-      const [endH, endM] = profSettings.dndEndTime.split(':').map(Number);
+      const [startH, startM] = activeSettings.dndStartTime.split(':').map(Number);
+      const [endH, endM] = activeSettings.dndEndTime.split(':').map(Number);
 
       if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) {
         return false;
@@ -70,14 +82,29 @@ export function NotificationProvider({ children }) {
     } catch {
       return false;
     }
-  }, [profSettings?.dndEnabled, profSettings?.dndStartTime, profSettings?.dndEndTime]);
+  }, [effectiveProfSettings]);
+
+  const markAsRead = useCallback(async (id) => {
+    try {
+      await api.markNotificationRead(id, currentUser?.id);
+      setNotifications(prev => {
+        const next = prev.map(n => (n.id === id ? { ...n, isRead: true } : n));
+        setUnreadCount(next.filter(n => !n.isRead).length);
+        return next;
+      });
+    } catch (err) {
+      console.warn('Failed to mark notification read:', err);
+    }
+  }, [currentUser?.id]);
 
   const loadNotifications = useCallback(async (triggerBrowser = false) => {
+    setBrowserPermission(getBrowserNotificationPermission());
     if (!currentUser?.id) {
       setNotifications([]);
       setUnreadCount(0);
       return;
     }
+    lastPollAtRef.current = Date.now();
     try {
       const list = await api.getNotifications(currentUser.id);
       const safeList = Array.isArray(list) ? list : [];
@@ -86,15 +113,28 @@ export function NotificationProvider({ children }) {
 
       // 브라우저 시스템 알림 트리거 (새 미읽음 알림이 존재하고, 방해금지 시간대가 아닐 때)
       if (triggerBrowser) {
-        const inDnd = isProfessor ? isCurrentlyInDnd() : false;
-        if (!inDnd && getBrowserNotificationPermission() === 'granted') {
-          const newUnreads = safeList.filter(n => !n.isRead && !notifiedIdsRef.current.has(n.id));
-          if (newUnreads.length > 0) {
-            const top = newUnreads[0];
-            notifiedIdsRef.current.add(top.id);
-            sendBrowserNotification(top.title, {
-              body: top.message,
-              tag: top.id
+        const newUnreads = safeList.filter(n => !n.isRead && !notifiedIdsRef.current.has(n.id));
+        newUnreads.forEach(n => notifiedIdsRef.current.add(n.id));
+
+        if (newUnreads.length > 0) {
+          window.dispatchEvent(
+            new CustomEvent('cistus:notifications-updated', { detail: { count: newUnreads.length } })
+          );
+          const inDnd = isProfessor ? isCurrentlyInDnd() : false;
+          if (!inDnd && getBrowserNotificationPermission() === 'granted') {
+            newUnreads.slice(0, 3).forEach((item) => {
+              sendBrowserNotification(item.title, {
+                body: item.message,
+                tag: item.id,
+                onClick: () => {
+                  void markAsRead(item.id);
+                  if (item.questionId) {
+                    window.dispatchEvent(
+                      new CustomEvent('cistus:open-question', { detail: { questionId: item.questionId } })
+                    );
+                  }
+                }
+              });
             });
           }
         }
@@ -107,7 +147,7 @@ export function NotificationProvider({ children }) {
       setNotifications([]);
       setUnreadCount(0);
     }
-  }, [currentUser?.id, isProfessor, isCurrentlyInDnd]);
+  }, [currentUser?.id, isProfessor, isCurrentlyInDnd, markAsRead]);
 
   const loadProfSettings = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -132,28 +172,35 @@ export function NotificationProvider({ children }) {
     // 유저 변경 시 이미 발송한 알림 목록 초기화
     notifiedIdsRef.current = new Set();
     if (!currentUser?.id) {
-      setNotifications([]);
-      setUnreadCount(0);
-      setProfSettings(DEFAULT_PROF_SETTINGS);
       return;
     }
-    loadNotifications(false);
+    void loadNotifications(false);
     if (isProfessor) {
-      loadProfSettings();
+      void loadProfSettings();
     }
-  }, [currentUser?.id, isProfessor, loadNotifications, loadProfSettings]);
 
-  const markAsRead = async (id) => {
-    try {
-      await api.markNotificationRead(id, currentUser?.id);
-      setNotifications(prev =>
-        prev.map(n => (n.id === id ? { ...n, isRead: true } : n))
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (err) {
-      console.warn('Failed to mark notification read:', err);
-    }
-  };
+    const pollInterval = setInterval(() => {
+      if (!document.hidden) {
+        void loadNotifications(true);
+      }
+    }, 15000);
+
+    const handleWakePoll = () => {
+      if (document.hidden) return;
+      setBrowserPermission(getBrowserNotificationPermission());
+      if (Date.now() - lastPollAtRef.current >= 3000) {
+        void loadNotifications(true);
+      }
+    };
+
+    window.addEventListener('focus', handleWakePoll);
+    document.addEventListener('visibilitychange', handleWakePoll);
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', handleWakePoll);
+      document.removeEventListener('visibilitychange', handleWakePoll);
+    };
+  }, [currentUser?.id, isProfessor, loadNotifications, loadProfSettings]);
 
   const markAllAsRead = async () => {
     try {
@@ -181,19 +228,23 @@ export function NotificationProvider({ children }) {
     }
   };
 
+  const exposedNotifications = currentUser?.id ? notifications : [];
+  const exposedUnreadCount = currentUser?.id ? unreadCount : 0;
+
   return (
     <NotificationContext.Provider
       value={{
-        notifications,
-        unreadCount,
+        notifications: exposedNotifications,
+        unreadCount: exposedUnreadCount,
         loadNotifications,
         markAsRead,
         markAllAsRead,
-        profSettings,
+        profSettings: effectiveProfSettings,
         updateProfSettings,
         isCurrentlyInDnd,
         browserPermission,
-        requestPermission
+        requestPermission,
+        sendTestNotification
       }}
     >
       {children}

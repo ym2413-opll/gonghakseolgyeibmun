@@ -3028,6 +3028,73 @@ input:checked + .slider:before {
   background: #15803d;
 }
 
+.browser-notif-bar.is-warn {
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--warning-color);
+}
+
+html[data-theme="dark"] .browser-notif-bar,
+html[data-theme="green-dark"] .browser-notif-bar {
+  background: var(--bg-card-subtle);
+  border-bottom-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .browser-notif-active-bar,
+html[data-theme="green-dark"] .browser-notif-active-bar {
+  background: var(--bg-card-subtle);
+  border-bottom-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.browser-notif-setting-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+}
+
+.notif-status-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+}
+
+.notif-status-info .status-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.badge-notif-granted,
+.badge-notif-denied,
+.badge-notif-default {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+}
+
+.badge-notif-granted {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.badge-notif-denied {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+}
+
+.badge-notif-default {
+  background: var(--warning-bg);
+  color: var(--warning-color);
+}
+
 /* 통일된 교수 직함 배지 (주교수/부교수 구분 배제) */
 .ans-role-tag.prof-tag {
   background: #e0e7ff;
