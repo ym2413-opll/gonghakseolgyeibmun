@@ -274,7 +274,17 @@ export function preprocessKoreanMarkdown(markdownText) {
     .map((part, idx) => {
       if (!part) return '';
       // 홀수 인덱스는 위 split 캡처 그룹(코드 블록, 인라인 코드, 수식)
-      if (idx % 2 === 1) return part;
+      if (idx % 2 === 1) {
+        // $ ... $ 앞뒤 공백 때문에 인라인 수식이 무시되는 경우를 방지 (수식 기호 포함 시에만 트림)
+        if (part.startsWith('$') && !part.startsWith('$$') && part.endsWith('$') && part.length >= 3) {
+          const inner = part.slice(1, -1);
+          const trimmed = inner.trim();
+          if (trimmed && inner !== trimmed && /[\\^_={}+\-*/<>()|]/.test(trimmed)) {
+            return `$${trimmed}$`;
+          }
+        }
+        return part;
+      }
 
       // LaTeX 괄호 수식 \[...\] -> $$...$$, \(...\) -> $...$ 선형 변환
       const withDollarMath = convertLatexDelimitersLinear(part);
