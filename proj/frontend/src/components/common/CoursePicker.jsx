@@ -1,6 +1,7 @@
 // src/components/common/CoursePicker.jsx
 import React, { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { formatCourseProfessorsSummary } from '../../utils/professorDisplay';
 
 /**
  * Reusable searchable multi-course checkbox picker shared across
@@ -81,15 +82,7 @@ const CoursePicker = ({
           filteredCourses.map((course) => {
             const checked = selectedIds.includes(course.id);
             const scopeLabel = course.department || course.college || '';
-            const profNames = Array.isArray(course.professors)
-              ? course.professors.map((p) => p?.name).filter(Boolean)
-              : [];
-            const profLabel =
-              profNames.length > 0
-                ? profNames.join(', ')
-                : course.profName && course.profName !== '미배정'
-                  ? course.profName
-                  : '미배정';
+            const profLabel = formatCourseProfessorsSummary(course);
             return (
               <label
                 key={course.id}

@@ -248,17 +248,23 @@ initializeStorage();
 
 function mapCourseDto(c) {
   if (!c || typeof c !== 'object') return c;
-  const professors = Array.isArray(c.professors) ? c.professors : [];
+  const professors = Array.isArray(c.professors)
+    ? c.professors.map((p) => (p && typeof p === 'object' ? { ...p, isRegistered: p.isRegistered !== false } : p))
+    : [];
   const rawAssignedId = c.assignedProfessorId || c.profId || '';
   const matchedProf = rawAssignedId
     ? professors.find((p) => p.id === rawAssignedId)
     : null;
-  const primaryProf = matchedProf || professors[0] || null;
+  const primaryProf = matchedProf || professors.find((p) => p.isRegistered !== false) || professors[0] || null;
   const explicitProfName = [c.assignedProfessorName, c.profName]
     .map((n) => (n || '').trim())
     .find((n) => n && n !== '미배정');
   const resolvedProfId = rawAssignedId || primaryProf?.id || '';
   const resolvedProfName = explicitProfName || primaryProf?.name || '미배정';
+  const resolvedProfRegistered =
+    primaryProf != null
+      ? primaryProf.isRegistered !== false
+      : c.assignedProfessorRegistered !== false;
   const resolvedSection = primaryProf?.section || c.section || '01분반';
 
   return {
@@ -274,6 +280,7 @@ function mapCourseDto(c) {
     profName: resolvedProfName,
     assignedProfessorId: resolvedProfId,
     assignedProfessorName: resolvedProfName,
+    assignedProfessorRegistered: resolvedProfRegistered,
     professors,
     enabledCategories: c.enabledCategories || c.availableCategories || ['GRADE', 'ASSIGNMENT', 'LECTURE']
   };

@@ -40,22 +40,30 @@ const ProfessorDashboard = ({
     return raw || [];
   }, [currentUser?.courses, allCourses]);
 
+  const profCourseIds = useMemo(
+    () => profCourses.map((c) => c.id).filter(Boolean),
+    [profCourses]
+  );
+
   const profCourseNames = useMemo(
     () => profCourses.map((c) => c.name),
     [profCourses]
   );
 
   const categorizedLists = useMemo(() => {
+    const matchesMyCourse = (q) =>
+      q.courseId
+        ? profCourseIds.includes(q.courseId)
+        : profCourseNames.includes(q.courseName);
+
     const myAssigned = questions.filter(
       (q) =>
         q.profId === currentUser?.id ||
-        q.assignedProfessorId === currentUser?.id ||
-        q.profName === currentUser?.name ||
-        q.assignedProfessorName === currentUser?.name
+        q.assignedProfessorId === currentUser?.id
     );
 
     const coProfLecture = questions.filter((q) => {
-      const isMyCourseGroup = profCourseNames.includes(q.courseName);
+      const isMyCourseGroup = matchesMyCourse(q);
       const isOtherProf =
         q.profId !== currentUser?.id &&
         q.assignedProfessorId !== currentUser?.id;
@@ -68,7 +76,7 @@ const ProfessorDashboard = ({
 
     const allMyCourseQuestions = questions.filter(
       (q) =>
-        profCourseNames.includes(q.courseName) ||
+        matchesMyCourse(q) ||
         q.profId === currentUser?.id ||
         q.assignedProfessorId === currentUser?.id
     );

@@ -1,9 +1,14 @@
 package com.gonghak
 
 import com.gonghak.dto.*
+import com.gonghak.models.CourseProfessorsTable
 import com.gonghak.models.QuestionCategory
 import com.gonghak.models.UserRole
+import com.gonghak.models.UsersTable
 import com.gonghak.service.PasswordSecurity
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.transactions.transaction
+import java.util.UUID
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
@@ -1498,5 +1503,144 @@ class R3OverhaulTest {
             header(HttpHeaders.Authorization, "Bearer ${coProf.token}")
         }.body<ApiResponse<List<NotificationDto>>>().data!!
         assertTrue(coProfAfterDelete.any { it.type == "QUESTION_DELETED" && it.questionId == qCreated.id })
+    }
+
+    @Test
+    fun testUnregisteredPlaceholderAndHomonymProfessorIsolation() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        // Seed admin & two separate courses sharing a timetable placeholder homonym ("김동명")
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "homonym_admin",
+                    password = "adminpass1234",
+                    name = "관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }
+            .body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("homonym_admin", grant = true)
+
+        val courseA = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCourseRequest(name = "동명이인과목A", code = "HOM-101", semester = "2026-2", department = "전자공학과", scopeType = "DEPARTMENT"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<CourseDto>>().data!!
+
+        val courseB = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCourseRequest(name = "동명이인과목B", code = "HOM-201", semester = "2026-2", department = "소프트웨어학과", scopeType = "DEPARTMENT"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<CourseDto>>().data!!
+
+        val placeholderId = UUID.randomUUID()
+        transaction {
+            UsersTable.insert {
+                it[id] = placeholderId
+                it[name] = "김동명"
+                it[role] = UserRole.PROFESSOR.name
+                it[identifier] = "P_HOM_1"
+                it[department] = "공통"
+                it[displayTag] = "김동명 교수"
+                it[isDemo] = true
+            }
+            CourseProfessorsTable.insert {
+                it[courseId] = UUID.fromString(courseA.id)
+                it[professorId] = placeholderId
+                it[section] = "01분반"
+                it[schedule] = "월 1교시"
+            }
+            CourseProfessorsTable.insert {
+                it[courseId] = UUID.fromString(courseB.id)
+                it[professorId] = placeholderId
+                it[section] = "01분반"
+                it[schedule] = "화 2교시"
+            }
+        }
+
+        // 1. Before real registration, both courses expose placeholder with isRegistered = false
+        val courseABefore = client.get("/api/courses/${courseA.id}").body<ApiResponse<CourseDto>>().data!!
+        assertEquals("김동명", courseABefore.assignedProfessorName)
+        assertFalse(courseABefore.assignedProfessorRegistered)
+        assertFalse(courseABefore.professors.single().isRegistered)
+
+        // Student enrolls in courseA and posts a question while only placeholder exists
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "homonym_stu_1",
+                    password = "stupass1234",
+                    name = "이학생",
+                    department = "전자공학과",
+                    identifier = "AUTO",
+                    courseIds = listOf(courseA.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+
+        val qOnPlaceholder = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateQuestionRequest(courseId = courseA.id, category = QuestionCategory.LECTURE, title = "가입 전 질문", rawContent = "질문 본문입니다."))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(placeholderId.toString(), qOnPlaceholder.assignedProfessorId)
+
+        // 2. Real Professor A ("김동명", 전자공학과) registers ONLY for courseA
+        val profA = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "kim_dm_elec",
+                    password = "profpass1234",
+                    name = "김동명",
+                    department = "전자공학과",
+                    courseIds = listOf(courseA.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+
+        // courseA is claimed by real prof A (and existing question migrates to A); courseB remains unregistered!
+        val courseAAfterA = client.get("/api/courses/${courseA.id}").body<ApiResponse<CourseDto>>().data!!
+        assertEquals(profA.user.id, courseAAfterA.assignedProfessorId)
+        assertTrue(courseAAfterA.assignedProfessorRegistered)
+        assertTrue(courseAAfterA.professors.single().isRegistered)
+
+        val migratedQ = client.get("/api/questions/${qOnPlaceholder.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${profA.token}")
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }.body<ApiResponse<QuestionDetailDto>>().data!!
+        assertEquals(profA.user.id, migratedQ.assignedProfessorId)
+
+        val courseBAfterA = client.get("/api/courses/${courseB.id}").body<ApiResponse<CourseDto>>().data!!
+        assertEquals(placeholderId.toString(), courseBAfterA.assignedProfessorId)
+        assertFalse(courseBAfterA.assignedProfessorRegistered, "Homonym registration on courseA must NEVER hijack courseB")
+
+        // 3. Second homonym Professor B ("김동명", 소프트웨어학과) registers ONLY for courseB
+        val profB = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "kim_dm_soft",
+                    password = "profpass1234",
+                    name = "김동명",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(courseB.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+        assertNotEquals(profA.user.id, profB.user.id)
+
+        val courseBAfterB = client.get("/api/courses/${courseB.id}").body<ApiResponse<CourseDto>>().data!!
+        assertEquals(profB.user.id, courseBAfterB.assignedProfessorId)
+        assertTrue(courseBAfterB.assignedProfessorRegistered)
     }
 }

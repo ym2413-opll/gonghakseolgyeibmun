@@ -236,11 +236,10 @@ class UserService {
                 it[isWithdrawn] = false
             }
 
-            // Enroll in selected courses or default courses
+            // Enroll in selected courses or default courses (preferring registered professors over timetable placeholders)
             val targetCourseUuids = resolveCourseUuids(request.courseIds, request.courseNames, cleanDept)
             targetCourseUuids.forEach { cId ->
-                val assignedProfId = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }
-                    .firstOrNull()?.get(CourseProfessorsTable.professorId)
+                val assignedProfId = pickDefaultProfessorIdForCourse(cId)
 
                 EnrollmentsTable.insert {
                     it[courseId] = cId
@@ -765,6 +764,32 @@ class UserService {
         getCoursesForUserInternal(userId)
     }
 
+    private fun isRegisteredProfessorRow(row: ResultRow): Boolean =
+        !row[UsersTable.isDemo] && !row[UsersTable.passwordHash].isNullOrBlank()
+
+    private fun loadCourseProfessorDtos(courseId: UUID): List<ProfessorSimpleDto> =
+        CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+            .select { CourseProfessorsTable.courseId eq courseId }
+            .sortedByDescending { isRegisteredProfessorRow(it) }
+            .map { pRow ->
+                ProfessorSimpleDto(
+                    id = pRow[UsersTable.id].value.toString(),
+                    name = pRow[UsersTable.name],
+                    department = pRow[UsersTable.department],
+                    section = pRow[CourseProfessorsTable.section],
+                    schedule = pRow[CourseProfessorsTable.schedule],
+                    isRegistered = isRegisteredProfessorRow(pRow)
+                )
+            }
+
+    private fun pickDefaultProfessorIdForCourse(courseId: UUID): UUID? {
+        val rows = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+            .select { CourseProfessorsTable.courseId eq courseId }
+            .toList()
+        val chosen = rows.firstOrNull { isRegisteredProfessorRow(it) } ?: rows.firstOrNull()
+        return chosen?.get(UsersTable.id)?.value
+    }
+
     private fun getCoursesForUserInternal(userId: UUID): List<CourseDto> {
         val user = UsersTable.select { UsersTable.id eq userId }.singleOrNull()
             ?: return emptyList()
@@ -779,26 +804,20 @@ class UserService {
             return enrollments.map { row ->
                 val cId = row[EnrollmentsTable.courseId]
                 val assignedProfId = row[EnrollmentsTable.assignedProfessorId]
+                val profList = loadCourseProfessorDtos(cId)
 
-                val profRows = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
-                    .select { CourseProfessorsTable.courseId eq cId }
-                    .toList()
-
-                val profList = profRows.map { pRow ->
-                    ProfessorSimpleDto(
-                        id = pRow[UsersTable.id].value.toString(),
-                        name = pRow[UsersTable.name],
-                        department = pRow[UsersTable.department],
-                        section = pRow[CourseProfessorsTable.section],
-                        schedule = pRow[CourseProfessorsTable.schedule]
-                    )
+                val matchedAssigned = assignedProfId?.let { targetId ->
+                    profList.firstOrNull { it.id == targetId.toString() }
                 }
-
-                val effectiveProfRow = assignedProfId?.let { targetId ->
-                    profRows.firstOrNull { it[UsersTable.id].value == targetId }
-                } ?: profRows.firstOrNull()
-                val effectiveProfId = effectiveProfRow?.get(UsersTable.id)?.value
-                val effectiveProfName = effectiveProfRow?.get(UsersTable.name)
+                // Upgrade assignment display preference to a registered professor if the stored link points to a placeholder
+                // and a real professor is registered for the course (excluding homonym ambiguity only via stored ID match first).
+                val effectiveProf = if (matchedAssigned != null && matchedAssigned.isRegistered) {
+                    matchedAssigned
+                } else {
+                    profList.firstOrNull { it.isRegistered } ?: matchedAssigned ?: profList.firstOrNull()
+                }
+                val effectiveProfId = effectiveProf?.id?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                val effectiveProfName = effectiveProf?.name
                 val enabledCategories = effectiveProfId?.let {
                     getAvailableCategoriesForStudent(it, cId)
                 } ?: QuestionCategory.values().toList()
@@ -816,7 +835,8 @@ class UserService {
                     professors = profList,
                     availableCategories = enabledCategories,
                     assignedProfessorId = effectiveProfId?.toString(),
-                    assignedProfessorName = effectiveProfName
+                    assignedProfessorName = effectiveProfName,
+                    assignedProfessorRegistered = effectiveProf?.isRegistered ?: true
                 )
             }
         } else {
@@ -826,21 +846,7 @@ class UserService {
 
             return teachingRows.map { row ->
                 val cId = row[CourseProfessorsTable.courseId]
-
-                val allProfRows = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
-                    .select { CourseProfessorsTable.courseId eq cId }
-                    .toList()
-
-                val profList = allProfRows.map { pRow ->
-                    ProfessorSimpleDto(
-                        id = pRow[UsersTable.id].value.toString(),
-                        name = pRow[UsersTable.name],
-                        department = pRow[UsersTable.department],
-                        section = pRow[CourseProfessorsTable.section],
-                        schedule = pRow[CourseProfessorsTable.schedule]
-                    )
-                }
-
+                val profList = loadCourseProfessorDtos(cId)
                 val myCategories = getProfessorCategoriesInternal(userId, cId).filter { it.isEnabled }.map { it.category }
 
                 CourseDto(
@@ -856,25 +862,74 @@ class UserService {
                     professors = profList,
                     availableCategories = myCategories,
                     assignedProfessorId = userId.toString(),
-                    assignedProfessorName = user[UsersTable.name]
+                    assignedProfessorName = user[UsersTable.name],
+                    assignedProfessorRegistered = isRegisteredProfessorRow(user)
                 )
             }
         }
     }
 
     private fun assignProfessorToCoursesInternal(professorId: UUID, courseUuids: List<UUID>) {
+        val profRow = UsersTable.select { UsersTable.id eq professorId }.singleOrNull()
+        val profName = profRow?.get(UsersTable.name)?.trim().orEmpty()
+        val profDept = profRow?.get(UsersTable.department)?.trim().orEmpty()
+
         courseUuids.forEach { cId ->
             val alreadyAssigned = CourseProfessorsTable.select {
                 (CourseProfessorsTable.courseId eq cId) and (CourseProfessorsTable.professorId eq professorId)
             }.count() > 0
+
             if (!alreadyAssigned) {
-                val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
-                val nextSection = String.format("%02d분반", existingSections + 1)
-                CourseProfessorsTable.insert {
-                    it[courseId] = cId
-                    it[CourseProfessorsTable.professorId] = professorId
-                    it[section] = nextSection
-                    it[schedule] = "학사 시간표 참조"
+                // Scope placeholder takeover strictly to (this selected courseId, exact name),
+                // tie-breaking homonyms by department and replacing at most one section row.
+                val matchingPlaceholders = if (profName.isNotBlank()) {
+                    CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+                        .select {
+                            (CourseProfessorsTable.courseId eq cId) and
+                                (UsersTable.isDemo eq true) and
+                                UsersTable.passwordHash.isNull() and
+                                (UsersTable.name eq profName)
+                        }
+                        .toList()
+                } else {
+                    emptyList()
+                }
+
+                val targetPlaceholder = matchingPlaceholders.firstOrNull {
+                    it[UsersTable.department].trim() == profDept
+                } ?: matchingPlaceholders.firstOrNull()
+
+                if (targetPlaceholder != null) {
+                    val cpId = targetPlaceholder[CourseProfessorsTable.id].value
+                    val oldPlaceholderProfId = targetPlaceholder[CourseProfessorsTable.professorId]
+
+                    CourseProfessorsTable.update({ CourseProfessorsTable.id eq cpId }) {
+                        it[CourseProfessorsTable.professorId] = professorId
+                    }
+
+                    // Reassign only enrollments & questions on THIS course that pointed to the claimed placeholder.
+                    EnrollmentsTable.update({
+                        (EnrollmentsTable.courseId eq cId) and
+                            (EnrollmentsTable.assignedProfessorId eq oldPlaceholderProfId)
+                    }) {
+                        it[assignedProfessorId] = professorId
+                    }
+
+                    QuestionsTable.update({
+                        (QuestionsTable.courseId eq cId) and
+                            (QuestionsTable.assignedProfessorId eq oldPlaceholderProfId)
+                    }) {
+                        it[assignedProfessorId] = professorId
+                    }
+                } else {
+                    val existingSections = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }.count()
+                    val nextSection = String.format("%02d분반", existingSections + 1)
+                    CourseProfessorsTable.insert {
+                        it[courseId] = cId
+                        it[CourseProfessorsTable.professorId] = professorId
+                        it[section] = nextSection
+                        it[schedule] = "학사 시간표 참조"
+                    }
                 }
             }
 
@@ -923,8 +978,7 @@ class UserService {
                 .toSet()
 
             validCourseUuids.filterNot { it in existingEnrolledIds }.forEach { cId ->
-                val assignedProfId = CourseProfessorsTable.select { CourseProfessorsTable.courseId eq cId }
-                    .firstOrNull()?.get(CourseProfessorsTable.professorId)
+                val assignedProfId = pickDefaultProfessorIdForCourse(cId)
                 EnrollmentsTable.insert {
                     it[courseId] = cId
                     it[studentId] = userId
@@ -1085,19 +1139,8 @@ class UserService {
 
     private fun getCourseByIdInternal(courseId: UUID): CourseDto? {
         val row = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull() ?: return null
-        val profRows = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
-            .select { CourseProfessorsTable.courseId eq courseId }
-            .toList()
-
-        val profList = profRows.map { pRow ->
-            ProfessorSimpleDto(
-                id = pRow[UsersTable.id].value.toString(),
-                name = pRow[UsersTable.name],
-                department = pRow[UsersTable.department],
-                section = pRow[CourseProfessorsTable.section],
-                schedule = pRow[CourseProfessorsTable.schedule]
-            )
-        }
+        val profList = loadCourseProfessorDtos(courseId)
+        val primaryProf = profList.firstOrNull()
 
         return CourseDto(
             id = courseId.toString(),
@@ -1111,8 +1154,9 @@ class UserService {
             credit = row[CoursesTable.credit],
             professors = profList,
             availableCategories = listOf(QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT, QuestionCategory.LECTURE),
-            assignedProfessorId = profList.firstOrNull()?.id,
-            assignedProfessorName = profList.firstOrNull()?.name
+            assignedProfessorId = primaryProf?.id,
+            assignedProfessorName = primaryProf?.name,
+            assignedProfessorRegistered = primaryProf?.isRegistered ?: true
         )
     }
 

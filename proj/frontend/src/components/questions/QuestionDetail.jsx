@@ -216,9 +216,7 @@ const QuestionDetail = ({
   const isPrimaryProf =
     isProfessor &&
     (currentUser?.id === question.profId ||
-      currentUser?.id === question.assignedProfessorId ||
-      currentUser?.name === question.profName ||
-      currentUser?.name === question.assignedProfessorName);
+      currentUser?.id === question.assignedProfessorId);
 
   const profCourses =
     Array.isArray(currentUser?.courses) && currentUser.courses.length > 0
@@ -229,7 +227,8 @@ const QuestionDetail = ({
     isProfessor &&
     !isPrimaryProf &&
     profCourses.some(
-      (c) => c.name === question.courseName || c.id === question.courseId
+      (c) =>
+        question.courseId ? c.id === question.courseId : c.name === question.courseName
     );
 
   const hasPrimaryProfAnswered =

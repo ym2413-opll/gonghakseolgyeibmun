@@ -162,11 +162,28 @@ class QuestionService(
                 pId
             }
 
-            val assignedProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId)
-                ?: requestedProfUUID
-                ?: CourseProfessorsTable.select { CourseProfessorsTable.courseId eq courseUUID }
-                    .firstOrNull()?.get(CourseProfessorsTable.professorId)
-                ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
+            val courseProfs = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+                .select { CourseProfessorsTable.courseId eq courseUUID }
+                .toList()
+            val enrolledProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId)
+            val enrolledIsRegistered = enrolledProfId?.let { eId ->
+                courseProfs.any {
+                    it[UsersTable.id].value == eId &&
+                        !it[UsersTable.isDemo] &&
+                        !it[UsersTable.passwordHash].isNullOrBlank()
+                }
+            } ?: false
+            val firstRegisteredProfId = courseProfs.firstOrNull {
+                !it[UsersTable.isDemo] && !it[UsersTable.passwordHash].isNullOrBlank()
+            }?.get(CourseProfessorsTable.professorId)
+
+            val assignedProfId = when {
+                enrolledProfId != null && enrolledIsRegistered -> enrolledProfId
+                requestedProfUUID != null -> requestedProfUUID
+                firstRegisteredProfId != null -> firstRegisteredProfId
+                enrolledProfId != null -> enrolledProfId
+                else -> courseProfs.firstOrNull()?.get(CourseProfessorsTable.professorId)
+            } ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
 
             // 3. Validate if professor has enabled this category
             val categorySetting = ProfessorCategorySettingsTable.select {

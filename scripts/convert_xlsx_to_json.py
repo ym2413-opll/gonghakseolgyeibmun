@@ -81,23 +81,22 @@ def convert_excel_to_json():
             sched_items.append(f"{r[30]} {r[31]}교시" + (f"({room3})" if room3 else ""))
         schedule_str = ', '.join(sched_items)
 
-        # Professor record
+        # Professor record (scoped by name + department to prevent cross-department homonym collisions)
         prof_id = None
         if prof_name and prof_name != '미지정':
-            if prof_name not in professors_map:
-                prof_uuid = generate_deterministic_uuid("prof", prof_name)
-                prof_dept = dept if dept and dept != '공통' else (college if college else '공통')
+            prof_dept = dept if dept and dept != '공통' else (college if college else '공통')
+            prof_key = f"{prof_name}::{prof_dept}"
+            if prof_key not in professors_map:
+                prof_uuid = generate_deterministic_uuid("prof", prof_key)
                 identifier = f"P_{len(professors_map) + 1:04d}"
-                professors_map[prof_name] = {
+                professors_map[prof_key] = {
                     "id": prof_uuid,
                     "name": prof_name,
                     "department": prof_dept,
                     "identifier": identifier
                 }
-            elif professors_map[prof_name]["department"] in ("공통", "") and dept not in ("공통", ""):
-                professors_map[prof_name]["department"] = dept
 
-            prof_id = professors_map[prof_name]["id"]
+            prof_id = professors_map[prof_key]["id"]
 
         # Course record
         if base_code not in courses_map:

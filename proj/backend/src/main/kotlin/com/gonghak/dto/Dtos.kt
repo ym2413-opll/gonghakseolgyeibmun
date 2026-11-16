@@ -168,7 +168,8 @@ data class ProfessorSimpleDto(
     val name: String,
     val department: String,
     val section: String,
-    val schedule: String = ""
+    val schedule: String = "",
+    val isRegistered: Boolean = true
 )
 
 @Serializable
@@ -185,7 +186,8 @@ data class CourseDto(
     val professors: List<ProfessorSimpleDto> = emptyList(),
     val availableCategories: List<QuestionCategory> = emptyList(),
     val assignedProfessorId: String? = null,
-    val assignedProfessorName: String? = null
+    val assignedProfessorName: String? = null,
+    val assignedProfessorRegistered: Boolean = true
 )
 
 @Serializable
