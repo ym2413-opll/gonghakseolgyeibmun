@@ -4,20 +4,47 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import remarkBreaks from 'remark-breaks';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { AlertTriangle, ExternalLink, X } from 'lucide-react';
 import { useOptionalAuth } from '../../context/AuthContext';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import {
   isSafeMarkdownHref,
   isSafeMarkdownImageUrl,
+  preprocessKoreanMarkdown,
+  remarkStripKoreanSentinels,
   safeMarkdownUrlTransform
 } from '../../utils/markdown';
 
 const TOKEN_PATTERN_SOURCE =
   '(\\[#\\d+\\s*[-:]?\\s*사진\\s*\\d+\\]|\\[사진\\s*#\\d+\\s*[-:\\s]\\s*\\d+\\]|\\[사진\\s*\\d+\\]|#\\d+(?!\\d))';
 
-const SKIP_DESCENT_TAGS = new Set(['code', 'pre', 'a', 'button', 'figure', 'img', 'ul', 'ol']);
+const SKIP_DESCENT_TAGS = new Set([
+  'code',
+  'pre',
+  'a',
+  'button',
+  'figure',
+  'img',
+  'ul',
+  'ol',
+  'math',
+  'annotation',
+  'semantics',
+  'mrow',
+  'mi',
+  'mo',
+  'mn',
+  'msup',
+  'msub',
+  'mfrac',
+  'mtext',
+  'mspace',
+  'svg'
+]);
 
 function tokenizeString(text, ctx, collectedFigures, keyPrefix) {
   const regex = new RegExp(TOKEN_PATTERN_SOURCE, 'g');
@@ -135,8 +162,13 @@ function transformInlineChildren(children, ctx, collectedFigures, keyPrefix, dep
       typeof children.type === 'string'
         ? children.type.toLowerCase()
         : (children.props?.node?.tagName || '').toLowerCase();
-    // 커스텀 컴포넌트(a, img, li, table 등) 및 SKIP_DESCENT_TAGS 내부로는 재귀 진입하지 않음
-    if (SKIP_DESCENT_TAGS.has(tagType) || typeof children.type === 'function') {
+    const elClass = typeof children.props?.className === 'string' ? children.props.className : '';
+    // 커스텀 컴포넌트(a, img, li, table 등), KaTeX 수식 및 SKIP_DESCENT_TAGS 내부로는 재귀 진입하지 않음
+    if (
+      SKIP_DESCENT_TAGS.has(tagType) ||
+      typeof children.type === 'function' ||
+      elClass.includes('katex')
+    ) {
       return children;
     }
     if (children.props && children.props.children !== undefined) {
@@ -281,7 +313,9 @@ export default function MarkdownContent({
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 
-  const safeContent = typeof content === 'string' ? content : String(content || '');
+  const safeContent = preprocessKoreanMarkdown(
+    typeof content === 'string' ? content : String(content || '')
+  );
   const ctx = { currentSeq, imagesBySeq, validSeqSet, onJumpToSeq };
 
   const renderBlockWithTokens = (Tag, children, appendFigures = true) => {
@@ -390,7 +424,19 @@ export default function MarkdownContent({
   return (
     <div className={`md-content ${className}`.trim()}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkStripKoreanSentinels]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              strict: false,
+              throwOnError: false,
+              trust: false,
+              maxExpand: 200,
+              maxSize: 100
+            }
+          ]
+        ]}
         urlTransform={safeMarkdownUrlTransform}
         components={components}
       >

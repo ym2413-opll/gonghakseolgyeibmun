@@ -15,6 +15,11 @@ export default defineConfig({
               priority: 30
             },
             {
+              name: 'katex-vendor',
+              test: /[\\/]node_modules[\\/]katex[\\/]/,
+              priority: 25
+            },
+            {
               name: 'markdown-vendor',
               test: /[\\/]node_modules[\\/](react-markdown|remark-.*|rehype-.*|unified|micromark.*|mdast-.*|hast-.*|unist-.*|vfile.*|bail|trough|is-plain-obj|devlop|property-information|space-separated-tokens|comma-separated-tokens|html-url-attributes|decode-named-character-reference|character-entities.*|ccount|escape-string-regexp|markdown-table|longest-streak|zwitch)[\\/]/,
               priority: 20

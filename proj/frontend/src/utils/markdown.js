@@ -172,6 +172,140 @@ export function safeMarkdownUrlTransform(url) {
   return '';
 }
 
+const KOREAN_BOUNDARY_SENTINEL = '\u2063';
+const WORD_OR_HANGUL_REGEX = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF0-9A-Za-z]/;
+const HANGUL_OR_CJK_REGEX = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF]/;
+const PUNCT_BOUNDARY_REGEX = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~「」『』【】〈〉《》〔〕‘’“”·…]/;
+
+function fixKoreanEmphasisInPlainSegment(segment) {
+  if (!segment) return segment;
+  // URL이나 수식($...$) 내부는 건드리지 않고 일반 텍스트 구간만 보정
+  return segment.replace(
+    /https?:\/\/[^\s)]+|\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$|(\*\*|~~|__|\*|_)/g,
+    (match, delim, offset, fullStr) => {
+      if (!delim) return match;
+      // 이스케이프된 기호(\*)는 그대로 유지
+      if (offset > 0 && fullStr[offset - 1] === '\\') return match;
+
+      const prev = offset > 0 ? fullStr[offset - 1] : '';
+      const nextIdx = offset + delim.length;
+      const next = nextIdx < fullStr.length ? fullStr[nextIdx] : '';
+
+      const isSingleUnderscoreOrStar = delim === '*' || delim === '_' || delim === '__';
+
+      // 닫는 구분자: 문장부호 뒤 + 한글/단어가 바로 이어지는 경우 (예: **테스트(1)**입니다)
+      if (prev && next && PUNCT_BOUNDARY_REGEX.test(prev) && WORD_OR_HANGUL_REGEX.test(next)) {
+        if (!isSingleUnderscoreOrStar || HANGUL_OR_CJK_REGEX.test(next)) {
+          return `${delim} ${KOREAN_BOUNDARY_SENTINEL}`;
+        }
+      }
+
+      // 여는 구분자: 한글/단어 뒤 + 문장부호로 시작하는 경우 (예: 한글**(테스트)**)
+      if (prev && next && WORD_OR_HANGUL_REGEX.test(prev) && PUNCT_BOUNDARY_REGEX.test(next)) {
+        if (!isSingleUnderscoreOrStar || HANGUL_OR_CJK_REGEX.test(prev)) {
+          return `${KOREAN_BOUNDARY_SENTINEL} ${delim}`;
+        }
+      }
+
+      return match;
+    }
+  );
+}
+
+function convertLatexDelimitersLinear(text) {
+  if (!text) return '';
+  let out = '';
+  let i = 0;
+  const len = text.length;
+  let nextCloseBracket = text.indexOf('\\]');
+  let nextCloseParen = text.indexOf('\\)');
+  let nextNewline = text.indexOf('\n');
+
+  while (i < len) {
+    if (text[i] === '\\' && i + 1 < len) {
+      const next = text[i + 1];
+      const isEscaped = i > 0 && text[i - 1] === '\\';
+      if (!isEscaped && next === '[' && nextCloseBracket !== -1) {
+        if (nextCloseBracket < i + 2) {
+          nextCloseBracket = text.indexOf('\\]', i + 2);
+        }
+        if (nextCloseBracket !== -1) {
+          const expr = text.slice(i + 2, nextCloseBracket).trim();
+          out += `\n$$\n${expr}\n$$\n`;
+          i = nextCloseBracket + 2;
+          continue;
+        }
+      } else if (!isEscaped && next === '(' && nextCloseParen !== -1) {
+        if (nextCloseParen < i + 2) {
+          nextCloseParen = text.indexOf('\\)', i + 2);
+        }
+        if (nextNewline !== -1 && nextNewline < i + 2) {
+          nextNewline = text.indexOf('\n', i + 2);
+        }
+        if (nextCloseParen !== -1 && (nextNewline === -1 || nextCloseParen < nextNewline)) {
+          const expr = text.slice(i + 2, nextCloseParen).trim();
+          if (expr.length > 0) {
+            out += `$${expr}$`;
+            i = nextCloseParen + 2;
+            continue;
+          }
+        }
+      }
+    }
+    out += text[i];
+    i++;
+  }
+
+  return out;
+}
+
+/**
+ * 한글 인접 Markdown 강조/취소선 및 LaTeX(\(...\), \[...\]) 구문 전처리
+ * - 코드 블록(```...```)과 인라인 코드(`...`)는 수정하지 않음
+ * - CommonMark 경계 규칙으로 깨지는 **테스트(1)**입니다 등을 안전하게 보정
+ */
+export function preprocessKoreanMarkdown(markdownText) {
+  if (!markdownText || typeof markdownText !== 'string') return '';
+  const sanitized = markdownText.replaceAll(KOREAN_BOUNDARY_SENTINEL, '');
+
+  // 코드 블록 / 인라인 코드 / 기존 $$...$$, $...$ 수식은 원형 보존
+  return sanitized
+    .split(/(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$)/g)
+    .map((part, idx) => {
+      if (!part) return '';
+      // 홀수 인덱스는 위 split 캡처 그룹(코드 블록, 인라인 코드, 수식)
+      if (idx % 2 === 1) return part;
+
+      // LaTeX 괄호 수식 \[...\] -> $$...$$, \(...\) -> $...$ 선형 변환
+      const withDollarMath = convertLatexDelimitersLinear(part);
+
+      return fixKoreanEmphasisInPlainSegment(withDollarMath);
+    })
+    .join('');
+}
+
+/**
+ * preprocessKoreanMarkdown이 삽입한 경계 센티넬(\u2063)을 MDAST 텍스트 노드에서 제거하는 remark 플러그인
+ */
+export function remarkStripKoreanSentinels() {
+  const visitText = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'text' && typeof node.value === 'string' && node.value.includes(KOREAN_BOUNDARY_SENTINEL)) {
+      node.value = node.value
+        .replace(/ ?\u2063 ?/g, '')
+        .replaceAll(KOREAN_BOUNDARY_SENTINEL, '');
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        visitText(child);
+      }
+    }
+  };
+  return (tree) => {
+    visitText(tree);
+  };
+}
+
 /**
  * 목록 미리보기 및 자동 요약 제목용 Markdown 기호 제거 평문 추출
  */
@@ -186,6 +320,10 @@ export function stripMarkdownForPreview(markdownText) {
         .replace(/```$/, '')
         .trim()
     )
+    .replace(/\$\$([\s\S]*?)\$\$/g, ' $1 ')
+    .replace(/\$([^$\r\n]+?)\$/g, '$1')
+    .replace(/\\\[([\s\S]*?)\\\]/g, ' $1 ')
+    .replace(/\\\(([^\r\n]+?)\\\)/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => (alt ? `[이미지: ${alt}]` : '[이미지]'))
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/`([^`]+)`/g, '$1')

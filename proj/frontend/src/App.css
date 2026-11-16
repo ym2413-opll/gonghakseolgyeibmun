@@ -8844,6 +8844,18 @@ body,
   display: block;
 }
 
+.md-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  margin: 0.65em 0;
+  padding: 4px 2px;
+}
+
+.md-content .katex {
+  font-size: 1.04em;
+}
+
 .md-link-confirm-overlay {
   z-index: 3200;
 }
