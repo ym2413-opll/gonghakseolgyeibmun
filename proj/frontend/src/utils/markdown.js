@@ -11,6 +11,7 @@ function hasControlOrInvisibleUrlChars(value) {
       (code >= 0x7f && code <= 0x9f) ||
       code === 0x00ad ||
       code === 0x034f ||
+      code === 0x061c ||
       (code >= 0x200b && code <= 0x200f) ||
       (code >= 0x202a && code <= 0x202e) ||
       (code >= 0x2060 && code <= 0x206f) ||
@@ -23,6 +24,8 @@ function hasControlOrInvisibleUrlChars(value) {
 }
 
 const ALLOWED_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+const ALLOWED_IMAGE_PROTOCOLS = new Set(['https:']);
+const SAFE_DATA_IMAGE_REGEX = /^data:image\/(?:png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=]+$/i;
 const SAFE_ATTACHMENT_PATH_REGEX = /^\/api\/attachments\/[A-Za-z0-9_-]{1,64}(?:\/download)?$/;
 
 /**
@@ -94,11 +97,76 @@ export function isSafeMarkdownHref(rawUrl) {
 }
 
 /**
+ * Markdown 인라인 이미지(img[src]) 허용 여부 검증
+ * - 내부 첨부파일(/api/attachments/<id>, blob:), 안전한 래스터 data:image/*, http(s):// 허용
+ * - data:image/svg+xml, javascript:, vbscript:, userinfo(@) 사칭, 제어문자 차단
+ */
+export function isSafeMarkdownImageUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  if (isSafeAttachmentUrl(rawUrl)) return true;
+  if (hasControlOrInvisibleUrlChars(rawUrl)) return false;
+
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+
+  if (SAFE_DATA_IMAGE_REGEX.test(trimmed)) {
+    return true;
+  }
+
+  if (
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('\\\\') ||
+    trimmed.includes('\\') ||
+    trimmed.includes('..')
+  ) {
+    return false;
+  }
+
+  let decodedFull;
+  try {
+    decodedFull = decodeURIComponent(trimmed);
+  } catch {
+    return false;
+  }
+  if (hasControlOrInvisibleUrlChars(decodedFull) || decodedFull.includes('\\')) {
+    return false;
+  }
+
+  if (trimmed.startsWith('/')) {
+    if (/%2e|%2f|%5c/i.test(trimmed) || decodedFull.includes('..')) {
+      return false;
+    }
+    return SAFE_ATTACHMENT_PATH_REGEX.test(trimmed);
+  }
+
+  try {
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+      return false;
+    }
+    const base =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost';
+    const parsed = new URL(trimmed, base);
+    const proto = parsed.protocol.toLowerCase();
+    if (!ALLOWED_IMAGE_PROTOCOLS.has(proto)) {
+      return false;
+    }
+    if (parsed.username !== '' || parsed.password !== '') {
+      return false;
+    }
+    return Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * react-markdown urlTransform 용 URL 정제 함수
  */
 export function safeMarkdownUrlTransform(url) {
   if (!url || typeof url !== 'string') return '';
-  if (isSafeMarkdownHref(url) || isSafeAttachmentUrl(url)) {
+  if (isSafeMarkdownHref(url) || isSafeMarkdownImageUrl(url) || isSafeAttachmentUrl(url)) {
     return url.trim();
   }
   return '';

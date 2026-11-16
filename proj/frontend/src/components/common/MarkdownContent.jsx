@@ -1,11 +1,18 @@
 // src/components/common/MarkdownContent.jsx
 // XSS 안전 GFM Markdown + 포럼 전용 토큰([사진 k], [#N 사진 k], #N 글 인용) 렌더러
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { AlertTriangle, ExternalLink, X } from 'lucide-react';
+import { useOptionalAuth } from '../../context/AuthContext';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
-import { isSafeMarkdownHref, safeMarkdownUrlTransform } from '../../utils/markdown';
+import {
+  isSafeMarkdownHref,
+  isSafeMarkdownImageUrl,
+  safeMarkdownUrlTransform
+} from '../../utils/markdown';
 
 const TOKEN_PATTERN_SOURCE =
   '(\\[#\\d+\\s*[-:]?\\s*사진\\s*\\d+\\]|\\[사진\\s*#\\d+\\s*[-:\\s]\\s*\\d+\\]|\\[사진\\s*\\d+\\]|#\\d+(?!\\d))';
@@ -202,6 +209,42 @@ export function MarkdownModeTabs({ isPreview, onTogglePreview }) {
   );
 }
 
+function MarkdownInlineImage({ src, alt }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!isSafeMarkdownImageUrl(src)) {
+    return (
+      <span
+        className="md-blocked-image"
+        title="보안 정책상 허용되지 않은 이미지 주소입니다."
+      >
+        [이미지: {alt || '차단된 이미지'}]
+      </span>
+    );
+  }
+
+  if (failed) {
+    return (
+      <span className="md-blocked-image" title={src}>
+        [이미지를 불러올 수 없음: {alt || '이미지'}]
+      </span>
+    );
+  }
+
+  return (
+    <figure className="inline-photo-figure md-inline-image-figure">
+      <img
+        src={src}
+        alt={alt || '첨부 이미지'}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+      {alt && <figcaption>{alt}</figcaption>}
+    </figure>
+  );
+}
+
 export default function MarkdownContent({
   content,
   currentSeq = 1,
@@ -210,6 +253,34 @@ export default function MarkdownContent({
   onJumpToSeq = null,
   className = ''
 }) {
+  const auth = useOptionalAuth();
+  const isAdmin = Boolean(auth?.isAdmin);
+  const [pendingLinkHref, setPendingLinkHref] = useState(null);
+  const cancelBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!pendingLinkHref) return undefined;
+    cancelBtnRef.current?.focus();
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setPendingLinkHref(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingLinkHref]);
+
+  const handleConfirmNavigate = () => {
+    const target = pendingLinkHref;
+    setPendingLinkHref(null);
+    if (!target || !isSafeMarkdownHref(target)) return;
+    if (target.toLowerCase().startsWith('mailto:')) {
+      window.location.assign(target);
+      return;
+    }
+    window.open(target, '_blank', 'noopener,noreferrer');
+  };
+
   const safeContent = typeof content === 'string' ? content : String(content || '');
   const ctx = { currentSeq, imagesBySeq, validSeqSet, onJumpToSeq };
 
@@ -289,37 +360,32 @@ export default function MarkdownContent({
         );
       }
       return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer nofollow"
-          className="md-link"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {children}
-        </a>
+        <span className="md-link-wrap">
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="md-link"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setPendingLinkHref(href);
+            }}
+          >
+            {children}
+          </a>
+          {isAdmin && (
+            <span className="md-admin-link-url" title={`실제 이동 경로: ${href}`}>
+              ({href})
+            </span>
+          )}
+        </span>
       );
     },
-    img: ({ node: _node, src, alt }) => {
-      // 외부 tracking pixel, data:image/svg+xml, javascript: 등 비인가 이미지 차단
-      if (!isSafeAttachmentUrl(src)) {
-        return (
-          <span
-            className="md-blocked-image"
-            title="보안 정책상 외부 이미지는 표시되지 않습니다. 파일 첨부 후 [사진 N] 태그를 이용해 주세요."
-          >
-            [이미지: {alt || '외부 이미지 차단됨'}]
-          </span>
-        );
-      }
-      return (
-        <figure className="inline-photo-figure">
-          <img src={src} alt={alt || '첨부 이미지'} loading="lazy" />
-          {alt && <figcaption>{alt}</figcaption>}
-        </figure>
-      );
-    }
+    img: ({ node: _node, src, alt }) => <MarkdownInlineImage key={src} src={src} alt={alt} />
   };
+
+  const isMailto = Boolean(pendingLinkHref && pendingLinkHref.toLowerCase().startsWith('mailto:'));
 
   return (
     <div className={`md-content ${className}`.trim()}>
@@ -330,6 +396,67 @@ export default function MarkdownContent({
       >
         {safeContent}
       </ReactMarkdown>
+      {pendingLinkHref &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="modal-overlay md-link-confirm-overlay"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPendingLinkHref(null);
+            }}
+          >
+            <div
+              className="modal-card md-link-confirm-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="md-link-confirm-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="md-link-confirm-header">
+                <span className="md-link-confirm-title-wrap" id="md-link-confirm-title">
+                  <AlertTriangle size={18} className="md-link-confirm-icon" />
+                  {isMailto ? '이메일 링크 열기 확인' : '외부 링크 이동 경고'}
+                </span>
+                <button
+                  type="button"
+                  className="md-link-confirm-close"
+                  onClick={() => setPendingLinkHref(null)}
+                  aria-label="닫기"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="md-link-confirm-desc">
+                {isMailto
+                  ? '메일 앱으로 아래 이메일 주소를 엽니다. 주소를 확인한 뒤 이동해 주세요.'
+                  : '작성자가 첨부한 외부 링크로 이동합니다. 피싱이나 악성 사이트일 수 있으니 이동 전 주소를 확인해 주세요.'}
+              </p>
+              <div className="md-link-confirm-url" title={pendingLinkHref}>
+                {pendingLinkHref}
+              </div>
+              <div className="md-link-confirm-actions">
+                <button
+                  ref={cancelBtnRef}
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setPendingLinkHref(null)}
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary md-link-confirm-go"
+                  onClick={handleConfirmNavigate}
+                >
+                  <ExternalLink size={14} />
+                  이동하기
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
