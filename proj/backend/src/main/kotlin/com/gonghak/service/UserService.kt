@@ -48,76 +48,67 @@ class UserService {
         )
     }
 
+    private val studentIdMiddleCodes: List<String> =
+        (1..8).flatMap { d1 -> (1..6).map { d3 -> "${d1}0${d3}" } }
+
+    private val studentIdMiddleRegex = Regex("^[1-8]0[1-6]$")
+
     suspend fun getNextStudentId(
         entryYear: Int,
-        departmentName: String,
         isForeign: Boolean,
         random: Boolean = false
     ): NextStudentIdResponse = dbQuery {
-        val cleanDept = PasswordSecurity.sanitizeInput(departmentName)
-        val deptCode = if (cleanDept.isBlank()) {
-            "101"
-        } else {
-            DatabaseFactory.resolveDepartmentRow(cleanDept)
-                ?.get(DepartmentsTable.code)?.takeIf { it.isNotBlank() } ?: "101"
-        }
-        allocateNextStudentIdInternal(entryYear, deptCode, isForeign, random)
+        allocateNextStudentIdInternal(entryYear, isForeign, random)
     }
 
     private fun allocateNextStudentIdInternal(
         entryYear: Int,
-        deptCode: String,
         isForeign: Boolean,
         random: Boolean = false
     ): NextStudentIdResponse {
         val safeYear = entryYear.coerceIn(1900, 2099)
-        val trimmedDeptCode = deptCode.trim()
-        val safeDeptCode = if (Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(trimmedDeptCode)) trimmedDeptCode else "101"
-        val prefix = String.format("%04d%s", safeYear, safeDeptCode)
+        val yearPrefix = String.format("%04d", safeYear)
+        val existingIds = UsersTable.select {
+            (UsersTable.role eq UserRole.STUDENT.name) and (UsersTable.identifier like "$yearPrefix%")
+        }.map { it[UsersTable.identifier] }.toSet()
 
-        val existingSerials = UsersTable.select {
-            (UsersTable.role eq UserRole.STUDENT.name) and (UsersTable.identifier like "$prefix%")
-        }.mapNotNull { row ->
-            val idStr = row[UsersTable.identifier]
-            if (idStr.length == 10 && idStr.startsWith(prefix)) {
-                idStr.substring(7, 10).toIntOrNull()
-            } else {
-                null
+        val serialRange = if (isForeign) (501..999) else (1..500)
+        val midOrder = if (random) studentIdMiddleCodes.shuffled() else studentIdMiddleCodes
+
+        for (midCode in midOrder) {
+            val prefix = "$yearPrefix$midCode"
+            val usedSerials = existingIds.mapNotNull { idStr ->
+                if (idStr.length == 10 && idStr.startsWith(prefix)) {
+                    idStr.substring(7, 10).toIntOrNull()
+                } else {
+                    null
+                }
             }
-        }
-
-        val nextSerialNum = if (random) {
-            val range = if (isForeign) (501..999) else (1..500)
-            val existingSet = existingSerials.toSet()
-            val candidates = range.filter { it !in existingSet }
-            if (candidates.isEmpty()) {
-                throw IllegalArgumentException(
-                    if (isForeign) "해당 연도/학과의 외국인 학생 학번 순번(501~999)을 초과했습니다."
-                    else "해당 연도/학과의 일반 학생 학번 순번(001~500)을 초과했습니다."
+            val nextSerialNum = if (random) {
+                val usedSet = usedSerials.toSet()
+                val candidates = serialRange.filter { it !in usedSet }
+                candidates.randomOrNull()
+            } else if (isForeign) {
+                val maxForeign = usedSerials.filter { it in 501..999 }.maxOrNull() ?: 500
+                if (maxForeign < 999) maxForeign + 1 else null
+            } else {
+                val maxDomestic = usedSerials.filter { it in 1..500 }.maxOrNull() ?: 0
+                if (maxDomestic < 500) maxDomestic + 1 else null
+            }
+            if (nextSerialNum != null) {
+                val serialStr = String.format("%03d", nextSerialNum)
+                return NextStudentIdResponse(
+                    studentId = "$prefix$serialStr",
+                    year = safeYear,
+                    serial = serialStr,
+                    isForeign = isForeign
                 )
             }
-            candidates.random()
-        } else if (isForeign) {
-            val maxForeign = existingSerials.filter { it in 501..999 }.maxOrNull() ?: 500
-            if (maxForeign >= 999) {
-                throw IllegalArgumentException("해당 연도/학과의 외국인 학생 학번 순번(501~999)을 초과했습니다.")
-            }
-            maxForeign + 1
-        } else {
-            val maxDomestic = existingSerials.filter { it in 1..500 }.maxOrNull() ?: 0
-            if (maxDomestic >= 500) {
-                throw IllegalArgumentException("해당 연도/학과의 일반 학생 학번 순번(001~500)을 초과했습니다.")
-            }
-            maxDomestic + 1
         }
 
-        val serialStr = String.format("%03d", nextSerialNum)
-        return NextStudentIdResponse(
-            studentId = "$prefix$serialStr",
-            year = safeYear,
-            departmentCode = safeDeptCode,
-            serial = serialStr,
-            isForeign = isForeign
+        throw IllegalArgumentException(
+            if (isForeign) "해당 연도의 외국인 학생 학번 순번(501~999)을 초과했습니다."
+            else "해당 연도의 일반 학생 학번 순번(001~500)을 초과했습니다."
         )
     }
 
@@ -146,27 +137,22 @@ class UserService {
         val passwordHash = PasswordSecurity.hashPassword(request.password)
         val newUserId = UUID.randomUUID()
 
-        // Resolve 3-digit department code from existing catalog without mutating DepartmentsTable
-        val existingDeptRow = DepartmentsTable.select { DepartmentsTable.name eq cleanDept }.singleOrNull()
-        val deptCode = existingDeptRow?.get(DepartmentsTable.code)?.ifBlank { "101" } ?: "101"
-
         val resolvedStudentId = if (role == UserRole.STUDENT) {
             val requestedId = PasswordSecurity.sanitizeInput(request.identifier)
             if (requestedId.isBlank() || requestedId.equals("AUTO", ignoreCase = true)) {
                 allocateNextStudentIdInternal(
                     entryYear = request.entryYear ?: 2026,
-                    deptCode = deptCode,
                     isForeign = request.isForeign
                 ).studentId
             } else {
                 if (!Regex("^\\d{10}$").matches(requestedId)) {
-                    throw IllegalArgumentException("학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 일반 001~500, 외국인 501~999) 형식의 10자리 숫자여야 합니다.")
+                    throw IllegalArgumentException("학번은 (연도 4자리)(1~8 + 0 + 1~6)(순번 3자리: 일반 001~500, 외국인 501~999) 형식의 10자리 숫자여야 합니다.")
                 }
                 val idYear = requestedId.substring(0, 4).toInt()
-                val idDeptCode = requestedId.substring(4, 7)
+                val idMiddleCode = requestedId.substring(4, 7)
                 val idSerial = requestedId.substring(7, 10).toInt()
-                if (idYear !in 1900..2099 || !Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(idDeptCode) || idSerial !in 1..999) {
-                    throw IllegalArgumentException("학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 일반 001~500, 외국인 501~999) 형식이어야 합니다.")
+                if (idYear !in 1900..2099 || !studentIdMiddleRegex.matches(idMiddleCode) || idSerial !in 1..999) {
+                    throw IllegalArgumentException("학번은 (연도 4자리)(1~8 + 0 + 1~6)(순번 3자리: 일반 001~500, 외국인 501~999) 형식이어야 합니다.")
                 }
                 if (request.isForeign && idSerial < 501) {
                     throw IllegalArgumentException("외국인 학생의 학번 순번은 501부터 시작해야 합니다.")
@@ -562,7 +548,6 @@ class UserService {
         return DepartmentDto(
             id = deptId.toString(),
             name = row[DepartmentsTable.name],
-            code = row[DepartmentsTable.code],
             college = row[DepartmentsTable.college],
             aliases = aliasesByDept[deptId].orEmpty(),
             createdAt = row[DepartmentsTable.createdAt].toString()
@@ -577,7 +562,7 @@ class UserService {
     suspend fun getDepartments(): List<DepartmentDto> = dbQuery {
         val aliasesByDept = loadAliasesMap()
         val deptRows = DepartmentsTable.selectAll()
-            .orderBy(DepartmentsTable.code to SortOrder.ASC, DepartmentsTable.name to SortOrder.ASC)
+            .orderBy(DepartmentsTable.name to SortOrder.ASC)
             .map { rowToDepartmentDto(it, aliasesByDept) }
         if (deptRows.isNotEmpty()) {
             deptRows
@@ -589,7 +574,6 @@ class UserService {
                     if (d.isBlank() || d == "공통") null else DepartmentDto(
                         id = d,
                         name = d,
-                        code = "101",
                         college = row[CoursesTable.college]
                     )
                 }
@@ -604,7 +588,6 @@ class UserService {
         return CollegeDto(
             id = colId.toString(),
             name = row[CollegesTable.name],
-            codeDigit = row[CollegesTable.codeDigit],
             aliases = aliasesByCollege[colId].orEmpty(),
             createdAt = row[CollegesTable.createdAt].toString()
         )
@@ -651,7 +634,7 @@ class UserService {
     suspend fun getColleges(): List<CollegeDto> = dbQuery {
         val aliasesByCollege = loadCollegeAliasesMap()
         CollegesTable.selectAll()
-            .orderBy(CollegesTable.codeDigit to SortOrder.ASC, CollegesTable.name to SortOrder.ASC)
+            .orderBy(CollegesTable.name to SortOrder.ASC)
             .map { rowToCollegeDto(it, aliasesByCollege) }
     }
 
@@ -671,16 +654,6 @@ class UserService {
                 else "'$cleanName'은(는) 이미 '${ownerName}'의 기존 단과대학명(별칭)으로 등록되어 있습니다."
             )
         }
-        val digit = request.codeDigit
-        if (digit != null) {
-            if (digit !in 1..9) {
-                throw IllegalArgumentException("단과대학 코드 첫자리는 1~9 사이의 숫자여야 합니다.")
-            }
-            val dupDigitOwner = CollegesTable.select { CollegesTable.codeDigit eq digit }.firstOrNull()
-            if (dupDigitOwner != null) {
-                throw IllegalArgumentException("코드 첫자리 '${digit}'는 이미 '${dupDigitOwner[CollegesTable.name]}'에서 사용 중입니다.")
-            }
-        }
         val cleanAliases = validateAliasInputs(request.aliases, cleanName, "단과대학", null, ::collegeOwnerLookup)
 
         val newId = UUID.randomUUID()
@@ -688,7 +661,6 @@ class UserService {
         CollegesTable.insert {
             it[id] = newId
             it[name] = cleanName
-            it[codeDigit] = digit
             it[createdAt] = now
         }
         cleanAliases.forEach { alias ->
@@ -701,7 +673,6 @@ class UserService {
         CollegeDto(
             id = newId.toString(),
             name = cleanName,
-            codeDigit = digit,
             aliases = cleanAliases,
             createdAt = now.toString()
         )
@@ -714,18 +685,6 @@ class UserService {
         val nextName = request.name?.let { PasswordSecurity.sanitizeInput(it).take(100) }?.takeIf { it.isNotBlank() } ?: oldName
         if (DatabaseFactory.isReservedCatalogName(nextName)) {
             throw IllegalArgumentException("예약된 범위 명칭('${nextName}')은 단과대학명으로 사용할 수 없습니다.")
-        }
-        val nextDigit = request.codeDigit ?: row[CollegesTable.codeDigit]
-        if (nextDigit != null) {
-            if (nextDigit !in 1..9) {
-                throw IllegalArgumentException("단과대학 코드 첫자리는 1~9 사이의 숫자여야 합니다.")
-            }
-            val dupDigitOwner = CollegesTable.select {
-                (CollegesTable.codeDigit eq nextDigit) and (CollegesTable.id neq collegeId)
-            }.firstOrNull()
-            if (dupDigitOwner != null) {
-                throw IllegalArgumentException("코드 첫자리 '${nextDigit}'는 이미 '${dupDigitOwner[CollegesTable.name]}'에서 사용 중입니다.")
-            }
         }
 
         if (!nextName.equals(oldName, ignoreCase = true)) {
@@ -742,7 +701,6 @@ class UserService {
 
         CollegesTable.update({ CollegesTable.id eq collegeId }) {
             it[name] = nextName
-            it[codeDigit] = nextDigit
         }
 
         if (nextName != oldName) {
@@ -882,25 +840,11 @@ class UserService {
 
         val cleanAliases = validateAliasInputs(request.aliases, cleanName, "학과", null, ::departmentOwnerLookup)
 
-        val deptCode = if (!request.code.isNullOrBlank()) {
-            val trimmed = request.code.trim()
-            if (!Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(trimmed)) {
-                throw IllegalArgumentException("학과 고유번호는 (단과대 1~9)(학과 01~99) 형식의 3자리 숫자여야 합니다.")
-            }
-            if (DepartmentsTable.select { DepartmentsTable.code eq trimmed }.count() > 0L) {
-                throw IllegalArgumentException("이미 사용 중인 학과 고유번호입니다: $trimmed")
-            }
-            trimmed
-        } else {
-            DatabaseFactory.allocateDepartmentCodeForCollege(cleanCollege)
-        }
-
         val newId = UUID.randomUUID()
         val now = Instant.now()
         DepartmentsTable.insert {
             it[id] = newId
             it[name] = cleanName
-            it[code] = deptCode
             it[college] = cleanCollege
             it[createdAt] = now
         }
@@ -916,7 +860,6 @@ class UserService {
         DepartmentDto(
             id = newId.toString(),
             name = cleanName,
-            code = deptCode,
             college = cleanCollege,
             aliases = cleanAliases,
             createdAt = now.toString()
@@ -928,7 +871,6 @@ class UserService {
             ?: throw IllegalArgumentException("존재하지 않는 학과입니다.")
         val oldName = deptRow[DepartmentsTable.name]
         val oldCollege = deptRow[DepartmentsTable.college]
-        val oldCode = deptRow[DepartmentsTable.code]
 
         val nextName = request.name?.let { PasswordSecurity.sanitizeInput(it).take(100) }?.takeIf { it.isNotBlank() } ?: oldName
         if (DatabaseFactory.isReservedCatalogName(nextName)) {
@@ -938,14 +880,6 @@ class UserService {
             val sanitized = PasswordSecurity.sanitizeInput(it).take(100)
             if (sanitized.isBlank()) oldCollege else DatabaseFactory.ensureCollegeExistsInternal(sanitized)
         } ?: oldCollege
-        val nextCode = request.code?.trim()?.takeIf { it.isNotBlank() }?.also { trimmed ->
-            if (!Regex("^[1-9](?:0[1-9]|[1-9]\\d)$").matches(trimmed)) {
-                throw IllegalArgumentException("학과 고유번호는 (단과대 1~9)(학과 01~99) 형식의 3자리 숫자여야 합니다.")
-            }
-            if (trimmed != oldCode && DepartmentsTable.select { (DepartmentsTable.code eq trimmed) and (DepartmentsTable.id neq departmentId) }.count() > 0L) {
-                throw IllegalArgumentException("이미 사용 중인 학과 고유번호입니다: $trimmed")
-            }
-        } ?: oldCode
 
         if (!nextName.equals(oldName, ignoreCase = true)) {
             val collision = departmentOwnerLookup(nextName)
@@ -961,7 +895,6 @@ class UserService {
         DepartmentsTable.update({ DepartmentsTable.id eq departmentId }) {
             it[name] = nextName
             it[college] = nextCollege
-            it[code] = nextCode
         }
 
         if (nextName != oldName) {
@@ -1147,7 +1080,6 @@ class UserService {
             DepartmentsTable.insert {
                 it[id] = UUID.randomUUID()
                 it[name] = finalDept
-                it[code] = DatabaseFactory.allocateDepartmentCodeForCollege(finalCollege)
                 it[college] = finalCollege
             }
         }

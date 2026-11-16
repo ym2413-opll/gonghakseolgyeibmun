@@ -466,13 +466,12 @@ export const api = {
     return { professorInviteRequired: false };
   },
 
-  async getNextStudentId({ year = 2026, department = '', isForeign = false, random = false } = {}) {
+  async getNextStudentId({ year = 2026, isForeign = false, random = false } = {}) {
     const safeYear = Math.min(2099, Math.max(1900, Number(year) || 2026));
     if (USE_REMOTE_BACKEND) {
       try {
         const params = new URLSearchParams({
           year: String(safeYear),
-          department: department || '',
           isForeign: String(Boolean(isForeign)),
           random: String(Boolean(random))
         });
@@ -488,42 +487,53 @@ export const api = {
       }
     }
 
-    const depts = safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS);
-    const deptObj = resolveDepartmentEntry(depts, department) || resolveDepartmentEntry(INITIAL_DEPARTMENTS, department);
-    const deptCode = /^[1-9](?:0[1-9]|[1-9]\d)$/.test(String(deptObj?.code || '')) ? String(deptObj.code) : '101';
-    const prefix = `${safeYear}${deptCode}`;
-    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
-    const serials = localUsers
-      .map(u => String(u.identifier || ''))
-      .filter(id => id.length === 10 && id.startsWith(prefix))
-      .map(id => Number(id.slice(7, 10)))
-      .filter(n => !Number.isNaN(n));
-    let nextNum;
-    if (random) {
-      const start = isForeign ? 501 : 1;
-      const end = isForeign ? 999 : 500;
-      const usedSet = new Set(serials);
-      const candidates = [];
-      for (let i = start; i <= end; i += 1) {
-        if (!usedSet.has(i)) candidates.push(i);
+    const middlePool = [];
+    for (let d1 = 1; d1 <= 8; d1 += 1) {
+      for (let d3 = 1; d3 <= 6; d3 += 1) {
+        middlePool.push(`${d1}0${d3}`);
       }
-      if (candidates.length === 0) {
-        throw new Error('사용 가능한 학번 순번이 남아있지 않습니다.');
-      }
-      nextNum = candidates[Math.floor(Math.random() * candidates.length)];
-    } else {
-      nextNum = isForeign
-        ? Math.max(500, ...serials.filter(n => n >= 501 && n <= 999)) + 1
-        : Math.max(0, ...serials.filter(n => n >= 1 && n <= 500)) + 1;
     }
-    const serial = String(nextNum).padStart(3, '0');
-    return {
-      studentId: `${prefix}${serial}`,
-      year: safeYear,
-      departmentCode: deptCode,
-      serial,
-      isForeign: Boolean(isForeign)
-    };
+    const localUsers = safeGetStorage(STORAGE_KEY_USERS, []);
+    const usedIds = new Set(localUsers.map(u => String(u.identifier || '')));
+    const start = isForeign ? 501 : 1;
+    const end = isForeign ? 999 : 500;
+    const orderedMids = random ? [...middlePool].sort(() => Math.random() - 0.5) : middlePool;
+
+    for (const mid of orderedMids) {
+      const prefix = `${safeYear}${mid}`;
+      const usedSerials = Array.from(usedIds)
+        .filter(id => id.length === 10 && id.startsWith(prefix))
+        .map(id => Number(id.slice(7, 10)))
+        .filter(n => !Number.isNaN(n));
+      let nextNum = null;
+      if (random) {
+        const usedSet = new Set(usedSerials);
+        const candidates = [];
+        for (let i = start; i <= end; i += 1) {
+          if (!usedSet.has(i)) candidates.push(i);
+        }
+        if (candidates.length > 0) {
+          nextNum = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+      } else {
+        const curMax = isForeign
+          ? Math.max(500, ...usedSerials.filter(n => n >= 501 && n <= 999))
+          : Math.max(0, ...usedSerials.filter(n => n >= 1 && n <= 500));
+        if (curMax < end) {
+          nextNum = curMax + 1;
+        }
+      }
+      if (nextNum !== null) {
+        const serial = String(nextNum).padStart(3, '0');
+        return {
+          studentId: `${prefix}${serial}`,
+          year: safeYear,
+          serial,
+          isForeign: Boolean(isForeign)
+        };
+      }
+    }
+    throw new Error('사용 가능한 학번 순번이 남아있지 않습니다.');
   },
 
   async logout(options = {}) {
@@ -575,8 +585,8 @@ export const api = {
     const isAutoId = roleUpper === 'STUDENT' && (!rawIdentifier || rawIdentifier.toUpperCase() === 'AUTO');
 
     if (roleUpper === 'STUDENT') {
-      if (!isAutoId && !/^(19\d\d|20\d\d)[1-9](?:0[1-9]|[1-9]\d)(?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(rawIdentifier)) {
-        throw new Error('학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
+      if (!isAutoId && !/^(19\d\d|20\d\d)[1-8]0[1-6](?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(rawIdentifier)) {
+        throw new Error('학번은 (연도 4자리)(1~8 + 0 + 1~6)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
       }
     } else if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUsername)) {
       throw new Error('아이디(ID)는 영문, 숫자, 밑줄(_) 조합 3~30자로 입력해주세요.');
@@ -657,8 +667,8 @@ export const api = {
         });
         sid = preview.studentId;
       }
-      if (!/^(19\d\d|20\d\d)[1-9](?:0[1-9]|[1-9]\d)(?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(sid)) {
-        throw new Error('학번은 (연도 4자리)(단과대 1~9 + 학과 01~99)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
+      if (!/^(19\d\d|20\d\d)[1-8]0[1-6](?:00[1-9]|0[1-9]\d|[1-9]\d\d)$/.test(sid)) {
+        throw new Error('학번은 (연도 4자리)(1~8 + 0 + 1~6)(순번 3자리: 001~999) 형식의 10자리 숫자로 입력해주세요.');
       }
       if (localUsers.some(u => u.role === 'student' && u.identifier === sid)) {
         throw new Error('이미 가입된 학번입니다. 중복 가입이 불가능합니다.');
@@ -1138,50 +1148,12 @@ export const api = {
     }
     const rawCollegeName = (deptPayload.college || '광운대학교').trim();
     const collegeName = resolveCollegeEntry(colleges, rawCollegeName)?.name || rawCollegeName;
-    const knownCollegeDigits = {
-      '인공지능융합대학': 1,
-      '전자정보공과대학': 2,
-      '공과대학': 3,
-      '자연과학대학': 4,
-      '인문사회과학대학': 5,
-      '경영대학': 6,
-      '정책법학대학': 7,
-      '참빛인재대학': 8
-    };
-    let assignedCode = (deptPayload.code || '').trim();
-    if (assignedCode) {
-      if (!/^[1-9](?:0[1-9]|[1-9]\d)$/.test(assignedCode)) {
-        throw new Error('학과 고유번호는 (단과대 1~9)(학과 01~99) 형식의 3자리 숫자여야 합니다.');
-      }
-      if (depts.some(d => String(d.code) === assignedCode)) {
-        throw new Error(`이미 사용 중인 학과 고유번호입니다: ${assignedCode}`);
-      }
-    } else {
-      const existingCollegeDept = depts.find(
-        d => d.college === collegeName && /^[1-9](?:0[1-9]|[1-9]\d)$/.test(String(d.code || ''))
-      );
-      const usedDigits = new Set(
-        depts
-          .map(d => String(d.code || ''))
-          .filter(c => /^[1-9]\d{2}$/.test(c))
-          .map(c => Number(c[0]))
-      );
-      const collegeDigit = knownCollegeDigits[collegeName]
-        ?? (existingCollegeDept ? Number(String(existingCollegeDept.code)[0]) : null)
-        ?? ([1, 2, 3, 4, 5, 6, 7, 8, 9].find(n => !usedDigits.has(n)) ?? 9);
-      const maxDeptIdx = depts
-        .map(d => String(d.code || ''))
-        .filter(c => /^[1-9](?:0[1-9]|[1-9]\d)$/.test(c) && Number(c[0]) === collegeDigit)
-        .reduce((max, c) => Math.max(max, Number(c.slice(1))), 0);
-      assignedCode = `${collegeDigit}${String(Math.min(99, maxDeptIdx + 1)).padStart(2, '0')}`;
-    }
     const newDept = {
       id: `dept-${Date.now()}`,
       name: cleanDeptName,
       shortName: (deptPayload.shortName || cleanDeptName.slice(0, 3)).trim(),
       college: collegeName,
-      aliases: cleanAliases,
-      code: assignedCode
+      aliases: cleanAliases
     };
     depts.push(newDept);
     safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts);
@@ -1222,7 +1194,7 @@ export const api = {
       nextAliases.push(cur.name);
     }
     nextAliases = nextAliases.filter((a) => a.toLowerCase() !== nextName.toLowerCase());
-    const updated = { ...cur, name: nextName, college: nextCollege, code: payload.code?.trim() || cur.code, aliases: nextAliases };
+    const updated = { ...cur, name: nextName, college: nextCollege, aliases: nextAliases };
     depts[idx] = updated;
     safeSetStorage(STORAGE_KEY_DEPARTMENTS, depts);
     if (nextName !== cur.name) {
@@ -1334,7 +1306,6 @@ export const api = {
     const created = {
       id: `col-${Date.now()}`,
       name: cleanName,
-      codeDigit: collegePayload.codeDigit ? Number(collegePayload.codeDigit) : null,
       aliases: Array.isArray(collegePayload.aliases) ? collegePayload.aliases.filter(Boolean) : []
     };
     colleges.push(created);
@@ -1376,7 +1347,6 @@ export const api = {
     const updated = {
       ...cur,
       name: nextName,
-      codeDigit: payload.codeDigit !== undefined ? payload.codeDigit : cur.codeDigit,
       aliases: nextAliases
     };
     colleges[idx] = updated;

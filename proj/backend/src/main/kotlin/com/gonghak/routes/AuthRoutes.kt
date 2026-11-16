@@ -26,7 +26,7 @@ fun Route.authRoutes(userService: UserService) {
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = RegistrationPolicyDto(professorInviteRequired = required)))
         }
 
-        // Preview next auto-assigned / random 10-digit student ID: (YYYY)(DDD)(SSS)
+        // Preview next auto-assigned / random 10-digit student ID: (YYYY)(1..8 + 0 + 1..6)(SSS)
         get("/next-student-id") {
             val ipKey = call.clientRateLimitKey()
             if (!nextIdIpLimiter.allow(ipKey)) {
@@ -37,11 +37,10 @@ fun Route.authRoutes(userService: UserService) {
                 return@get
             }
             val year = call.request.queryParameters["year"]?.toIntOrNull() ?: 2026
-            val department = call.request.queryParameters["department"].orEmpty()
             val isForeign = call.request.queryParameters["isForeign"]?.equals("true", ignoreCase = true) == true
             val random = call.request.queryParameters["random"]?.equals("true", ignoreCase = true) == true
             try {
-                val res = userService.getNextStudentId(year, department, isForeign, random)
+                val res = userService.getNextStudentId(year, isForeign, random)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = res))
             } catch (e: IllegalArgumentException) {
                 call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))

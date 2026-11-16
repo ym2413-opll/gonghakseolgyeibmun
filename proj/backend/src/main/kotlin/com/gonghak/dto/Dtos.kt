@@ -67,7 +67,6 @@ data class RegistrationPolicyDto(
 data class NextStudentIdResponse(
     val studentId: String,
     val year: Int,
-    val departmentCode: String,
     val serial: String,
     val isForeign: Boolean = false
 )
@@ -200,7 +199,6 @@ data class CourseDto(
 data class DepartmentDto(
     val id: String,
     val name: String,
-    val code: String = "101",
     val college: String = "",
     val aliases: List<String> = emptyList(),
     val createdAt: String = ""
@@ -209,7 +207,6 @@ data class DepartmentDto(
 @Serializable
 data class CreateDepartmentRequest(
     val name: String,
-    val code: String? = null,
     val college: String = "",
     val aliases: List<String> = emptyList()
 )
@@ -218,7 +215,6 @@ data class CreateDepartmentRequest(
 data class UpdateDepartmentRequest(
     val name: String? = null,
     val college: String? = null,
-    val code: String? = null,
     val aliases: List<String>? = null,
     val keepOldNameAsAlias: Boolean = true
 )
@@ -238,7 +234,6 @@ data class RenameAliasRequest(
 data class CollegeDto(
     val id: String,
     val name: String,
-    val codeDigit: Int? = null,
     val aliases: List<String> = emptyList(),
     val createdAt: String = ""
 )
@@ -246,14 +241,12 @@ data class CollegeDto(
 @Serializable
 data class CreateCollegeRequest(
     val name: String,
-    val codeDigit: Int? = null,
     val aliases: List<String> = emptyList()
 )
 
 @Serializable
 data class UpdateCollegeRequest(
     val name: String? = null,
-    val codeDigit: Int? = null,
     val aliases: List<String>? = null,
     val keepOldNameAsAlias: Boolean = true
 )

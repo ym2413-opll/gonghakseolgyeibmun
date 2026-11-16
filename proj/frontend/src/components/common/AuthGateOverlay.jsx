@@ -289,7 +289,6 @@ const AuthGateOverlay = () => {
                         onClick={() => {
                           api.getNextStudentId({
                             year: entryYear,
-                            department: effectiveDepartment,
                             isForeign,
                             random: true
                           }).then((res) => {

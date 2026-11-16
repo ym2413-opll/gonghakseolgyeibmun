@@ -25,7 +25,6 @@ object UsersTable : UUIDTable("users") {
 
 object CollegesTable : UUIDTable("colleges") {
     val name = varchar("name", 100).uniqueIndex()
-    val codeDigit = integer("code_digit").nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -37,7 +36,6 @@ object CollegeAliasesTable : UUIDTable("college_aliases") {
 
 object DepartmentsTable : UUIDTable("departments") {
     val name = varchar("name", 100).uniqueIndex()
-    val code = varchar("code", 3).default("101")
     val college = varchar("college", 100).default("")
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }

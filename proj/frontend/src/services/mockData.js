@@ -2,31 +2,31 @@
 // 광운대학교 학업 Q&A 센터 포털 사용자, 학과, 교과목, 질문 및 알림 데이터 규격 (R3 Overhaul)
 
 export const INITIAL_COLLEGES = [
-  { id: 'col-1', name: '인공지능융합대학', codeDigit: 1, aliases: ['소프트웨어융합대학'] },
-  { id: 'col-2', name: '전자정보공과대학', codeDigit: 2, aliases: [] },
-  { id: 'col-3', name: '공과대학', codeDigit: 3, aliases: [] },
-  { id: 'col-4', name: '자연과학대학', codeDigit: 4, aliases: [] },
-  { id: 'col-5', name: '인문사회과학대학', codeDigit: 5, aliases: [] },
-  { id: 'col-6', name: '경영대학', codeDigit: 6, aliases: [] },
-  { id: 'col-7', name: '정책법학대학', codeDigit: 7, aliases: [] },
-  { id: 'col-8', name: '참빛인재대학', codeDigit: 8, aliases: [] }
+  { id: 'col-1', name: '인공지능융합대학', aliases: ['소프트웨어융합대학'] },
+  { id: 'col-2', name: '전자정보공과대학', aliases: [] },
+  { id: 'col-3', name: '공과대학', aliases: [] },
+  { id: 'col-4', name: '자연과학대학', aliases: [] },
+  { id: 'col-5', name: '인문사회과학대학', aliases: [] },
+  { id: 'col-6', name: '경영대학', aliases: [] },
+  { id: 'col-7', name: '정책법학대학', aliases: [] },
+  { id: 'col-8', name: '참빛인재대학', aliases: [] }
 ];
 
 export const INITIAL_DEPARTMENTS = [
-  { id: 'dept-001', name: '소프트웨어학부', aliases: ['소프트웨어학과'], shortName: '소프트', code: '101', college: '인공지능융합대학' },
-  { id: 'dept-002', name: '컴퓨터정보공학부', aliases: ['컴퓨터공학과'], shortName: '컴정', code: '102', college: '인공지능융합대학' },
-  { id: 'dept-003', name: '정보융합학부', aliases: [], shortName: '정융', code: '103', college: '인공지능융합대학' },
-  { id: 'dept-004', name: '로봇학부', aliases: [], shortName: '로봇', code: '104', college: '인공지능융합대학' },
-  { id: 'dept-005', name: '전자공학과', aliases: [], shortName: '전자', code: '201', college: '전자정보공과대학' },
-  { id: 'dept-006', name: '전자통신공학과', aliases: [], shortName: '전통', code: '202', college: '전자정보공과대학' },
-  { id: 'dept-007', name: '전자융합공학과', aliases: [], shortName: '전융', code: '203', college: '전자정보공과대학' },
-  { id: 'dept-008', name: '전기공학과', aliases: [], shortName: '전기', code: '204', college: '전자정보공과대학' },
-  { id: 'dept-009', name: '반도체시스템공학부', aliases: [], shortName: '반도체', code: '205', college: '전자정보공과대학' },
-  { id: 'dept-010', name: '화학공학과', aliases: [], shortName: '화공', code: '301', college: '공과대학' },
-  { id: 'dept-011', name: '건축공학과', aliases: [], shortName: '건축', code: '302', college: '공과대학' },
-  { id: 'dept-012', name: '수학교육과', aliases: [], shortName: '수교', code: '401', college: '자연과학대학' },
-  { id: 'dept-013', name: '미디어커뮤니케이션학부', aliases: [], shortName: '미컴', code: '501', college: '인문사회과학대학' },
-  { id: 'dept-014', name: '경영학부', aliases: [], shortName: '경영', code: '601', college: '경영대학' }
+  { id: 'dept-001', name: '소프트웨어학부', aliases: ['소프트웨어학과'], shortName: '소프트', college: '인공지능융합대학' },
+  { id: 'dept-002', name: '컴퓨터정보공학부', aliases: ['컴퓨터공학과'], shortName: '컴정', college: '인공지능융합대학' },
+  { id: 'dept-003', name: '정보융합학부', aliases: [], shortName: '정융', college: '인공지능융합대학' },
+  { id: 'dept-004', name: '로봇학부', aliases: [], shortName: '로봇', college: '인공지능융합대학' },
+  { id: 'dept-005', name: '전자공학과', aliases: [], shortName: '전자', college: '전자정보공과대학' },
+  { id: 'dept-006', name: '전자통신공학과', aliases: [], shortName: '전통', college: '전자정보공과대학' },
+  { id: 'dept-007', name: '전자융합공학과', aliases: [], shortName: '전융', college: '전자정보공과대학' },
+  { id: 'dept-008', name: '전기공학과', aliases: [], shortName: '전기', college: '전자정보공과대학' },
+  { id: 'dept-009', name: '반도체시스템공학부', aliases: [], shortName: '반도체', college: '전자정보공과대학' },
+  { id: 'dept-010', name: '화학공학과', aliases: [], shortName: '화공', college: '공과대학' },
+  { id: 'dept-011', name: '건축공학과', aliases: [], shortName: '건축', college: '공과대학' },
+  { id: 'dept-012', name: '수학교육과', aliases: [], shortName: '수교', college: '자연과학대학' },
+  { id: 'dept-013', name: '미디어커뮤니케이션학부', aliases: [], shortName: '미컴', college: '인문사회과학대학' },
+  { id: 'dept-014', name: '경영학부', aliases: [], shortName: '경영', college: '경영대학' }
 ];
 
 export const INITIAL_COURSES = [

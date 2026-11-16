@@ -31,7 +31,6 @@ import {
 const CatalogChipList = ({
   items = [],
   entityKey,
-  getCodeLabel,
   getSubLabel,
   editingAlias,
   onStartRenameAlias,
@@ -43,12 +42,11 @@ const CatalogChipList = ({
 }) => (
   <div className="admin-chip-list">
     {items.map((item) => {
-      const codeLabel = getCodeLabel(item);
       const subLabel = getSubLabel(item);
       const aliases = Array.isArray(item.aliases) ? item.aliases : [];
       return (
         <span key={item.id || item.name} className="admin-dept-chip">
-          {codeLabel ? `${codeLabel} · ` : ''}{item.name}
+          {item.name}
           {subLabel ? <small> ({subLabel})</small> : null}
           <button
             type="button"
@@ -198,15 +196,14 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const [deptAliasesInput, setDeptAliasesInput] = useState('');
   const [aliasTargetDeptId, setAliasTargetDeptId] = useState('');
   const [aliasNewName, setAliasNewName] = useState('');
-  const [editingDept, setEditingDept] = useState(null); // { id, name, college, code, keepOldNameAsAlias }
+  const [editingDept, setEditingDept] = useState(null); // { id, name, college, keepOldNameAsAlias }
 
   // Catalog form state (Colleges)
   const [newCollegeName, setNewCollegeName] = useState('');
-  const [newCollegeDigit, setNewCollegeDigit] = useState('');
   const [newCollegeAliasesInput, setNewCollegeAliasesInput] = useState('');
   const [aliasTargetCollegeId, setAliasTargetCollegeId] = useState('');
   const [collegeAliasNewName, setCollegeAliasNewName] = useState('');
-  const [editingCollege, setEditingCollege] = useState(null); // { id, name, codeDigit, keepOldNameAsAlias }
+  const [editingCollege, setEditingCollege] = useState(null); // { id, name, keepOldNameAsAlias }
 
   // Inline alias rename state shared for departments & colleges
   const [editingAlias, setEditingAlias] = useState(null); // { entityKey: 'dept'|'college', itemId, oldAlias, value }
@@ -345,7 +342,6 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       const updated = await api.updateDepartment(editingDept.id, {
         name: editingDept.name.trim(),
         college: editingDept.college.trim() || undefined,
-        code: editingDept.code.trim() || undefined,
         keepOldNameAsAlias: editingDept.keepOldNameAsAlias
       });
       setEditingDept(null);
@@ -365,15 +361,12 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
-    const parsedDigit = newCollegeDigit.trim() ? Number(newCollegeDigit.trim()) : null;
     try {
       await api.createCollege({
         name: addedName,
-        codeDigit: parsedDigit,
         aliases: initialAliases
       });
       setNewCollegeName('');
-      setNewCollegeDigit('');
       setNewCollegeAliasesInput('');
       await refreshCatalog();
       notifySuccess(`단과대학 '${addedName}'이(가) 추가되었습니다.`);
@@ -413,9 +406,6 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     try {
       const updated = await api.updateCollege(editingCollege.id, {
         name: editingCollege.name.trim(),
-        codeDigit: editingCollege.codeDigit !== '' && editingCollege.codeDigit !== null
-          ? Number(editingCollege.codeDigit)
-          : null,
         keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
       });
       setEditingCollege(null);
@@ -658,7 +648,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       >
                         {departments.map((d) => (
                           <option key={d.id || d.name} value={d.id}>
-                            {d.code ? `[${d.code}] ` : ''}{d.name}
+                            {d.name}
                           </option>
                         ))}
                       </select>
@@ -707,25 +697,14 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                           />
                         </div>
                       </div>
-                      <div className="auth-form-grid-2">
-                        <div className="form-group">
-                          <label className="form-label">학과 고유번호(3자리)</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={editingDept.code}
-                            onChange={(e) => setEditingDept((prev) => ({ ...prev, code: e.target.value }))}
-                          />
-                        </div>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85em', marginTop: '20px' }}>
-                          <input
-                            type="checkbox"
-                            checked={editingDept.keepOldNameAsAlias}
-                            onChange={(e) => setEditingDept((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))}
-                          />
-                          학과명 변경 시 기존 이름을 별칭으로 자동 보존
-                        </label>
-                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85em', marginBottom: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={editingDept.keepOldNameAsAlias}
+                          onChange={(e) => setEditingDept((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))}
+                        />
+                        학과명 변경 시 기존 이름을 별칭으로 자동 보존
+                      </label>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="submit" className="btn btn-primary btn-xs">저장</button>
                         <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingDept(null)}>취소</button>
@@ -735,7 +714,6 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                   <CatalogChipList
                     items={departments}
                     entityKey="dept"
-                    getCodeLabel={(d) => d.code || ''}
                     getSubLabel={(d) => (d.college || d.shortName || '').trim()}
                     editingAlias={editingAlias}
                     onStartRenameAlias={(entityKey, itemId, oldAlias) => setEditingAlias({ entityKey, itemId, oldAlias, value: oldAlias })}
@@ -743,7 +721,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     onSubmitRenameAlias={handleSubmitRenameAlias}
                     onCancelRenameAlias={() => setEditingAlias(null)}
                     onRemoveAlias={handleRemoveAlias}
-                    onStartEditItem={(d) => setEditingDept({ id: d.id, name: d.name, college: d.college || '', code: d.code || '', keepOldNameAsAlias: true })}
+                    onStartEditItem={(d) => setEditingDept({ id: d.id, name: d.name, college: d.college || '', keepOldNameAsAlias: true })}
                   />
                 </div>
               </div>
@@ -754,30 +732,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                   단과대학(College) 및 별칭 관리
                 </h3>
                 <form onSubmit={handleAddCollege} className="admin-compact-form">
-                  <div className="auth-form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label">단과대학 정식 명칭 *</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="예: 인공지능융합대학"
-                        value={newCollegeName}
-                        onChange={(e) => setNewCollegeName(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">코드 첫자리 (1~9, 선택)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={9}
-                        className="form-input"
-                        placeholder="예: 1"
-                        value={newCollegeDigit}
-                        onChange={(e) => setNewCollegeDigit(e.target.value)}
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">단과대학 정식 명칭 *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="예: 인공지능융합대학"
+                      value={newCollegeName}
+                      onChange={(e) => setNewCollegeName(e.target.value)}
+                      required
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">기존 단과대학명 별칭(선택 · 쉼표 구분)</label>
@@ -806,7 +770,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       >
                         {colleges.map((c) => (
                           <option key={c.id || c.name} value={c.id}>
-                            {c.codeDigit ? `[${c.codeDigit}] ` : ''}{c.name}
+                            {c.name}
                           </option>
                         ))}
                       </select>
@@ -833,28 +797,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                   <div className="admin-chip-header">현재 등록된 단과대학 ({colleges.length}개)</div>
                   {editingCollege && (
                     <form onSubmit={handleSaveEditedCollege} className="admin-compact-form" style={{ marginBottom: '12px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                      <div className="auth-form-grid-2">
-                        <div className="form-group">
-                          <label className="form-label">수정할 정식 단과대학명 *</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={editingCollege.name}
-                            onChange={(e) => setEditingCollege((prev) => ({ ...prev, name: e.target.value }))}
-                            required
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">코드 첫자리 (1~9)</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={9}
-                            className="form-input"
-                            value={editingCollege.codeDigit}
-                            onChange={(e) => setEditingCollege((prev) => ({ ...prev, codeDigit: e.target.value }))}
-                          />
-                        </div>
+                      <div className="form-group">
+                        <label className="form-label">수정할 정식 단과대학명 *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={editingCollege.name}
+                          onChange={(e) => setEditingCollege((prev) => ({ ...prev, name: e.target.value }))}
+                          required
+                        />
                       </div>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85em', marginBottom: '8px' }}>
                         <input
@@ -873,7 +824,6 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                   <CatalogChipList
                     items={colleges}
                     entityKey="college"
-                    getCodeLabel={(c) => (c.codeDigit ? `${c.codeDigit}xx` : '')}
                     getSubLabel={() => ''}
                     editingAlias={editingAlias}
                     onStartRenameAlias={(entityKey, itemId, oldAlias) => setEditingAlias({ entityKey, itemId, oldAlias, value: oldAlias })}
@@ -881,7 +831,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     onSubmitRenameAlias={handleSubmitRenameAlias}
                     onCancelRenameAlias={() => setEditingAlias(null)}
                     onRemoveAlias={handleRemoveCollegeAlias}
-                    onStartEditItem={(c) => setEditingCollege({ id: c.id, name: c.name, codeDigit: c.codeDigit ?? '', keepOldNameAsAlias: true })}
+                    onStartEditItem={(c) => setEditingCollege({ id: c.id, name: c.name, keepOldNameAsAlias: true })}
                   />
                 </div>
               </div>

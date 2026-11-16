@@ -149,7 +149,6 @@ object DatabaseFactory {
         listOf(
             "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id DROP NOT NULL",
             "ALTER TABLE enrollments ALTER COLUMN assigned_professor_id SET NULL",
-            "ALTER TABLE departments ADD COLUMN IF NOT EXISTS code VARCHAR(3) DEFAULT '101'",
             "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS help_level VARCHAR(20) DEFAULT 'SOME'",
             "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS exhibition_mode BOOLEAN DEFAULT FALSE",
             "ALTER TABLE questions ADD COLUMN IF NOT EXISTS is_thread_open BOOLEAN DEFAULT FALSE",
@@ -268,18 +267,16 @@ object DatabaseFactory {
         return false
     }
 
-    private val knownCollegeDigits = mapOf(
-        "인공지능융합대학" to 1,
-        "전자정보공과대학" to 2,
-        "공과대학" to 3,
-        "자연과학대학" to 4,
-        "인문사회과학대학" to 5,
-        "경영대학" to 6,
-        "정책법학대학" to 7,
-        "참빛인재대학" to 8
+    private val defaultCollegeNames = listOf(
+        "인공지능융합대학",
+        "전자정보공과대학",
+        "공과대학",
+        "자연과학대학",
+        "인문사회과학대학",
+        "경영대학",
+        "정책법학대학",
+        "참빛인재대학"
     )
-
-    private val validDeptCodeRegex = Regex("^[1-9](?:0[1-9]|[1-9]\\d)$")
 
     private val defaultCollegeAliases = listOf(
         "인공지능융합대학" to "소프트웨어융합대학"
@@ -343,24 +340,15 @@ object DatabaseFactory {
         }
     }
 
-    internal fun ensureCollegeExistsInternal(rawCollegeName: String, preferredDigit: Int? = null): String {
+    internal fun ensureCollegeExistsInternal(rawCollegeName: String): String {
         val cleanCollege = rawCollegeName.trim()
         if (cleanCollege.isBlank() || cleanCollege in specialCollegeScopes) return cleanCollege
         val resolved = resolveCollegeRow(cleanCollege)
         if (resolved != null) return resolved[CollegesTable.name]
 
-        val digit = preferredDigit
-            ?: knownCollegeDigits[cleanCollege]
-            ?: run {
-                val usedDigits = (knownCollegeDigits.values +
-                    CollegesTable.selectAll().mapNotNull { it[CollegesTable.codeDigit] }).toSet()
-                (1..9).firstOrNull { it !in usedDigits }
-            }
-
         CollegesTable.insert {
             it[id] = UUID.randomUUID()
             it[name] = cleanCollege
-            it[codeDigit] = digit
         }
         return cleanCollege
     }
@@ -392,17 +380,11 @@ object DatabaseFactory {
             }
         }
 
-        knownCollegeDigits.forEach { (collegeName, digit) ->
-            val existing = CollegesTable.select { CollegesTable.name eq collegeName }.singleOrNull()
-            if (existing == null) {
+        defaultCollegeNames.forEach { collegeName ->
+            if (CollegesTable.select { CollegesTable.name eq collegeName }.singleOrNull() == null) {
                 CollegesTable.insert {
                     it[id] = UUID.randomUUID()
                     it[name] = collegeName
-                    it[codeDigit] = digit
-                }
-            } else if (existing[CollegesTable.codeDigit] == null) {
-                CollegesTable.update({ CollegesTable.id eq existing[CollegesTable.id] }) {
-                    it[codeDigit] = digit
                 }
             }
         }
@@ -413,40 +395,6 @@ object DatabaseFactory {
                 ensureCollegeAliasInternal(colRow[CollegesTable.id].value, legacyAlias)
             }
         }
-    }
-
-    internal fun allocateDepartmentCodeForCollege(collegeName: String): String {
-        val cleanCollege = resolveCanonicalCollegeName(collegeName.trim().ifBlank { "광운대학교" })
-        val allRows = DepartmentsTable.selectAll().toList()
-
-        val collegeDigit = resolveCollegeRow(cleanCollege)?.get(CollegesTable.codeDigit)
-            ?: knownCollegeDigits[cleanCollege]
-            ?: allRows.firstOrNull {
-                it[DepartmentsTable.college] == cleanCollege &&
-                    validDeptCodeRegex.matches(it[DepartmentsTable.code])
-            }?.let { it[DepartmentsTable.code][0].digitToInt() }
-            ?: run {
-                val usedDigits = knownCollegeDigits.values.toMutableSet()
-                CollegesTable.selectAll().mapNotNull { it[CollegesTable.codeDigit] }.forEach { usedDigits.add(it) }
-                allRows.forEach { r ->
-                    val c = r[DepartmentsTable.code]
-                    if (validDeptCodeRegex.matches(c)) {
-                        usedDigits.add(c[0].digitToInt())
-                    }
-                }
-                (1..9).firstOrNull { it !in usedDigits } ?: 9
-            }
-
-        val usedIndices = allRows.mapNotNull { row ->
-            val c = row[DepartmentsTable.code]
-            if (validDeptCodeRegex.matches(c) && c[0].digitToInt() == collegeDigit) {
-                c.substring(1, 3).toIntOrNull()
-            } else {
-                null
-            }
-        }
-        val nextIdx = ((usedIndices.maxOrNull() ?: 0) + 1).coerceIn(1, 99)
-        return String.format("%d%02d", collegeDigit, nextIdx)
     }
 
     private val defaultDepartmentAliases = listOf(
@@ -525,37 +473,28 @@ object DatabaseFactory {
         }
 
         val initialDepartments = listOf(
-            Triple("101", "소프트웨어학부", "인공지능융합대학"),
-            Triple("102", "컴퓨터정보공학부", "인공지능융합대학"),
-            Triple("103", "정보융합학부", "인공지능융합대학"),
-            Triple("104", "로봇학부", "인공지능융합대학"),
-            Triple("201", "전자공학과", "전자정보공과대학"),
-            Triple("202", "전자통신공학과", "전자정보공과대학"),
-            Triple("203", "전자융합공학과", "전자정보공과대학"),
-            Triple("204", "전기공학과", "전자정보공과대학"),
-            Triple("205", "반도체시스템공학부", "전자정보공과대학"),
-            Triple("301", "화학공학과", "공과대학"),
-            Triple("302", "건축공학과", "공과대학"),
-            Triple("401", "수학교육과", "자연과학대학"),
-            Triple("501", "미디어커뮤니케이션학부", "인문사회과학대학"),
-            Triple("601", "경영학부", "경영대학")
+            "소프트웨어학부" to "인공지능융합대학",
+            "컴퓨터정보공학부" to "인공지능융합대학",
+            "정보융합학부" to "인공지능융합대학",
+            "로봇학부" to "인공지능융합대학",
+            "전자공학과" to "전자정보공과대학",
+            "전자통신공학과" to "전자정보공과대학",
+            "전자융합공학과" to "전자정보공과대학",
+            "전기공학과" to "전자정보공과대학",
+            "반도체시스템공학부" to "전자정보공과대학",
+            "화학공학과" to "공과대학",
+            "건축공학과" to "공과대학",
+            "수학교육과" to "자연과학대학",
+            "미디어커뮤니케이션학부" to "인문사회과학대학",
+            "경영학부" to "경영대학"
         )
-        initialDepartments.forEach { (deptCode, deptName, collegeName) ->
+        initialDepartments.forEach { (deptName, collegeName) ->
             val existing = DepartmentsTable.select { DepartmentsTable.name eq deptName }.singleOrNull()
             if (existing == null) {
                 DepartmentsTable.insert {
                     it[id] = UUID.randomUUID()
                     it[name] = deptName
-                    it[code] = deptCode
                     it[college] = collegeName
-                }
-            } else {
-                val curCode = existing[DepartmentsTable.code].trim()
-                if (!validDeptCodeRegex.matches(curCode) || curCode != deptCode) {
-                    DepartmentsTable.update({ DepartmentsTable.id eq existing[DepartmentsTable.id] }) {
-                        it[code] = deptCode
-                        it[college] = collegeName
-                    }
                 }
             }
         }
@@ -566,18 +505,6 @@ object DatabaseFactory {
                 ensureDepartmentAliasInternal(deptRow[DepartmentsTable.id].value, legacyAlias)
             }
         }
-
-        // Upgrade any remaining legacy 0xx department codes in existing DB rows to (collegeDigit)(deptIndex)
-        DepartmentsTable.selectAll()
-            .orderBy(DepartmentsTable.createdAt to SortOrder.ASC, DepartmentsTable.name to SortOrder.ASC)
-            .toList()
-            .filter { !validDeptCodeRegex.matches(it[DepartmentsTable.code].trim()) }
-            .forEach { legacyRow ->
-                val newCode = allocateDepartmentCodeForCollege(legacyRow[DepartmentsTable.college])
-                DepartmentsTable.update({ DepartmentsTable.id eq legacyRow[DepartmentsTable.id] }) {
-                    it[code] = newCode
-                }
-            }
     }
 
     private fun seedConvertedCoursesData() {
@@ -628,11 +555,9 @@ object DatabaseFactory {
                 if (cleanDept.isNotBlank() && cleanDept != "공통") {
                     if (resolveDepartmentRow(cleanDept) == null) {
                         val collegeName = cleanCollege.ifBlank { "광운대학교" }
-                        val assignedCode = allocateDepartmentCodeForCollege(collegeName)
                         DepartmentsTable.insert {
                             it[id] = UUID.randomUUID()
                             it[name] = cleanDept
-                            it[code] = assignedCode
                             it[college] = collegeName
                         }
                     }

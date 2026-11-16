@@ -1030,25 +1030,21 @@ class R3OverhaulTest {
         assertFalse(profSettingsRes.emailEnabled)
         assertNull(profSettingsRes.notificationEmail)
 
-        // 2. Department code rules (college 1..9 + dept 01..99) & 10-digit student ID allocation
+        // 2. Department catalog (without department/college code numbers) & 10-digit student ID rules: year(4) + (1..8)0(1..6) + serial(3)
         val deptList = client.get("/api/departments")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<List<DepartmentDto>>>().data!!
-        val deptCodeRegex = Regex("^[1-9](?:0[1-9]|[1-9]\\d)$")
-        assertTrue(deptList.isNotEmpty() && deptList.all { deptCodeRegex.matches(it.code) })
-        assertTrue(deptList.any { it.code == "101" })
-        assertTrue(deptList.any { it.code == "201" })
-        assertTrue(deptList.any { it.code == "301" })
-        assertTrue(deptList.any { it.code == "601" })
-        assertEquals("201", deptList.first { it.name == "전자공학과" }.code)
+        assertTrue(deptList.isNotEmpty() && deptList.any { it.name == "전자공학과" })
 
-        val nextDomesticPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=false")
+        val nextDomesticPreview = client.get("/api/auth/next-student-id?year=2029&isForeign=false")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertEquals("2029201001", nextDomesticPreview.studentId)
+        assertEquals("2029101001", nextDomesticPreview.studentId)
 
-        val nextForeignPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=true")
+        val nextForeignPreview = client.get("/api/auth/next-student-id?year=2029&isForeign=true")
+            .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertEquals("2029201501", nextForeignPreview.studentId)
+        assertEquals("2029101501", nextForeignPreview.studentId)
 
         val domStuAuth = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
@@ -1067,7 +1063,7 @@ class R3OverhaulTest {
             )
         }.also { assertEquals(HttpStatusCode.Created, it.status) }
             .body<ApiResponse<AuthResponse>>().data!!
-        assertEquals("2029201001", domStuAuth.user.identifier)
+        assertEquals("2029101001", domStuAuth.user.identifier)
 
         val forStuAuth = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
@@ -1086,24 +1082,27 @@ class R3OverhaulTest {
             )
         }.also { assertEquals(HttpStatusCode.Created, it.status) }
             .body<ApiResponse<AuthResponse>>().data!!
-        assertEquals("2029201501", forStuAuth.user.identifier)
+        assertEquals("2029101501", forStuAuth.user.identifier)
 
-        // Random generation skips already-used serials and respects domestic (001~500) / foreign (501~999) ranges
-        val randomDomesticPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=false&random=true")
+        // Random generation uses (1..8)0(1..6) middle digits and respects domestic (001~500) / foreign (501~999) ranges
+        val middleCodeRegex = Regex("^[1-8]0[1-6]$")
+        val randomDomesticPreview = client.get("/api/auth/next-student-id?year=2029&isForeign=false&random=true")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertTrue(randomDomesticPreview.studentId.startsWith("2029201"))
-        assertTrue(randomDomesticPreview.studentId != "2029201001")
+        assertTrue(randomDomesticPreview.studentId.startsWith("2029"))
+        assertTrue(middleCodeRegex.matches(randomDomesticPreview.studentId.substring(4, 7)))
+        assertTrue(randomDomesticPreview.studentId != "2029101001")
         assertTrue(randomDomesticPreview.studentId.takeLast(3).toInt() in 1..500)
 
-        val randomForeignPreview = client.get("/api/auth/next-student-id?year=2029&department=${java.net.URLEncoder.encode("전자공학과", "UTF-8")}&isForeign=true&random=true")
+        val randomForeignPreview = client.get("/api/auth/next-student-id?year=2029&isForeign=true&random=true")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertTrue(randomForeignPreview.studentId.startsWith("2029201"))
-        assertTrue(randomForeignPreview.studentId != "2029201501")
+        assertTrue(randomForeignPreview.studentId.startsWith("2029"))
+        assertTrue(middleCodeRegex.matches(randomForeignPreview.studentId.substring(4, 7)))
+        assertTrue(randomForeignPreview.studentId != "2029101501")
         assertTrue(randomForeignPreview.studentId.takeLast(3).toInt() in 501..999)
 
-        // Format-only department code validation: valid (1..9)(01..99) format accepted even if different from selected dept's code
+        // Format-only middle-digit validation: valid (1..8)0(1..6) format accepted regardless of department
         val crossDeptFormatRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(
@@ -1113,42 +1112,29 @@ class R3OverhaulTest {
                     password = "stupass1234",
                     name = "형식허용학생",
                     department = "전자공학과",
-                    identifier = "2029101001"
+                    identifier = "2029806001"
                 )
             )
         }
         assertEquals(HttpStatusCode.Created, crossDeptFormatRes.status)
 
-        // Invalid college digit (0) or invalid dept index (00) rejected by format validation
-        val invalidCollegeDigitRes = client.post("/api/auth/register") {
-            contentType(ContentType.Application.Json)
-            setBody(
-                RegisterRequest(
-                    role = UserRole.STUDENT,
-                    username = "bad_college_digit_stu",
-                    password = "stupass1234",
-                    name = "잘못된단과대",
-                    department = "전자공학과",
-                    identifier = "2029001001"
+        // Invalid middle digits rejected by (1..8) + 0 + (1..6) format validation
+        for ((suffixIdx, badId) in listOf("2029001001", "2029901001", "2029111001", "2029100001", "2029107001").withIndex()) {
+            val badIdRes = client.post("/api/auth/register") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    RegisterRequest(
+                        role = UserRole.STUDENT,
+                        username = "bad_middle_id_stu_$suffixIdx",
+                        password = "stupass1234",
+                        name = "잘못된학번$suffixIdx",
+                        department = "전자공학과",
+                        identifier = badId
+                    )
                 )
-            )
+            }
+            assertEquals(HttpStatusCode.BadRequest, badIdRes.status, "Expected 400 for invalid student ID $badId")
         }
-        assertEquals(HttpStatusCode.BadRequest, invalidCollegeDigitRes.status)
-
-        val invalidDeptIdxRes = client.post("/api/auth/register") {
-            contentType(ContentType.Application.Json)
-            setBody(
-                RegisterRequest(
-                    role = UserRole.STUDENT,
-                    username = "bad_dept_idx_stu",
-                    password = "stupass1234",
-                    name = "잘못된학과번호",
-                    department = "전자공학과",
-                    identifier = "2029100001"
-                )
-            )
-        }
-        assertEquals(HttpStatusCode.BadRequest, invalidDeptIdxRes.status)
 
         // 3. Admin mode + thread open/close + immutable sequence numbers
         val qRes = client.post("/api/questions") {
@@ -1778,30 +1764,20 @@ class R3OverhaulTest {
         }
         val suffix = (10000..99999).random()
 
-        // 1. Default seeded canonical department & alias (소프트웨어학과 -> 소프트웨어학부, 101)
+        // 1. Default seeded canonical department & alias (소프트웨어학과 -> 소프트웨어학부)
         val depts = client.get("/api/departments")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<List<DepartmentDto>>>().data!!
         val swDept = depts.firstOrNull { it.name == "소프트웨어학부" }
         assertNotNull(swDept, "Canonical 소프트웨어학부 should exist")
-        assertEquals("101", swDept.code)
         assertTrue("소프트웨어학과" in swDept.aliases, "소프트웨어학과 should be registered as an alias of 소프트웨어학부")
         assertFalse(depts.any { it.name == "소프트웨어학과" }, "Legacy alias should not duplicate canonical departments list")
 
         val csDept = depts.firstOrNull { it.name == "컴퓨터정보공학부" }
         assertNotNull(csDept)
-        assertEquals("102", csDept.code)
         assertTrue("컴퓨터공학과" in csDept.aliases)
 
-        // 2. Preview next-student-id with legacy alias resolves canonical deptCode 101
-        val legacyPreview = client.get(
-            "/api/auth/next-student-id?year=2035&department=${java.net.URLEncoder.encode("소프트웨어학과", "UTF-8")}"
-        ).also { assertEquals(HttpStatusCode.OK, it.status) }
-            .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertEquals("101", legacyPreview.departmentCode)
-        assertTrue(legacyPreview.studentId.startsWith("2035101"))
-
-        // 3. Registering a student with legacy alias normalizes to canonical department & enrolls in canonical courses
+        // 2. Registering a student with legacy alias normalizes to canonical department & enrolls in canonical courses
         val stuAuth = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(
@@ -1919,12 +1895,6 @@ class R3OverhaulTest {
             .body<ApiResponse<CourseListResponse>>().data!!
         assertTrue(customAliasCourses.courses.any { it.department == newDeptName })
 
-        val customAliasPreview = client.get(
-            "/api/auth/next-student-id?year=2035&department=${java.net.URLEncoder.encode(addedAlias, "UTF-8")}"
-        ).also { assertEquals(HttpStatusCode.OK, it.status) }
-            .body<ApiResponse<NextStudentIdResponse>>().data!!
-        assertEquals(createdDept.code, customAliasPreview.departmentCode)
-
         // Remove alias
         val afterRemove = client.delete(
             "/api/admin/departments/${createdDept.id}/aliases?alias=${java.net.URLEncoder.encode(addedAlias, "UTF-8")}"
@@ -1942,13 +1912,12 @@ class R3OverhaulTest {
         }
         val suffix = (10000..99999).random()
 
-        // 1. Default seeded college alias: 소프트웨어융합대학 -> 인공지능융합대학 (codeDigit 1)
+        // 1. Default seeded college alias: 소프트웨어융합대학 -> 인공지능융합대학
         val colleges = client.get("/api/colleges")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<List<CollegeDto>>>().data!!
         val aiCollege = colleges.firstOrNull { it.name == "인공지능융합대학" }
         assertNotNull(aiCollege)
-        assertEquals(1, aiCollege.codeDigit)
         assertTrue("소프트웨어융합대학" in aiCollege.aliases)
 
         val adminAuth = client.post("/api/auth/register") {
@@ -1998,7 +1967,7 @@ class R3OverhaulTest {
         val createdCol = client.post("/api/admin/colleges") {
             header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
             contentType(ContentType.Application.Json)
-            setBody(CreateCollegeRequest(name = oldColName, codeDigit = 9, aliases = listOf(colAlias1)))
+            setBody(CreateCollegeRequest(name = oldColName, aliases = listOf(colAlias1)))
         }.also { assertEquals(HttpStatusCode.Created, it.status) }
             .body<ApiResponse<CollegeDto>>().data!!
         assertEquals(listOf(colAlias1), createdCol.aliases)
@@ -2010,7 +1979,6 @@ class R3OverhaulTest {
         }.also { assertEquals(HttpStatusCode.Created, it.status) }
             .body<ApiResponse<DepartmentDto>>().data!!
         assertEquals(oldColName, deptInNewCol.college)
-        assertTrue(deptInNewCol.code.startsWith("9"))
 
         client.post("/api/admin/courses") {
             header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
@@ -2086,13 +2054,13 @@ class R3OverhaulTest {
         assertEquals(newDeptName, updatedProfMe.department)
         assertTrue(updatedProfMe.displayTag.startsWith(newDeptName), "Expected displayTag updated to $newDeptName: ${updatedProfMe.displayTag}")
 
-        // 4. Guardrails: reserved scope names & duplicate college codeDigit rejected (400)
+        // 4. Guardrails: reserved scope names & duplicate college names rejected (400)
         assertEquals(
             HttpStatusCode.BadRequest,
             client.post("/api/admin/colleges") {
                 header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
                 contentType(ContentType.Application.Json)
-                setBody(CreateCollegeRequest(name = "전체", codeDigit = 9))
+                setBody(CreateCollegeRequest(name = "전체"))
             }.status
         )
         assertEquals(
@@ -2100,7 +2068,7 @@ class R3OverhaulTest {
             client.post("/api/admin/colleges") {
                 header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
                 contentType(ContentType.Application.Json)
-                setBody(CreateCollegeRequest(name = "중복코드단과대_$suffix", codeDigit = 1))
+                setBody(CreateCollegeRequest(name = "공과대학"))
             }.status
         )
         assertEquals(
