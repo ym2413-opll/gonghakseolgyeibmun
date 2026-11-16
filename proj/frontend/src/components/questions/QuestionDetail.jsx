@@ -304,32 +304,14 @@ const QuestionDetail = ({
 
   const validSeqSet = new Set([1]);
   const imagesBySeq = new Map();
-  const opImages = getImageAttachments(question.attachments);
-  imagesBySeq.set(1, opImages);
-  const threadPhotoRefs = opImages.map((att, idx) => ({
-    key: `1-${att.id || idx}`,
-    seq: 1,
-    photoNum: idx + 1,
-    tag: `[#1 사진 ${idx + 1}]`,
-    name: att.originalName || `사진 ${idx + 1}`
-  }));
+  imagesBySeq.set(1, getImageAttachments(question.attachments));
 
   let maxSeq = Number(question.lastSequenceNumber || 1);
   answers.forEach((ans, idx) => {
     const seq = Number(ans.sequenceNumber || idx + 2);
     validSeqSet.add(seq);
     if (seq > maxSeq) maxSeq = seq;
-    const ansImages = getImageAttachments(ans.attachments);
-    imagesBySeq.set(seq, ansImages);
-    ansImages.forEach((att, imgIdx) => {
-      threadPhotoRefs.push({
-        key: `${seq}-${att.id || imgIdx}`,
-        seq,
-        photoNum: imgIdx + 1,
-        tag: `[#${seq} 사진 ${imgIdx + 1}]`,
-        name: att.originalName || `사진 ${imgIdx + 1}`
-      });
-    });
+    imagesBySeq.set(seq, getImageAttachments(ans.attachments));
   });
   const nextSequenceNumber = maxSeq + 1;
 
@@ -1112,7 +1094,7 @@ const QuestionDetail = ({
               ref={followUpTextareaRef}
               className={`answer-textarea ${hasFollowUpAiRefined ? 'has-refined-border' : ''}`}
               rows={3}
-              placeholder="추가 질문을 입력하세요. (예: #2의 설명 중 [#1 사진 1] 부분을 다시 여쭙고 싶습니다.)"
+              placeholder="추가 질문을 입력하세요."
               value={followUpText}
               onChange={(e) => {
                 setFollowUpText(e.target.value);
@@ -1120,32 +1102,6 @@ const QuestionDetail = ({
               }}
               required
             />
-            {threadPhotoRefs.length > 0 && (
-              <div className="composer-photo-quickbar">
-                <span className="composer-quick-label">이전 글 사진 인용:</span>
-                {threadPhotoRefs.map((refItem) => (
-                  <button
-                    type="button"
-                    key={refItem.key}
-                    className="photo-insert-btn"
-                    title={`${refItem.tag} (${refItem.name}) 삽입`}
-                    onClick={() =>
-                      insertSnippetAtCursor(
-                        followUpTextareaRef,
-                        followUpText,
-                        setFollowUpText,
-                        refItem.tag,
-                        () => {
-                          if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
-                        }
-                      )
-                    }
-                  >
-                    {refItem.tag} 삽입
-                  </button>
-                ))}
-              </div>
-            )}
             <AttachmentUploader
               attachments={followUpAttachments}
               onChangeAttachments={setFollowUpAttachments}
@@ -1251,34 +1207,11 @@ const QuestionDetail = ({
                 ref={answerTextareaRef}
                 className="answer-textarea"
                 rows={4}
-                placeholder="답변을 입력하세요. (예: [#1 사진 1] 참고, 또는 첨부한 이미지를 [사진 1]로 삽입)"
+                placeholder="답변을 입력하세요."
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
                 required
               />
-              {threadPhotoRefs.length > 0 && (
-                <div className="composer-photo-quickbar">
-                  <span className="composer-quick-label">이전 글 사진 인용:</span>
-                  {threadPhotoRefs.map((refItem) => (
-                    <button
-                      type="button"
-                      key={refItem.key}
-                      className="photo-insert-btn"
-                      title={`${refItem.tag} (${refItem.name}) 삽입`}
-                      onClick={() =>
-                        insertSnippetAtCursor(
-                          answerTextareaRef,
-                          answerText,
-                          setAnswerText,
-                          refItem.tag
-                        )
-                      }
-                    >
-                      {refItem.tag} 삽입
-                    </button>
-                  ))}
-                </div>
-              )}
               <AttachmentUploader
                 attachments={answerAttachments}
                 onChangeAttachments={setAnswerAttachments}
