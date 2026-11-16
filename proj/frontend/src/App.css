@@ -8340,6 +8340,28 @@ body,
   max-width: 100%;
 }
 
+/* 헤더/툴바 등 좁은 가로 배치 영역에서는 재열기(?) 버튼을 옆이 아니라 밑으로 배치 */
+.help-bubble-host {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.help-bubble-host.is-collapsed {
+  justify-content: flex-start;
+}
+
+.help-bubble-reopen-btn {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.help-bubble-floating.no-arrow::before {
+  display: none;
+}
+
 .help-bubble-callout,
 .help-bubble-inline {
   max-width: 100%;
@@ -8355,4 +8377,12 @@ body,
 .help-bubble-reopen-pill {
   max-width: 100%;
   white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .help-bubble-floating {
+    max-width: min(250px, calc(100vw - 20px));
+    padding: 7px 10px;
+    font-size: 0.77rem;
+  }
 }

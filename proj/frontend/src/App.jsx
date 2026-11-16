@@ -17,7 +17,6 @@ import SettingsModal from './components/common/SettingsModal';
 import NotificationSettingsModal from './components/professor/NotificationSettingsModal';
 import AdminModal from './components/admin/AdminModal';
 import HelpOnboardingModal from './components/common/HelpOnboardingModal';
-import HelpBubble from './components/common/HelpBubble';
 import { api } from './services/api';
 import './App.css';
 
@@ -336,18 +335,6 @@ function MainApp() {
             }`}
             aria-hidden={!isAuthenticated}
           >
-            {isAuthenticated && (
-              <HelpBubble
-                tier="SOME"
-                mode="inline"
-                text={
-                  isProfessor
-                    ? '상단 메뉴에서 방해금지·이메일 알림, 테마·글자 크기·도움말 설정, 알림 센터를 이용할 수 있어요.'
-                    : '상단 메뉴에서 테마·글자 크기·도움말 설정과 알림 센터를 이용할 수 있어요.'
-                }
-                className="mb-help-bubble"
-              />
-            )}
             {currentView === 'new' && isAuthenticated && isStudent ? (
               <QuestionForm
                 onQuestionCreated={handleQuestionCreated}
