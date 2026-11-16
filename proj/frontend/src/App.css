@@ -7286,10 +7286,14 @@ html[data-theme="green-dark"] .image-viewer-modal-box {
 
 .help-bubble-floating {
   position: fixed;
-  z-index: 450;
+  z-index: 80;
   width: max-content;
   max-width: min(255px, calc(100vw - 24px));
   box-sizing: border-box;
+}
+
+.help-bubble-floating.in-header {
+  z-index: 130;
 }
 
 .help-bubble-floating::before {

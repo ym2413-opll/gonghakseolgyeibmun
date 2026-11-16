@@ -2,6 +2,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle, X } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
 /**
@@ -18,6 +19,7 @@ const HelpBubble = ({
   className = '',
   children
 }) => {
+  const { isAuthenticated } = useAuth();
   const { helpLevel } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [floatingPos, setFloatingPos] = useState(null);
@@ -30,6 +32,7 @@ const HelpBubble = ({
   }, [helpLevel]);
 
   const shouldShow =
+    isAuthenticated &&
     Boolean(text) &&
     (helpLevel === 'ALL' || (helpLevel === 'SOME' && tier === 'SOME'));
 
@@ -89,6 +92,7 @@ const HelpBubble = ({
       left: Math.round(clampedLeft),
       arrowLeft: Math.round(arrowLeft),
       isFlippedTop,
+      inHeader,
       visible: true
     });
   }, [shouldShow, collapsed, mode, placement]);
@@ -126,8 +130,8 @@ const HelpBubble = ({
             <div
               ref={bubbleRef}
               className={`help-bubble-callout help-bubble-floating ${
-                floatingPos?.isFlippedTop ? 'flipped-top' : ''
-              }`}
+                floatingPos?.inHeader ? 'in-header' : ''
+              } ${floatingPos?.isFlippedTop ? 'flipped-top' : ''}`}
               style={{
                 position: 'fixed',
                 top: floatingPos ? `${floatingPos.top}px` : '-9999px',
