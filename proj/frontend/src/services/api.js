@@ -919,7 +919,7 @@ export const api = {
           const body = await res.json();
           const payload = body?.data || body;
           const list = Array.isArray(payload) ? payload : payload?.courses;
-          if (Array.isArray(list) && list.length > 0) {
+          if (Array.isArray(list)) {
             const mapped = list.map(mapCourseDto);
             safeSetStorage(STORAGE_KEY_COURSES, mapped);
             return mapped;

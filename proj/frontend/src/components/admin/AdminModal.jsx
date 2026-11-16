@@ -25,7 +25,8 @@ import {
   Trash2,
   Sparkles,
   Check,
-  Pencil
+  Pencil,
+  Search
 } from 'lucide-react';
 
 const CatalogChipList = ({
@@ -1067,12 +1068,39 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
                 {(() => {
                   const trimmedQ = courseSearchQuery.trim().toLowerCase();
+                  const aliasMatchedDepts = new Set(
+                    trimmedQ
+                      ? departments
+                          .filter((d) =>
+                            Array.isArray(d.aliases) &&
+                            d.aliases.some((al) => String(al).toLowerCase().includes(trimmedQ))
+                          )
+                          .map((d) => d.name)
+                      : []
+                  );
+                  const aliasMatchedColleges = new Set(
+                    trimmedQ
+                      ? colleges
+                          .filter((col) =>
+                            Array.isArray(col.aliases) &&
+                            col.aliases.some((al) => String(al).toLowerCase().includes(trimmedQ))
+                          )
+                          .map((col) => col.name)
+                      : []
+                  );
                   const filteredCourses = trimmedQ
                     ? allCourses.filter((c) => {
                         const profNames = (c.professors || []).map((p) => p.name || '').join(' ');
-                        return [c.name, c.code, c.department, c.college, c.profName, profNames]
+                        const directMatch = [c.name, c.code, c.department, c.college, c.profName, profNames]
                           .filter(Boolean)
                           .some((field) => String(field).toLowerCase().includes(trimmedQ));
+                        if (directMatch) return true;
+                        if (c.department && aliasMatchedDepts.has(c.department)) return true;
+                        if (c.college && aliasMatchedColleges.has(c.college)) return true;
+                        return Boolean(
+                          c.department &&
+                            Array.from(aliasMatchedColleges).some((col) => c.department === `${col} 전체`)
+                        );
                       })
                     : allCourses;
                   const visibleCourses = filteredCourses.slice(0, courseListLimit);
@@ -1083,16 +1111,33 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       <div className="admin-chip-header">
                         등록된 교과목 ({allCourses.length}개{trimmedQ ? ` · 검색 결과 ${filteredCourses.length}개` : ''}) · 연필/휴지통으로 수정·삭제
                       </div>
-                      <input
-                        type="search"
-                        className="form-input admin-course-search-input"
-                        placeholder="과목명 · 학수번호 · 학과 · 교수명 검색..."
-                        value={courseSearchQuery}
-                        onChange={(e) => {
-                          setCourseSearchQuery(e.target.value);
-                          setCourseListLimit(24);
-                        }}
-                      />
+                      <div className="admin-course-search-box">
+                        <Search size={14} className="admin-course-search-icon" aria-hidden="true" />
+                        <input
+                          type="search"
+                          className="form-input admin-course-search-input"
+                          placeholder="과목명 · 학수번호 · 학과(별칭) · 교수명 검색..."
+                          aria-label="등록된 교과목 검색"
+                          value={courseSearchQuery}
+                          onChange={(e) => {
+                            setCourseSearchQuery(e.target.value);
+                            setCourseListLimit(24);
+                          }}
+                        />
+                        {courseSearchQuery && (
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-xs"
+                            onClick={() => {
+                              setCourseSearchQuery('');
+                              setCourseListLimit(24);
+                            }}
+                            aria-label="교과목 검색어 지우기"
+                          >
+                            초기화
+                          </button>
+                        )}
+                      </div>
 
                       {editingCourse && (
                         <form onSubmit={handleSaveEditedCourse} className="admin-compact-form admin-inline-edit-box">
@@ -1157,9 +1202,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                               onChangeDepartment={(val) => setEditingCourse((prev) => ({ ...prev, department: val }))}
                             />
                           </div>
-                          <div style={{ display: 'flex', gap: '8px' }}>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <button type="submit" className="btn btn-primary btn-xs">저장</button>
                             <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingCourse(null)}>취소</button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-xs"
+                              style={{ marginLeft: 'auto' }}
+                              onClick={() => handleDeleteCourse(editingCourse)}
+                            >
+                              <Trash2 size={12} /> 삭제
+                            </button>
                           </div>
                         </form>
                       )}

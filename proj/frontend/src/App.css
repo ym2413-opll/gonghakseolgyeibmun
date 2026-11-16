@@ -5316,8 +5316,21 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
   font-weight: 600;
 }
 
-.admin-course-search-input {
+.admin-course-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 8px;
+}
+
+.admin-course-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.admin-course-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 6px 10px;
   font-size: 0.8rem;
 }
