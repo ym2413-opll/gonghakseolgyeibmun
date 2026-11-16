@@ -270,11 +270,12 @@ const AuthGateOverlay = () => {
                   <label className="form-label" htmlFor="reg-student-id">
                     학번 *
                   </label>
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     <input
                       id="reg-student-id"
                       type="text"
                       className="form-input"
+                      style={{ flex: '1 1 150px', minWidth: 0 }}
                       placeholder="예: 2026101001"
                       value={studentId}
                       onChange={(e) => setStudentId(e.target.value)}
@@ -412,12 +413,12 @@ const AuthGateOverlay = () => {
                   <label className="form-label" htmlFor="reg-entry-year">
                     입학년도 · 구분
                   </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
                       id="reg-entry-year"
                       type="number"
                       className="form-input"
-                      style={{ width: '92px' }}
+                      style={{ width: '92px', maxWidth: '100%' }}
                       min={1990}
                       max={2099}
                       value={entryYear}
