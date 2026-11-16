@@ -12,6 +12,7 @@ import {
 import { calculateSimilarQuestions } from '../utils/wordSimilarity';
 import { generateSummaryTitle } from '../utils/textSummary';
 import { clearBrowserPushSubscription } from '../utils/browserNotification';
+import { sanitizeAnonymousStudentText } from '../utils/anonymize';
 
 const STORAGE_KEY_QUESTIONS = 'prof_qa_questions_v3';
 const STORAGE_KEY_SETTINGS = 'prof_qa_settings_v3';
@@ -122,18 +123,26 @@ function stripAiZeroWidthAndControl(value) {
 
 function replaceAiPlaceholders(
   text,
-  { profGreeting = '교수님', studentTag = '수강생', studentInfo = {}, courseName = '' } = {}
+  {
+    profGreeting = '교수님',
+    studentTag = '수강생',
+    studentInfo = {},
+    courseName = '',
+    isAnonymous = false,
+    anonymizeUser = null,
+    professorNames = []
+  } = {}
 ) {
   if (!text) return '';
   const cleanProf = stripAiZeroWidthAndControl(profGreeting).trim() || '교수님';
-  const cleanTag = stripAiZeroWidthAndControl(studentTag).trim() || '수강생';
-  const studentName = stripAiZeroWidthAndControl(studentInfo?.name || '').trim() || '학생';
-  const studentId = stripAiZeroWidthAndControl(studentInfo?.studentId || studentInfo?.identifier || '').trim();
-  const studentDept = stripAiZeroWidthAndControl(studentInfo?.department || '').trim();
+  const cleanTag = isAnonymous ? '학생' : (stripAiZeroWidthAndControl(studentTag).trim() || '수강생');
+  const studentName = isAnonymous ? '학생' : (stripAiZeroWidthAndControl(studentInfo?.name || '').trim() || '학생');
+  const studentId = isAnonymous ? '' : stripAiZeroWidthAndControl(studentInfo?.studentId || studentInfo?.identifier || '').trim();
+  const studentDept = isAnonymous ? '' : stripAiZeroWidthAndControl(studentInfo?.department || '').trim();
   const courseDisplay = stripAiZeroWidthAndControl(courseName || '').trim() || '이번 학기 강의';
 
   // Single-pass simultaneous replacement prevents second-order placeholder expansion
-  return stripAiZeroWidthAndControl(text)
+  let replaced = stripAiZeroWidthAndControl(text)
     .replace(
       COMBINED_AI_PLACEHOLDER_REGEX,
       (match, profHit, studentBeforeProfHit, introHit, nameHit, idHit, deptHit, courseHit, piiHit) => {
@@ -143,7 +152,7 @@ function replaceAiPlaceholders(
         if (idHit) return studentId;
         if (deptHit) return studentDept;
         if (courseHit) return courseDisplay;
-        if (piiHit) return '';
+        if (piiHit) return isAnonymous ? '' : match;
         return match;
       }
     )
@@ -151,6 +160,13 @@ function replaceAiPlaceholders(
     .replace(/교수님님/g, '교수님')
     .replace(/ {2,}/g, ' ')
     .trim();
+
+  if (isAnonymous) {
+    replaced = sanitizeAnonymousStudentText(replaced, anonymizeUser || studentInfo, {
+      professorNames: [cleanProf, ...professorNames]
+    });
+  }
+  return replaced;
 }
 
 function getAuthHeaders() {
@@ -2240,10 +2256,10 @@ export const api = {
   },
 
   async createQuestion(questionData) {
-    const summaryTitle = questionData.title?.trim() || generateSummaryTitle(questionData.content);
+    const rawTitle = questionData.title?.trim() || generateSummaryTitle(questionData.content);
     const questionPayload = {
       ...questionData,
-      title: summaryTitle
+      title: rawTitle
     };
     const uid = getCurrentUserId(questionData.studentId);
 
@@ -2286,6 +2302,24 @@ export const api = {
       throw new Error(`현재 질문 작성 제한 상태입니다. (해제 일시: ${sessionUser.questionBanUntil})`);
     }
 
+    const sanitizedPayload = questionPayload.isAnonymous
+      ? {
+          ...questionPayload,
+          title: sanitizeAnonymousStudentText(questionPayload.title, sessionUser, {
+            professorNames: [questionPayload.profName]
+          }),
+          content: sanitizeAnonymousStudentText(questionPayload.content, sessionUser, {
+            professorNames: [questionPayload.profName]
+          }),
+          originalContent: sanitizeAnonymousStudentText(
+            questionPayload.originalContent || questionPayload.content,
+            sessionUser,
+            { professorNames: [questionPayload.profName] }
+          )
+        }
+      : questionPayload;
+    const summaryTitle = sanitizedPayload.title || generateSummaryTitle(sanitizedPayload.content);
+
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
     const newQuestion = {
       id: `q-${Date.now()}`,
@@ -2295,7 +2329,8 @@ export const api = {
       realStudentName: sessionUser?.name || questionData.studentName,
       realStudentTag: sessionUser?.displayTag || questionData.studentTag,
       realStudentIdentifier: sessionUser?.identifier || '',
-      ...questionPayload
+      ...sanitizedPayload,
+      title: summaryTitle
     };
     questions.unshift(newQuestion);
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
@@ -2362,12 +2397,25 @@ export const api = {
     const index = questions.findIndex(q => q.id === questionId);
     if (index === -1) throw new Error('질문을 찾을 수 없습니다.');
 
+    const targetQ = questions[index];
+    const effectiveAnon =
+      updatedData.isAnonymous !== undefined ? Boolean(updatedData.isAnonymous) : Boolean(targetQ.isAnonymous);
+    const sessionUser = this.getCurrentSessionUser();
+    const profNames = [targetQ.profName, targetQ.assignedProfessorName].filter(Boolean);
+
     const updated = {
-      ...questions[index],
+      ...targetQ,
       ...updatedData,
+      isAnonymous: effectiveAnon,
       isEdited: true,
       updatedAt: new Date().toISOString()
     };
+    if (effectiveAnon && sessionUser) {
+      if (updated.title) updated.title = sanitizeAnonymousStudentText(updated.title, sessionUser, { professorNames: profNames });
+      if (updated.content) updated.content = sanitizeAnonymousStudentText(updated.content, sessionUser, { professorNames: profNames });
+      if (updated.originalContent) updated.originalContent = sanitizeAnonymousStudentText(updated.originalContent, sessionUser, { professorNames: profNames });
+      if (updated.refinedContent) updated.refinedContent = sanitizeAnonymousStudentText(updated.refinedContent, sessionUser, { professorNames: profNames });
+    }
     questions[index] = updated;
     safeSetStorage(STORAGE_KEY_QUESTIONS, questions);
     return updated;
@@ -2520,8 +2568,15 @@ export const api = {
       throw new Error('질문을 작성한 학생 본인만 추가 질문을 남길 수 있습니다.');
     }
 
-    const trimmedContent = (followUpData?.content || '').trim();
-    const trimmedOriginal = (followUpData?.originalContent || '').trim() || trimmedContent;
+    const rawContent = (followUpData?.content || '').trim();
+    const rawOriginal = (followUpData?.originalContent || '').trim() || rawContent;
+    const profNames = [targetQ.profName, targetQ.assignedProfessorName].filter(Boolean);
+    const trimmedContent = targetQ.isAnonymous
+      ? sanitizeAnonymousStudentText(rawContent, sessionUser, { professorNames: profNames })
+      : rawContent;
+    const trimmedOriginal = targetQ.isAnonymous
+      ? sanitizeAnonymousStudentText(rawOriginal, sessionUser, { professorNames: profNames })
+      : rawOriginal;
     const nextSeq = Math.max(targetQ.lastSequenceNumber || 1, 1) + 1;
     const newFollowUp = {
       id: `followup-${Date.now()}`,
@@ -2629,10 +2684,23 @@ export const api = {
       if (rawProfName.endsWith('교수')) return `${rawProfName}님`;
       return `${rawProfName} 교수님`;
     })();
-    const studentTag = studentInfo.name
-      ? `${studentInfo.department || '학부'} ${studentInfo.studentId || ''} ${studentInfo.name}`.replace(/\s+/g, ' ').trim()
-      : '수강생';
-    const placeholderCtx = { profGreeting, studentTag, studentInfo, courseName };
+    const isAnonymous = Boolean(courseContext?.isAnonymous);
+    const effectiveStudentInfo = isAnonymous ? {} : studentInfo;
+    const sessionUser = safeGetStorage(STORAGE_KEY_SESSION, null);
+    const studentTag = isAnonymous
+      ? '학생'
+      : (effectiveStudentInfo.name
+          ? `${effectiveStudentInfo.department || '학부'} ${effectiveStudentInfo.studentId || ''} ${effectiveStudentInfo.name}`.replace(/\s+/g, ' ').trim()
+          : '수강생');
+    const placeholderCtx = {
+      profGreeting,
+      studentTag,
+      studentInfo: effectiveStudentInfo,
+      courseName,
+      isAnonymous,
+      anonymizeUser: sessionUser || studentInfo,
+      professorNames: rawProfName ? [rawProfName] : []
+    };
 
     if (USE_REMOTE_BACKEND) {
       try {
@@ -2649,12 +2717,13 @@ export const api = {
             rawTitle: rawTitle,
             courseName: courseName || null,
             professorName: rawProfName || null,
-            studentName: studentInfo?.name || null,
-            studentDepartment: studentInfo?.department || null,
-            studentIdentifier: studentInfo?.studentId || studentInfo?.identifier || null,
+            studentName: isAnonymous ? null : (effectiveStudentInfo?.name || null),
+            studentDepartment: isAnonymous ? null : (effectiveStudentInfo?.department || null),
+            studentIdentifier: isAnonymous ? null : (effectiveStudentInfo?.studentId || effectiveStudentInfo?.identifier || null),
             category,
-            studentInfo,
+            studentInfo: effectiveStudentInfo,
             isFollowUp: Boolean(courseContext?.isFollowUp),
+            isAnonymous,
             previousAnswer: courseContext?.previousAnswer || null
           }),
           signal: controller.signal

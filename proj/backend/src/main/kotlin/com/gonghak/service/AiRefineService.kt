@@ -113,6 +113,9 @@ class AiRefineService(
         studentName: String? = null,
         studentDepartment: String? = null,
         studentIdentifier: String? = null,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList(),
+        isAnonymous: Boolean = false,
         isFollowUp: Boolean = false,
         previousAnswer: String? = null
     ): RefinedResult {
@@ -132,6 +135,9 @@ class AiRefineService(
                             studentName = studentName,
                             studentDepartment = studentDepartment,
                             studentIdentifier = studentIdentifier,
+                            studentEmail = studentEmail,
+                            studentDepartmentAliases = studentDepartmentAliases,
+                            isAnonymous = isAnonymous,
                             isFollowUp = isFollowUp,
                             previousAnswer = previousAnswer
                         )
@@ -153,6 +159,9 @@ class AiRefineService(
                 studentName = studentName,
                 studentDepartment = studentDepartment,
                 studentIdentifier = studentIdentifier,
+                studentEmail = studentEmail,
+                studentDepartmentAliases = studentDepartmentAliases,
+                isAnonymous = isAnonymous,
                 isFollowUp = isFollowUp,
                 previousAnswer = previousAnswer
             )
@@ -286,6 +295,8 @@ class AiRefineService(
         studentName: String? = null,
         studentDepartment: String? = null,
         studentIdentifier: String? = null,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList(),
         courseName: String? = null
     ): MaskedPromptInput {
         val dynamicTokens = linkedMapOf<String, String>()
@@ -318,9 +329,13 @@ class AiRefineService(
             }
         }.distinct().sortedByDescending { it.length }
 
-        val cleanDept = studentDepartment?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
+        val cleanDeptVariants = (listOfNotNull(studentDepartment) + studentDepartmentAliases)
+            .mapNotNull { stripZeroWidthAndControl(it).trim().takeIf { d -> d.length >= 2 } }
+            .distinct()
+            .sortedByDescending { it.length }
         val cleanId = studentIdentifier?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
         val cleanName = studentName?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
+        val cleanEmail = studentEmail?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.isNotBlank() }
 
         fun maskPiiOnePass(text: String): String {
             return transformOutsideValidPlaceholders(text) { segment ->
@@ -328,8 +343,11 @@ class AiRefineService(
                 profVariants.forEach { variant ->
                     masked = masked.replace(variant, PLACEHOLDER_PROFESSOR_TITLE)
                 }
-                if (cleanDept != null) {
-                    masked = masked.replace(cleanDept, PLACEHOLDER_STUDENT_DEPT)
+                if (cleanEmail != null && masked.contains(cleanEmail)) {
+                    masked = masked.replace(cleanEmail, allocToken("EMAIL", cleanEmail))
+                }
+                cleanDeptVariants.forEach { dept ->
+                    masked = masked.replace(dept, PLACEHOLDER_STUDENT_DEPT)
                 }
                 if (cleanId != null) {
                     masked = masked.replace(cleanId, PLACEHOLDER_STUDENT_ID)
@@ -374,7 +392,8 @@ class AiRefineService(
         masked: MaskedPromptInput,
         courseName: String? = null,
         category: QuestionCategory? = null,
-        isFollowUp: Boolean = false
+        isFollowUp: Boolean = false,
+        isAnonymous: Boolean = false
     ): String {
         val categoryDesc = when (category) {
             QuestionCategory.GRADE -> "성적 및 평가 관련 문의"
@@ -393,6 +412,12 @@ class AiRefineService(
             .trim()
             .ifBlank { if (isFollowUp) "추가 질문 내용" else "수업 관련 질문" }
 
+        val anonInstruction = if (isAnonymous) {
+            "- 익명 모드: 작성자(학생)의 실명, 학번, 소속 학과/단과대, 연락처, 이메일 등 어떠한 신상·식별 정보도 절대 포함하지 마세요. 자기소개 자리에는 반드시 $PLACEHOLDER_STUDENT_INTRO 만 사용하세요.\n"
+        } else {
+            ""
+        }
+
         val built = if (isFollowUp) {
             val prevSnippet = masked.previousAnswer
                 ?.let { escapePromptSegmentMultiPass(it, singleLine = false) }
@@ -409,7 +434,7 @@ class AiRefineService(
             2. 이미 진행 중인 질문 스레드의 후속 질문이므로, 첫인사는 "${PLACEHOLDER_PROFESSOR_TITLE}, 정성스러운 답변 감사합니다." 등으로 간결히 이어가고 불필요한 긴 자기소개는 줄이세요.
             3. 개인정보 보호를 위해 교수님 호칭 자리에는 반드시 $PLACEHOLDER_PROFESSOR_TITLE 플레이스홀더를 철자 그대로(변형·삭제 금지) 넣어 작성하고, 뒤에 '교수님'이나 '님'을 중복 추가하지 마세요.
             4. 원문에 포함된 {{...}} 형태의 플레이스홀더($PLACEHOLDER_STUDENT_NAME, $PLACEHOLDER_STUDENT_ID, $PLACEHOLDER_STUDENT_DEPT, {{PII_...}} 등)가 있다면 임의로 변형·삭제하지 말고 문맥에 맞게 유지하세요.
-            5. 반드시 아래 JSON 형식으로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 문자열만 출력):
+            ${anonInstruction}5. 반드시 아래 JSON 형식으로만 응답하세요 (마크다운 코드블록 없이 순수 JSON 문자열만 출력):
             {
               "title": "윤색된 추가 질문 제목",
               "content": "윤색된 추가 질문 본문"
@@ -444,7 +469,7 @@ class AiRefineService(
                - 중요: 개인정보 보호를 위해 실제 교수님 성함 대신 반드시 $PLACEHOLDER_PROFESSOR_TITLE 플레이스홀더를 철자 그대로 사용하고, 뒤에 '교수님'이나 '님'을 덧붙이지 마세요.
             4. 학생 본인 소개 문장은 반드시 $PLACEHOLDER_STUDENT_INTRO 플레이스홀더를 사용하여 "... 강의를 수강 중인 ${PLACEHOLDER_STUDENT_INTRO}입니다." 형식으로 자연스럽게 작성하세요. 아래 'course_name' 정보도 자연스럽게 반영하세요.
                - 원문에 포함된 {{...}} 형태의 플레이스홀더($PLACEHOLDER_STUDENT_NAME, $PLACEHOLDER_STUDENT_ID, $PLACEHOLDER_STUDENT_DEPT, {{PII_...}} 등)가 있다면 임의로 변형·삭제하지 말고 문맥에 맞게 유지하세요.
-            5. 반드시 아래 JSON 형식으로만 응답하세요 (마크다운 코드블록이나 백틱 없이 순수 JSON 문자열만 출력):
+            ${anonInstruction}5. 반드시 아래 JSON 형식으로만 응답하세요 (마크다운 코드블록이나 백틱 없이 순수 JSON 문자열만 출력):
             {
               "title": "윤색된 제목",
               "content": "윤색된 본문 내용"
@@ -573,19 +598,140 @@ class AiRefineService(
         )
     }
 
+    fun redactAuthorIdentityForAnonymous(
+        text: String,
+        studentName: String? = null,
+        studentDepartment: String? = null,
+        studentIdentifier: String? = null,
+        studentDisplayTag: String? = null,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList(),
+        professorNames: Collection<String> = emptyList()
+    ): String {
+        if (text.isBlank()) return text
+        var result = stripZeroWidthAndControl(text)
+
+        val cleanName = studentName?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
+        val cleanDeptVariants = (listOfNotNull(studentDepartment) + studentDepartmentAliases)
+            .mapNotNull { stripZeroWidthAndControl(it).trim().takeIf { d -> d.length >= 2 } }
+            .distinct()
+            .sortedByDescending { it.length }
+        val cleanId = studentIdentifier?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
+        val cleanTag = studentDisplayTag?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.length >= 2 }
+        val cleanEmail = studentEmail?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.isNotBlank() }
+
+        val profTokens = professorNames
+            .mapNotNull { raw ->
+                val t = stripZeroWidthAndControl(raw).trim()
+                t.takeIf { it.length >= 2 }
+            }
+            .flatMap { t ->
+                val root = t.removeSuffix("님").removeSuffix("교수").trim()
+                listOfNotNull(t, root.takeIf { it.length >= 2 })
+            }
+            .toSet()
+
+        val compoundIntros = buildList {
+            cleanDeptVariants.forEach { dept ->
+                if (cleanId != null && cleanName != null) {
+                    add("$dept $cleanId $cleanName")
+                    add("$dept $cleanId ($cleanName)")
+                    add("$dept ($cleanId) $cleanName")
+                }
+                if (cleanName != null) {
+                    add("$dept $cleanName")
+                }
+                if (cleanId != null) {
+                    add("$dept $cleanId")
+                    add("$dept($cleanId)")
+                    add("$dept ($cleanId)")
+                }
+            }
+            if (cleanId != null && cleanName != null) {
+                add("$cleanId $cleanName")
+                add("$cleanName($cleanId)")
+                add("$cleanName ($cleanId)")
+            }
+            if (cleanTag != null && cleanTag != cleanName) {
+                add(cleanTag)
+            }
+        }.distinct().sortedByDescending { it.length }
+
+        compoundIntros.forEach { phrase ->
+            result = result.replace(phrase, "학생")
+        }
+
+        if (cleanEmail != null) {
+            result = result.replace(cleanEmail, "")
+        }
+        result = EMAIL_REGEX.replace(result, "")
+        result = PHONE_REGEX.replace(result, "")
+
+        if (cleanId != null) {
+            result = result.replace(cleanId, "")
+        }
+        result = STUDENT_ID_REGEX.replace(result, "")
+
+        if (cleanName != null && cleanName !in profTokens) {
+            // Never strip professor greetings even if student and professor share a name
+            result = Regex("""${Regex.escape(cleanName)}(?!\s*교수)""").replace(result, "학생")
+        }
+
+        // Collapse spaces created by removed IDs/contacts BEFORE stripping "<dept> 학생/수강생/입니다"
+        result = result
+            .replace(Regex("""(?:학생|수강생)(?:\s+(?:학생|수강생))+"""), "학생")
+            .replace(Regex("""\(\s*[,;/·\s]*\)"""), "")
+            .replace(Regex("""[ \t]+([,.)\]])"""), "$1")
+            .replace(Regex(""" {2,}"""), " ")
+
+        cleanDeptVariants.forEach { dept ->
+            if (dept !in profTokens) {
+                val escapedDept = Regex.escape(dept)
+                result = Regex("""$escapedDept\s*(?:소속\s*)?(?:학생|수강생)""").replace(result, "학생")
+                result = Regex("""$escapedDept(?=\s*(?:입니다|학생|수강생))""").replace(result, "학생")
+            }
+        }
+
+        return result
+            .replace(Regex("""(?:학생|수강생)(?:\s+(?:학생|수강생))+"""), "학생")
+            .replace(Regex("""\(\s*[,;/·\s]*\)"""), "")
+            .replace(Regex("""[ \t]+([,.)\]])"""), "$1")
+            .replace(Regex(""" {2,}"""), " ")
+            .trim()
+    }
+
     internal fun replacePlaceholders(
         text: String,
         professorName: String? = null,
         studentName: String? = null,
         studentDepartment: String? = null,
         studentIdentifier: String? = null,
-        dynamicTokens: Map<String, String> = emptyMap()
+        dynamicTokens: Map<String, String> = emptyMap(),
+        isAnonymous: Boolean = false,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList()
     ): String {
         val profTitle = formatProfessorGreeting(professorName)
-        val studentIntro = formatStudentIntro(studentName, studentDepartment, studentIdentifier)
-        val cleanStudentName = studentName?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.isNotBlank() } ?: "학생"
-        val cleanStudentId = studentIdentifier?.let(::stripZeroWidthAndControl)?.trim().orEmpty()
-        val cleanStudentDept = studentDepartment?.let(::stripZeroWidthAndControl)?.trim().orEmpty()
+        val studentIntro = if (isAnonymous) {
+            "학생"
+        } else {
+            formatStudentIntro(studentName, studentDepartment, studentIdentifier)
+        }
+        val cleanStudentName = if (isAnonymous) {
+            "학생"
+        } else {
+            studentName?.let(::stripZeroWidthAndControl)?.trim()?.takeIf { it.isNotBlank() } ?: "학생"
+        }
+        val cleanStudentId = if (isAnonymous) {
+            ""
+        } else {
+            studentIdentifier?.let(::stripZeroWidthAndControl)?.trim().orEmpty()
+        }
+        val cleanStudentDept = if (isAnonymous) {
+            ""
+        } else {
+            studentDepartment?.let(::stripZeroWidthAndControl)?.trim().orEmpty()
+        }
 
         val normalizedDynamicTokens = dynamicTokens.entries.associate { (k, v) ->
             k.replace(Regex("\\s+"), "").uppercase() to v
@@ -601,8 +747,12 @@ class AiRefineService(
                 mr.groups[5] != null -> cleanStudentId
                 mr.groups[6] != null -> cleanStudentDept
                 mr.groups[7] != null -> {
-                    val key = mr.value.replace(Regex("\\s+"), "").uppercase()
-                    dynamicTokens[mr.value] ?: normalizedDynamicTokens[key] ?: ""
+                    if (isAnonymous) {
+                        ""
+                    } else {
+                        val key = mr.value.replace(Regex("\\s+"), "").uppercase()
+                        dynamicTokens[mr.value] ?: normalizedDynamicTokens[key] ?: ""
+                    }
                 }
                 else -> mr.value
             }
@@ -610,7 +760,8 @@ class AiRefineService(
 
         val cleanProf = professorName?.trim()?.takeIf { it.isNotBlank() }
         val nonEmptyStudent = studentName?.trim()?.takeIf { it.isNotBlank() }
-        if (nonEmptyStudent != null &&
+        if (!isAnonymous &&
+            nonEmptyStudent != null &&
             nonEmptyStudent != cleanProf &&
             !nonEmptyStudent.contains("{{") &&
             !nonEmptyStudent.contains("}}")
@@ -620,11 +771,24 @@ class AiRefineService(
                 .replace("${nonEmptyStudent}교수님", profTitle)
         }
 
-        return resolved
+        resolved = resolved
             .replace("교수님 교수님", "교수님")
             .replace("교수님님", "교수님")
             .replace(Regex(" {2,}"), " ")
             .trim()
+
+        if (isAnonymous) {
+            resolved = redactAuthorIdentityForAnonymous(
+                text = resolved,
+                studentName = studentName,
+                studentDepartment = studentDepartment,
+                studentIdentifier = studentIdentifier,
+                studentEmail = studentEmail,
+                studentDepartmentAliases = studentDepartmentAliases,
+                professorNames = listOfNotNull(cleanProf)
+            )
+        }
+        return resolved
     }
 
     private suspend fun callGeminiApi(
@@ -637,6 +801,9 @@ class AiRefineService(
         studentName: String? = null,
         studentDepartment: String? = null,
         studentIdentifier: String? = null,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList(),
+        isAnonymous: Boolean = false,
         isFollowUp: Boolean = false,
         previousAnswer: String? = null
     ): RefinedResult {
@@ -657,13 +824,16 @@ class AiRefineService(
             studentName = studentName,
             studentDepartment = studentDepartment,
             studentIdentifier = studentIdentifier,
+            studentEmail = studentEmail,
+            studentDepartmentAliases = studentDepartmentAliases,
             courseName = courseName
         )
         val prompt = buildPrompt(
             masked = maskedInput,
             courseName = courseName,
             category = category,
-            isFollowUp = isFollowUp
+            isFollowUp = isFollowUp,
+            isAnonymous = isAnonymous
         )
 
         val requestBody = buildJsonObject {
@@ -709,10 +879,13 @@ class AiRefineService(
                                     studentName = studentName,
                                     studentDepartment = studentDepartment,
                                     studentIdentifier = studentIdentifier,
-                                    dynamicTokens = maskedInput.dynamicTokens
+                                    dynamicTokens = maskedInput.dynamicTokens,
+                                    isAnonymous = isAnonymous,
+                                    studentEmail = studentEmail,
+                                    studentDepartmentAliases = studentDepartmentAliases
                                 )
                             } ?: fallbackRefine(
-                                rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, isFollowUp, previousAnswer
+                                rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, studentEmail, studentDepartmentAliases, isAnonymous, isFollowUp, previousAnswer
                             ).title
                             val cleanContent = replacePlaceholders(
                                 content,
@@ -720,14 +893,17 @@ class AiRefineService(
                                 studentName = studentName,
                                 studentDepartment = studentDepartment,
                                 studentIdentifier = studentIdentifier,
-                                dynamicTokens = maskedInput.dynamicTokens
+                                dynamicTokens = maskedInput.dynamicTokens,
+                                isAnonymous = isAnonymous,
+                                studentEmail = studentEmail,
+                                studentDepartmentAliases = studentDepartmentAliases
                             )
                             return RefinedResult(finalTitle, cleanContent)
                         }
                     } catch (e: Exception) {
                         logger.warn("Failed to parse Gemini JSON output, using clean text directly: ${e.message}")
                         val fallback = fallbackRefine(
-                            rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, isFollowUp, previousAnswer
+                            rawContent, rawTitle, courseName, category, professorName, studentName, studentDepartment, studentIdentifier, studentEmail, studentDepartmentAliases, isAnonymous, isFollowUp, previousAnswer
                         )
                         val cleanContent = replacePlaceholders(
                             cleanedText,
@@ -735,7 +911,10 @@ class AiRefineService(
                             studentName = studentName,
                             studentDepartment = studentDepartment,
                             studentIdentifier = studentIdentifier,
-                            dynamicTokens = maskedInput.dynamicTokens
+                            dynamicTokens = maskedInput.dynamicTokens,
+                            isAnonymous = isAnonymous,
+                            studentEmail = studentEmail,
+                            studentDepartmentAliases = studentDepartmentAliases
                         )
                         return RefinedResult(fallback.title, cleanContent)
                     }
@@ -757,6 +936,9 @@ class AiRefineService(
         studentName: String? = null,
         studentDepartment: String? = null,
         studentIdentifier: String? = null,
+        studentEmail: String? = null,
+        studentDepartmentAliases: Collection<String> = emptyList(),
+        isAnonymous: Boolean = false,
         isFollowUp: Boolean = false,
         previousAnswer: String? = null
     ): RefinedResult {
@@ -768,6 +950,8 @@ class AiRefineService(
             studentName = studentName,
             studentDepartment = studentDepartment,
             studentIdentifier = studentIdentifier,
+            studentEmail = studentEmail,
+            studentDepartmentAliases = studentDepartmentAliases,
             courseName = courseName
         )
         val courseText = masked.courseName?.trim()?.takeIf { it.isNotBlank() } ?: "이번 학기"
@@ -806,7 +990,10 @@ class AiRefineService(
                     studentName = studentName,
                     studentDepartment = studentDepartment,
                     studentIdentifier = studentIdentifier,
-                    dynamicTokens = masked.dynamicTokens
+                    dynamicTokens = masked.dynamicTokens,
+                    isAnonymous = isAnonymous,
+                    studentEmail = studentEmail,
+                    studentDepartmentAliases = studentDepartmentAliases
                 ),
                 content = replacePlaceholders(
                     followBody,
@@ -814,7 +1001,10 @@ class AiRefineService(
                     studentName = studentName,
                     studentDepartment = studentDepartment,
                     studentIdentifier = studentIdentifier,
-                    dynamicTokens = masked.dynamicTokens
+                    dynamicTokens = masked.dynamicTokens,
+                    isAnonymous = isAnonymous,
+                    studentEmail = studentEmail,
+                    studentDepartmentAliases = studentDepartmentAliases
                 )
             )
         }
@@ -863,7 +1053,10 @@ class AiRefineService(
                 studentName = studentName,
                 studentDepartment = studentDepartment,
                 studentIdentifier = studentIdentifier,
-                dynamicTokens = masked.dynamicTokens
+                dynamicTokens = masked.dynamicTokens,
+                isAnonymous = isAnonymous,
+                studentEmail = studentEmail,
+                studentDepartmentAliases = studentDepartmentAliases
             ),
             content = replacePlaceholders(
                 refinedContent,
@@ -871,7 +1064,10 @@ class AiRefineService(
                 studentName = studentName,
                 studentDepartment = studentDepartment,
                 studentIdentifier = studentIdentifier,
-                dynamicTokens = masked.dynamicTokens
+                dynamicTokens = masked.dynamicTokens,
+                isAnonymous = isAnonymous,
+                studentEmail = studentEmail,
+                studentDepartmentAliases = studentDepartmentAliases
             )
         )
     }

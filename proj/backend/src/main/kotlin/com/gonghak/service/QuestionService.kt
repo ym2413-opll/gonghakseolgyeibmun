@@ -1,5 +1,6 @@
 package com.gonghak.service
 
+import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.DatabaseFactory.dbQueryWithRetry
 import com.gonghak.dto.*
@@ -154,6 +155,30 @@ class QuestionService(
             .withDistinct()
             .map { it[AnswersTable.professorId] }
 
+    private fun redactAnonymousAuthorText(
+        text: String,
+        studentUser: ResultRow,
+        professorNames: Collection<String>
+    ): String {
+        val deptName = studentUser[UsersTable.department]
+        val deptAliases = DatabaseFactory.expandDepartmentAliasNames(deptName)
+        return aiRefineService.redactAuthorIdentityForAnonymous(
+            text = text,
+            studentName = studentUser[UsersTable.name],
+            studentDepartment = deptName,
+            studentIdentifier = studentUser[UsersTable.identifier],
+            studentDisplayTag = studentUser[UsersTable.displayTag],
+            studentEmail = studentUser[UsersTable.email],
+            studentDepartmentAliases = deptAliases,
+            professorNames = professorNames
+        )
+    }
+
+    private fun findCourseProfessorNames(courseId: UUID): List<String> =
+        CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+            .select { CourseProfessorsTable.courseId eq courseId }
+            .map { it[UsersTable.name] }
+
     private fun validateContentLength(text: String?, label: String) {
         if (text != null && text.length > MAX_CONTENT_LENGTH) {
             throw IllegalArgumentException("${label}은(는) 최대 ${MAX_CONTENT_LENGTH}자까지 입력할 수 있습니다.")
@@ -265,24 +290,40 @@ class QuestionService(
                 throw IllegalStateException("담당 교수님에 의해 '${request.category}' 카테고리 질문 접수가 비활성화되어 있습니다.")
             }
 
-            // 4. Calculate refined content if not provided or refine using AI service
-            val effectiveRaw = request.effectiveRawContent
-            val finalRefinedContent = if (!request.refinedContent.isNullOrBlank()) {
+            // 4. Calculate refined content and enforce anonymity on text if anonymous
+            val courseProfNames = courseProfs.map { it[UsersTable.name] }
+            val rawInput = request.effectiveRawContent
+            val rawRefinedInput = if (!request.refinedContent.isNullOrBlank()) {
                 request.refinedContent!!
             } else if (!request.content.isNullOrBlank()) {
                 request.content!!
             } else {
-                effectiveRaw
+                rawInput
+            }
+            val effectiveRaw = if (request.isAnonymous) {
+                redactAnonymousAuthorText(rawInput, studentUser, courseProfNames)
+            } else {
+                rawInput
+            }
+            val finalRefinedContent = if (request.isAnonymous) {
+                redactAnonymousAuthorText(rawRefinedInput, studentUser, courseProfNames)
+            } else {
+                rawRefinedInput
             }
             validateContentLength(effectiveRaw, "질문 원문")
             validateContentLength(finalRefinedContent, "질문 본문")
 
             val effectiveTitle = if (!request.title.isNullOrBlank()) {
-                val trimmedTitle = request.title!!.trim()
-                if (trimmedTitle.length > MAX_TITLE_LENGTH) {
+                val rawTitleText = request.title!!.trim()
+                val cleanedTitle = if (request.isAnonymous) {
+                    redactAnonymousAuthorText(rawTitleText, studentUser, courseProfNames)
+                } else {
+                    rawTitleText
+                }
+                if (cleanedTitle.length > MAX_TITLE_LENGTH) {
                     throw IllegalArgumentException("제목은 최대 ${MAX_TITLE_LENGTH}자까지 입력할 수 있습니다.")
                 }
-                trimmedTitle
+                cleanedTitle
             } else {
                 generateSummaryTitle(finalRefinedContent.ifBlank { effectiveRaw }).take(MAX_TITLE_LENGTH)
             }
@@ -1071,7 +1112,21 @@ class QuestionService(
                 }
             }
 
-            val cleanUpdatedTitle = request.title?.trim()?.takeIf { it.isNotBlank() }?.also { v ->
+            val studentUserRow = if (effectiveAnonymous) {
+                UsersTable.select { UsersTable.id eq qRow[QuestionsTable.studentId] }.singleOrNull()
+            } else null
+            val profNamesForCourse = if (effectiveAnonymous) {
+                findCourseProfessorNames(qRow[QuestionsTable.courseId])
+            } else emptyList()
+
+            fun maybeRedact(text: String): String =
+                if (effectiveAnonymous && studentUserRow != null) {
+                    redactAnonymousAuthorText(text, studentUserRow, profNamesForCourse)
+                } else {
+                    text
+                }
+
+            val cleanUpdatedTitle = request.title?.trim()?.takeIf { it.isNotBlank() }?.let(::maybeRedact)?.also { v ->
                 if (v.length > MAX_TITLE_LENGTH) {
                     throw IllegalArgumentException("제목은 최대 ${MAX_TITLE_LENGTH}자까지 입력할 수 있습니다.")
                 }
@@ -1081,14 +1136,27 @@ class QuestionService(
             validateContentLength(request.refinedContent, "질문 본문")
             validateContentLength(request.content, "질문 본문")
 
+            val incomingRaw = (request.originalContent ?: request.rawContent)?.takeIf { it.isNotBlank() }
+            val incomingRefined = (request.content ?: request.refinedContent)?.takeIf { it.isNotBlank() }
+
             QuestionsTable.update({ QuestionsTable.id eq questionId }) {
-                cleanUpdatedTitle?.let { v -> it[title] = v }
+                if (cleanUpdatedTitle != null) {
+                    it[title] = cleanUpdatedTitle
+                } else if (effectiveAnonymous) {
+                    it[title] = maybeRedact(qRow[QuestionsTable.title])
+                }
                 request.category?.let { v -> it[category] = v.name }
                 request.isAnonymous?.let { v -> it[isAnonymous] = v }
-                request.rawContent?.takeIf { it.isNotBlank() }?.let { v -> it[rawContent] = v }
-                request.originalContent?.takeIf { it.isNotBlank() }?.let { v -> it[rawContent] = v }
-                request.refinedContent?.takeIf { it.isNotBlank() }?.let { v -> it[refinedContent] = v }
-                request.content?.takeIf { it.isNotBlank() }?.let { v -> it[refinedContent] = v }
+                if (incomingRaw != null) {
+                    it[rawContent] = maybeRedact(incomingRaw)
+                } else if (effectiveAnonymous) {
+                    it[rawContent] = maybeRedact(qRow[QuestionsTable.rawContent])
+                }
+                if (incomingRefined != null) {
+                    it[refinedContent] = maybeRedact(incomingRefined)
+                } else if (effectiveAnonymous) {
+                    it[refinedContent] = maybeRedact(qRow[QuestionsTable.refinedContent])
+                }
             }
 
             val updatedRow = QuestionsTable.select { QuestionsTable.id eq questionId }.single()
@@ -1331,7 +1399,19 @@ class QuestionService(
             val followUpId = UUID.randomUUID()
             val nextSeq = maxOf(qRow[QuestionsTable.lastSequenceNumber], 1) + 1
             val now = Instant.now()
-            val originalDraft = request.originalContent?.trim()?.takeIf { it.isNotBlank() } ?: cleanContent
+            val isAnonymous = qRow[QuestionsTable.isAnonymous]
+            val profNamesForCourse = if (isAnonymous) findCourseProfessorNames(courseId) else emptyList()
+            val rawDraftInput = request.originalContent?.trim()?.takeIf { it.isNotBlank() } ?: cleanContent
+            val finalFollowUpContent = if (isAnonymous) {
+                redactAnonymousAuthorText(cleanContent, studentUser, profNamesForCourse)
+            } else {
+                cleanContent
+            }
+            val originalDraft = if (isAnonymous) {
+                redactAnonymousAuthorText(rawDraftInput, studentUser, profNamesForCourse)
+            } else {
+                rawDraftInput
+            }
 
             AnswersTable.insert {
                 it[id] = followUpId
@@ -1339,7 +1419,7 @@ class QuestionService(
                 it[professorId] = studentId
                 it[sequenceNumber] = nextSeq
                 it[rawContent] = originalDraft
-                it[content] = cleanContent
+                it[content] = finalFollowUpContent
                 it[isAssignedProfessor] = false
                 it[isHidden] = false
                 it[createdAt] = now
@@ -1357,7 +1437,6 @@ class QuestionService(
                 it[lastSequenceNumber] = nextSeq
             }
 
-            val isAnonymous = qRow[QuestionsTable.isAnonymous]
             val authorDisplay = if (isAnonymous) "$courseName 수강생" else studentUser[UsersTable.displayTag]
             val dto = buildAnswerDto(
                 answerId = followUpId,
@@ -1371,7 +1450,7 @@ class QuestionService(
                     department = studentUser[UsersTable.department],
                     isAdmin = studentUser[UsersTable.isAdmin]
                 ),
-                rawContent = cleanContent,
+                rawContent = finalFollowUpContent,
                 originalDraftContent = originalDraft,
                 isAssignedProfessor = false,
                 isAnsHidden = false,
@@ -1404,7 +1483,7 @@ class QuestionService(
             questionId = questionId,
             questionTitle = created.questionTitle,
             category = created.category,
-            followUpContent = cleanContent,
+            followUpContent = created.dto.content,
             authorDisplay = created.authorDisplay,
             participatingProfessorIds = created.participatingProfIds
         )

@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
+import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import AiRefineModal from '../student/AiRefineModal';
 import HelpBubble from '../common/HelpBubble';
@@ -430,10 +431,18 @@ const QuestionDetail = ({
     setErrorMsg('');
     setIsUpdating(true);
     try {
+      const nextAnonymous = category.allowAnonymous ? editAnonymous : false;
+      const profList = [question.profName, question.assignedProfessorName].filter(Boolean);
+      const nextTitle = nextAnonymous
+        ? sanitizeAnonymousStudentText(editTitle.trim(), currentUser, { professorNames: profList })
+        : editTitle.trim();
+      const nextContent = nextAnonymous
+        ? sanitizeAnonymousStudentText(editContent.trim(), currentUser, { professorNames: profList })
+        : editContent.trim();
       await onUpdateQuestion(question.id, {
-        title: editTitle.trim(),
-        content: editContent.trim(),
-        isAnonymous: category.allowAnonymous ? editAnonymous : false
+        title: nextTitle,
+        content: nextContent,
+        isAnonymous: nextAnonymous
       });
       setIsEditing(false);
     } catch (err) {
@@ -518,10 +527,19 @@ const QuestionDetail = ({
         );
         return;
       }
+      const profList = [question.profName, question.assignedProfessorName].filter(Boolean);
+      const finalFollowUp = question.isAnonymous
+        ? sanitizeAnonymousStudentText(followUpText.trim(), currentUser, { professorNames: profList })
+        : followUpText.trim();
+      const finalOriginalFollowUp = question.isAnonymous
+        ? sanitizeAnonymousStudentText(followUpOriginalText || followUpText.trim(), currentUser, {
+            professorNames: profList
+          })
+        : (followUpOriginalText || followUpText.trim());
       await onAddFollowUp(question.id, {
         authorId: currentUser.id,
-        content: followUpText.trim(),
-        originalContent: followUpOriginalText || followUpText.trim(),
+        content: finalFollowUp,
+        originalContent: finalOriginalFollowUp,
         hasAiRefined: hasFollowUpAiRefined,
         attachmentIds: followUpAttachments.map((a) => a.id),
         attachments: followUpAttachments
@@ -1156,8 +1174,17 @@ const QuestionDetail = ({
             }
             isAnonymous={Boolean(question.isAnonymous)}
             onApplyRefined={(refinedText, origText) => {
-              setFollowUpText(refinedText);
-              setFollowUpOriginalText((prev) => prev || origText || followUpText);
+              const profList = [question.profName, question.assignedProfessorName].filter(Boolean);
+              const nextText = question.isAnonymous
+                ? sanitizeAnonymousStudentText(refinedText, currentUser, { professorNames: profList })
+                : refinedText;
+              const nextOrig = question.isAnonymous
+                ? sanitizeAnonymousStudentText(origText || followUpText, currentUser, {
+                    professorNames: profList
+                  })
+                : (origText || followUpText);
+              setFollowUpText(nextText);
+              setFollowUpOriginalText((prev) => prev || nextOrig);
               setHasFollowUpAiRefined(true);
             }}
           />

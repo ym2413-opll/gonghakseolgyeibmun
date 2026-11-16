@@ -1,5 +1,7 @@
 package com.gonghak.routes
 
+import com.gonghak.config.DatabaseFactory
+import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.ApiResponse
 import com.gonghak.dto.RefineQuestionRequest
 import com.gonghak.dto.RefineQuestionResponse
@@ -47,15 +49,28 @@ fun Route.aiRoutes(
                 return@post
             }
 
+            val isAnonymousRequest = request.isAnonymous
+            val deptAliases = if (isAnonymousRequest) {
+                dbQuery {
+                    (listOfNotNull(request.effectiveStudentDepartment, user.department)
+                        .flatMap { DatabaseFactory.expandDepartmentAliasNames(it) })
+                        .distinct()
+                }
+            } else {
+                emptyList()
+            }
             val result = aiRefineService.refineQuestion(
                 rawContent = contentToRefine.ifBlank { titleToRefine ?: "" },
                 rawTitle = titleToRefine,
                 courseName = request.courseName,
                 category = request.category,
                 professorName = request.effectiveProfessorName,
-                studentName = request.effectiveStudentName,
-                studentDepartment = request.effectiveStudentDepartment,
-                studentIdentifier = request.effectiveStudentIdentifier,
+                studentName = if (isAnonymousRequest) (request.effectiveStudentName ?: user.name) else request.effectiveStudentName,
+                studentDepartment = if (isAnonymousRequest) (request.effectiveStudentDepartment ?: user.department) else request.effectiveStudentDepartment,
+                studentIdentifier = if (isAnonymousRequest) (request.effectiveStudentIdentifier ?: user.identifier) else request.effectiveStudentIdentifier,
+                studentEmail = if (isAnonymousRequest) user.email else null,
+                studentDepartmentAliases = deptAliases,
+                isAnonymous = isAnonymousRequest,
                 isFollowUp = request.isFollowUp,
                 previousAnswer = request.previousAnswer
             )

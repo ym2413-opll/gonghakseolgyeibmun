@@ -5,6 +5,7 @@ import { useNotifications } from '../../context/NotificationContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import { generateSummaryTitle } from '../../utils/textSummary';
+import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import ProfessorNameList from '../common/ProfessorNameList';
 import AiRefineModal from './AiRefineModal';
@@ -90,10 +91,25 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     }
   }, [content, selectedCategory, currentCourse.id]);
 
+  const scrubForAnonymous = (text) =>
+    sanitizeAnonymousStudentText(text, currentUser, {
+      professorNames: [currentCourse?.profName, currentCourse?.assignedProfessorName]
+    });
+
+  const handleAnonymousToggle = (checked) => {
+    setIsAnonymous(checked);
+    if (checked && selectedCategory !== 'grade') {
+      setContent((prev) => scrubForAnonymous(prev));
+      setOriginalContent((prev) => (prev ? scrubForAnonymous(prev) : prev));
+      setRefinedTitle((prev) => (prev ? scrubForAnonymous(prev) : prev));
+    }
+  };
+
   const handleApplyAiRefined = (refinedContent, originContent, aiTitle) => {
-    if (refinedContent) setContent(refinedContent);
-    if (originContent) setOriginalContent(originContent);
-    if (aiTitle) setRefinedTitle(aiTitle);
+    const anonActive = selectedCategory !== 'grade' && isAnonymous;
+    if (refinedContent) setContent(anonActive ? scrubForAnonymous(refinedContent) : refinedContent);
+    if (originContent) setOriginalContent(anonActive ? scrubForAnonymous(originContent) : originContent);
+    if (aiTitle) setRefinedTitle(anonActive ? scrubForAnonymous(aiTitle) : aiTitle);
     setHasAiRefined(true);
   };
 
@@ -142,10 +158,17 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         return;
       }
 
+      const effectiveAnonymous = selectedCategory === 'grade' ? false : isAnonymous;
+      const finalContent = effectiveAnonymous ? scrubForAnonymous(content.trim()) : content.trim();
+      const finalOriginal = effectiveAnonymous
+        ? scrubForAnonymous(originalContent || content.trim())
+        : (originalContent || content.trim());
+
       // AI 정제 제목이 있으면 우선 사용하고, 없으면 본문에서 자동으로 요약 생성
-      const summaryTitle = (hasAiRefined && refinedTitle?.trim())
+      const rawSummaryTitle = (hasAiRefined && refinedTitle?.trim())
         ? refinedTitle.trim()
-        : generateSummaryTitle(content);
+        : generateSummaryTitle(finalContent);
+      const summaryTitle = effectiveAnonymous ? scrubForAnonymous(rawSummaryTitle) : rawSummaryTitle;
 
       const payload = {
         courseId: currentCourse.id,
@@ -155,14 +178,14 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         profName: currentCourse.profName,
         category: selectedCategory,
         title: summaryTitle,
-        content: content.trim(),
-        originalContent: originalContent || content.trim(),
+        content: finalContent,
+        originalContent: finalOriginal,
         hasAiRefined,
         studentId: currentUser.id,
         studentName: currentUser.name,
         studentTag: currentUser.displayTag,
         department: currentUser.department,
-        isAnonymous: selectedCategory === 'grade' ? false : isAnonymous,
+        isAnonymous: effectiveAnonymous,
         // 첨부파일 목록 및 ID 연동
         attachmentIds: attachments.map((a) => a.id),
         attachments: attachments
@@ -383,7 +406,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   type="checkbox"
                   checked={isAnonymous}
                   disabled={selectedCategory === 'grade'}
-                  onChange={(e) => setIsAnonymous(e.target.checked)}
+                  onChange={(e) => handleAnonymousToggle(e.target.checked)}
                 />
                 <span className="checkbox-text">
                   익명으로 질문하기

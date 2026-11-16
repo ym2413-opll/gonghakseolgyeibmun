@@ -2473,4 +2473,109 @@ class R3OverhaulTest {
             }.status
         )
     }
+
+    @Test
+    fun testAnonymousQuestionAndAiRefineScrubAuthorIdentity() = testApplication {
+        val client = createClient {
+            install(ContentNegotiation) { json(json) }
+        }
+
+        val adminAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "anon_pii_admin",
+                    password = "adminpass1234",
+                    name = "익명검증관리자",
+                    department = "소프트웨어학과"
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+        com.gonghak.service.UserService().grantOrRevokeAdminByUsername("anon_pii_admin", grant = true)
+
+        val course = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, "Bearer ${adminAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(CreateCourseRequest(name = "익명보호개론", code = "ANON-101", semester = "2026-2", scopeType = "ALL"))
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<CourseDto>>().data!!
+
+        val profAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.PROFESSOR,
+                    username = "anon_pii_prof",
+                    password = "profpass1234",
+                    name = "강민수",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+
+        val stuAuth = client.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                RegisterRequest(
+                    role = UserRole.STUDENT,
+                    username = "2026101014",
+                    identifier = "2026101014",
+                    password = "stupass1234",
+                    name = "김익명학생",
+                    department = "소프트웨어학과",
+                    courseIds = listOf(course.id)
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<AuthResponse>>().data!!
+
+        // 1. /api/ai/refine with isAnonymous=true must scrub user PII even when included in raw draft
+        val refineRes = client.post("/api/ai/refine") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RefineQuestionRequest(
+                    text = "소프트웨어학과 2026101014 김익명학생(010-2222-3333)인데 과제 질문있습니다",
+                    title = "김익명학생 과제 질문",
+                    courseName = course.name,
+                    professorName = profAuth.user.name,
+                    category = QuestionCategory.ASSIGNMENT,
+                    isAnonymous = true
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }.body<ApiResponse<RefineQuestionResponse>>().data!!
+
+        listOf("김익명학생", "2026101014", "소프트웨어학과", "소프트웨어학부", "010-2222-3333").forEach { pii ->
+            assertFalse(refineRes.refined.contains(pii), "Refined anonymous response leaked '$pii': ${refineRes.refined}")
+            assertFalse((refineRes.refinedTitle ?: "").contains(pii), "Refined anonymous title leaked '$pii'")
+        }
+        assertTrue(refineRes.refined.contains("강민수 교수님"), "Expected professor greeting in: ${refineRes.refined}")
+
+        // 2. Posting an anonymous question that already contains AI self-intro scrubs PII server-side
+        val createdQ = client.post("/api/questions") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateQuestionRequest(
+                    courseId = course.id,
+                    category = QuestionCategory.LECTURE,
+                    title = "[강의 문의] 김익명학생 질문의 건",
+                    rawContent = "소프트웨어학과 2026101014 김익명학생입니다. 수업 내용 질문드려요.",
+                    refinedContent = "안녕하십니까, 강민수 교수님. 익명보호개론 강의를 수강 중인 소프트웨어학과 2026101014 김익명학생입니다. 질문 올립니다.",
+                    isAnonymous = true
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.Created, it.status) }.body<ApiResponse<QuestionDetailDto>>().data!!
+
+        val profDetail = client.get("/api/questions/${createdQ.id}") {
+            header(HttpHeaders.Authorization, "Bearer ${profAuth.token}")
+        }.body<ApiResponse<QuestionDetailDto>>().data!!
+
+        listOf("김익명학생", "2026101014", "소프트웨어학과", "소프트웨어학부").forEach { pii ->
+            assertFalse(profDetail.content.contains(pii), "Professor-visible anonymous content leaked '$pii': ${profDetail.content}")
+            assertFalse((profDetail.title ?: "").contains(pii), "Professor-visible anonymous title leaked '$pii': ${profDetail.title}")
+        }
+        assertTrue(profDetail.content.contains("강민수 교수님"))
+        assertTrue(profDetail.content.contains("학생입니다"))
+    }
 }

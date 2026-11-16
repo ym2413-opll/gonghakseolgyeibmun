@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AI_INQUIRY_TEMPLATES } from '../../services/mockData';
+import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import { PenTool, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X, FileText, Loader2 } from 'lucide-react';
 
 export default function AiRefineModal({
@@ -62,12 +63,20 @@ export default function AiRefineModal({
         courseName,
         professorName,
         isFollowUp,
+        isAnonymous: Boolean(isAnonymous),
         previousAnswer
       });
       if (!isMountedRef.current || reqId !== requestIdRef.current) return;
-      setAiResult(result);
-      setRefinedText(result.refined || '');
-      setRefinedTitle(result.refinedTitle || '');
+      const profList = professorName ? [professorName] : [];
+      const finalRefined = isAnonymous
+        ? sanitizeAnonymousStudentText(result.refined || '', currentUser, { professorNames: profList })
+        : (result.refined || '');
+      const finalRefinedTitle = isAnonymous
+        ? sanitizeAnonymousStudentText(result.refinedTitle || '', currentUser, { professorNames: profList })
+        : (result.refinedTitle || '');
+      setAiResult({ ...result, refined: finalRefined, refinedTitle: finalRefinedTitle });
+      setRefinedText(finalRefined);
+      setRefinedTitle(finalRefinedTitle);
     } catch (err) {
       if (!isMountedRef.current || reqId !== requestIdRef.current) return;
       console.error('Text refinement error', err);
@@ -77,7 +86,7 @@ export default function AiRefineModal({
         setIsLoading(false);
       }
     }
-  }, [userName, userStudentId, userDept, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
+  }, [currentUser, userName, userStudentId, userDept, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
 
   useEffect(() => {
     if (isOpen) {
@@ -102,7 +111,20 @@ export default function AiRefineModal({
 
   const handleApply = () => {
     if (typeof onApplyRefined === 'function') {
-      onApplyRefined(refinedText, originalText, refinedTitle, originalTitle);
+      const profList = professorName ? [professorName] : [];
+      const outText = isAnonymous
+        ? sanitizeAnonymousStudentText(refinedText, currentUser, { professorNames: profList })
+        : refinedText;
+      const outTitle = isAnonymous
+        ? sanitizeAnonymousStudentText(refinedTitle, currentUser, { professorNames: profList })
+        : refinedTitle;
+      const outOrigText = isAnonymous
+        ? sanitizeAnonymousStudentText(originalText, currentUser, { professorNames: profList })
+        : originalText;
+      const outOrigTitle = isAnonymous
+        ? sanitizeAnonymousStudentText(originalTitle, currentUser, { professorNames: profList })
+        : originalTitle;
+      onApplyRefined(outText, outOrigText, outTitle, outOrigTitle);
     }
     onClose();
   };

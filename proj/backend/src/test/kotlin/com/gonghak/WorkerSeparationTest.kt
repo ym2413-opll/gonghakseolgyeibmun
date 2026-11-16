@@ -500,4 +500,50 @@ class WorkerSeparationTest {
             workerManager.shutdown()
         }
     }
+
+    @Test
+    fun testAiRefineAnonymousStripsPersonalInfo() = runBlocking {
+        val workerManager = BackgroundWorkerManager()
+        val service = AiRefineService(apiKey = null, workerManager = workerManager)
+
+        try {
+            val refined = service.refineQuestion(
+                rawContent = "소프트웨어학부 20261234 홍길동(hong@kw.ac.kr, 010-1234-5678)인데 과제 질문있습니다",
+                rawTitle = "홍길동 과제 질문 20261234",
+                courseName = "공학설계입문",
+                category = QuestionCategory.ASSIGNMENT,
+                professorName = "박철수",
+                studentName = "홍길동",
+                studentDepartment = "소프트웨어학부",
+                studentIdentifier = "20261234",
+                studentEmail = "hong@kw.ac.kr",
+                isAnonymous = true
+            )
+
+            assertTrue(refined.content.contains("박철수 교수님"), "Professor greeting must remain: ${refined.content}")
+            assertTrue(refined.content.contains("학생입니다"), "Anonymous intro should use '학생': ${refined.content}")
+            listOf("홍길동", "20261234", "소프트웨어학부", "hong@kw.ac.kr", "010-1234-5678").forEach { pii ->
+                assertFalse(refined.content.contains(pii), "Anonymous refined content must not contain PII '$pii': ${refined.content}")
+                assertFalse(refined.title.contains(pii), "Anonymous refined title must not contain PII '$pii': ${refined.title}")
+            }
+
+            // Simulate post-refine anonymous toggle scrubbing pre-baked self-intro
+            val scrubbed = service.redactAuthorIdentityForAnonymous(
+                text = "안녕하십니까, 박철수 교수님.\n공학설계입문 강의를 수강 중인 소프트웨어학부 20261234 홍길동입니다.\n연락처는 010-9999-8888이고 학번은 20261234입니다.",
+                studentName = "홍길동",
+                studentDepartment = "소프트웨어학부",
+                studentIdentifier = "20261234",
+                studentEmail = "hong@kw.ac.kr",
+                professorNames = listOf("박철수")
+            )
+            assertTrue(scrubbed.contains("박철수 교수님"))
+            assertTrue(scrubbed.contains("학생입니다."))
+            listOf("홍길동", "20261234", "소프트웨어학부", "010-9999-8888").forEach { pii ->
+                assertFalse(scrubbed.contains(pii), "Scrubbed anonymous text must not contain '$pii': $scrubbed")
+            }
+        } finally {
+            service.close()
+            workerManager.shutdown()
+        }
+    }
 }

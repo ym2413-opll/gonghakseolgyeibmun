@@ -371,6 +371,7 @@ data class RefineQuestionRequest(
     val category: QuestionCategory? = null,
     val studentInfo: Map<String, String>? = null,
     val isFollowUp: Boolean = false,
+    val isAnonymous: Boolean = false,
     val previousAnswer: String? = null
 ) {
     val effectiveContent: String
