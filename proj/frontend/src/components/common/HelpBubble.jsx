@@ -48,10 +48,11 @@ const HelpBubble = ({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // 요소가 숨겨져 있거나 블러 잠금 영역 안에 있거나 뷰포트 밖으로 스크롤된 경우 숨김
+    // 요소가 숨겨져 있거나 블러 잠금 영역 안에 있거나 모달/알림 메뉴가 열려있거나 뷰포트 밖인 경우 숨김
     if (
       (hostRect.width === 0 && hostRect.height === 0) ||
       hostEl.closest('.is-blurred-locked, [aria-hidden="true"]') ||
+      Boolean(document.querySelector('.modal-backdrop, .image-viewer-modal-backdrop, .notif-dropdown')) ||
       hostRect.bottom < 0 ||
       hostRect.top > vh
     ) {

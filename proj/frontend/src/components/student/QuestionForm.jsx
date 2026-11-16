@@ -463,42 +463,35 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
               </div>
 
               <div className="content-toolbar-actions">
-                <HelpBubble
-                  tier="ALL"
-                  mode="floating"
-                  placement="bottom-end"
-                  text="작성한 질문을 AI로 다듬어요."
+                <button
+                  type="button"
+                  className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
+                  onClick={() => setIsAiModalOpen(true)}
                 >
-                  <button
-                    type="button"
-                    className={`btn-ai-assist ${hasAiRefined ? 'refined-active' : ''}`}
-                    onClick={() => setIsAiModalOpen(true)}
-                  >
-                    <PenTool size={14} />
-                    <span>{hasAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
-                  </button>
-                </HelpBubble>
+                  <PenTool size={14} />
+                  <span>{hasAiRefined ? '문장 다듬기 다시 실행' : '문장 다듬기'}</span>
+                </button>
 
                 {selectedCategory !== 'grade' && (
-                  <HelpBubble
-                    tier="ALL"
-                    mode="floating"
-                    placement="bottom-end"
-                    text="유사한 기존 질문과 답변을 확인해요."
+                  <button
+                    type="button"
+                    className="btn-similar-search"
+                    onClick={() => setIsSimilarModalOpen(true)}
+                    disabled={similarList.length === 0}
                   >
-                    <button
-                      type="button"
-                      className="btn-similar-search"
-                      onClick={() => setIsSimilarModalOpen(true)}
-                      disabled={similarList.length === 0}
-                    >
-                      <Search size={14} />
-                      <span>유사 질답 ({similarList.length})</span>
-                    </button>
-                  </HelpBubble>
+                    <Search size={14} />
+                    <span>유사 질답 ({similarList.length})</span>
+                  </button>
                 )}
               </div>
             </div>
+
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="'문장 다듬기'로 AI 교정을 받고, '유사 질답'으로 기존 질문과 답변을 먼저 확인해요."
+              className="mb-help-bubble"
+            />
 
             <textarea
               ref={contentTextareaRef}

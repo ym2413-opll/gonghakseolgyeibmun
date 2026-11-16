@@ -425,30 +425,23 @@ const QuestionDetail = ({
 
         <div className="forum-thread-actions-right">
           {canToggleThread && (
-            <HelpBubble
-              tier="ALL"
-              mode="floating"
-              placement="bottom"
-              text="스레드 열림/닫힘을 전환해요. 열림 상태면 공동교수·타 학생도 답변할 수 있어요."
+            <button
+              type="button"
+              className={`btn btn-sm thread-open-toggle-btn ${
+                isThreadOpen ? 'is-open' : 'is-closed'
+              }`}
+              onClick={() => onToggleThreadOpen(question.id, !isThreadOpen)}
             >
-              <button
-                type="button"
-                className={`btn btn-sm thread-open-toggle-btn ${
-                  isThreadOpen ? 'is-open' : 'is-closed'
-                }`}
-                onClick={() => onToggleThreadOpen(question.id, !isThreadOpen)}
-              >
-                {isThreadOpen ? (
-                  <>
-                    <Unlock size={14} /> 열림
-                  </>
-                ) : (
-                  <>
-                    <Lock size={14} /> 질문자, 담당교수 외 닫힘
-                  </>
-                )}
-              </button>
-            </HelpBubble>
+              {isThreadOpen ? (
+                <>
+                  <Unlock size={14} /> 열림
+                </>
+              ) : (
+                <>
+                  <Lock size={14} /> 질문자, 담당교수 외 닫힘
+                </>
+              )}
+            </button>
           )}
 
           {isAdmin && onToggleHideQuestion && (
@@ -490,6 +483,15 @@ const QuestionDetail = ({
           )}
         </div>
       </div>
+
+      {canToggleThread && (
+        <HelpBubble
+          tier="ALL"
+          mode="inline"
+          text="질문 작성자와 담당교수는 스레드 열림/닫힘을 전환할 수 있어요. 열림 상태면 공동교수·타 학생도 답변할 수 있어요."
+          className="mb-help-bubble"
+        />
+      )}
 
       {/* 토픽 타이틀 배너 */}
       <div className="forum-thread-title-box">
