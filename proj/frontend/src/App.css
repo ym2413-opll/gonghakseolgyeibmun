@@ -8853,7 +8853,22 @@ body,
 }
 
 .md-content .katex {
-  font-size: 1.04em;
+  font-size: 1.08em;
+  line-height: 1.2;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-indent: 0;
+}
+
+.md-content .katex,
+.md-content .katex * {
+  box-sizing: content-box;
+}
+
+.md-content .katex .fbox,
+.md-content .katex .fcolorbox,
+.md-content .katex .angl {
+  box-sizing: border-box;
 }
 
 .md-link-confirm-overlay {
