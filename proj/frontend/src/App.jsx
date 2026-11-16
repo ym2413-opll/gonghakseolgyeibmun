@@ -1,7 +1,7 @@
 // src/App.jsx
 // 광운대학교 학업 Q&A 포럼 메인 애플리케이션 (R3 Overhaul: 서양식 포럼 / 3단계 반응형 / 블러 인증 게이트 / 관리 모드)
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { NotificationProvider } from './context/NotificationContext';
@@ -10,15 +10,16 @@ import Header from './components/common/Header';
 import BottomNav from './components/common/BottomNav';
 import AuthGateOverlay from './components/common/AuthGateOverlay';
 import QuestionList from './components/questions/QuestionList';
-import QuestionDetail from './components/questions/QuestionDetail';
-import QuestionForm from './components/student/QuestionForm';
-import ProfessorDashboard from './components/professor/ProfessorDashboard';
-import SettingsModal from './components/common/SettingsModal';
-import NotificationSettingsModal from './components/professor/NotificationSettingsModal';
-import AdminModal from './components/admin/AdminModal';
 import HelpOnboardingModal from './components/common/HelpOnboardingModal';
 import { api } from './services/api';
 import './App.css';
+
+const QuestionDetail = lazy(() => import('./components/questions/QuestionDetail'));
+const QuestionForm = lazy(() => import('./components/student/QuestionForm'));
+const ProfessorDashboard = lazy(() => import('./components/professor/ProfessorDashboard'));
+const SettingsModal = lazy(() => import('./components/common/SettingsModal'));
+const NotificationSettingsModal = lazy(() => import('./components/professor/NotificationSettingsModal'));
+const AdminModal = lazy(() => import('./components/admin/AdminModal'));
 
 function getDeviceTier(width) {
   if (width <= 640) return 'smartphone';
@@ -336,22 +337,26 @@ function MainApp() {
             aria-hidden={!isAuthenticated}
           >
             {currentView === 'new' && isAuthenticated && isStudent ? (
-              <QuestionForm
-                onQuestionCreated={handleQuestionCreated}
-                onCancel={() => setCurrentView('list')}
-              />
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <QuestionForm
+                  onQuestionCreated={handleQuestionCreated}
+                  onCancel={() => setCurrentView('list')}
+                />
+              </Suspense>
             ) : isDesktopSplit ? (
               <div className="forum-desktop-split">
                 <div className="forum-split-left">
                   {isProfessor ? (
-                    <ProfessorDashboard
-                      questions={safeQuestions}
-                      selectedQuestionId={selectedQuestionId}
-                      onSelectQuestion={handleSelectQuestion}
-                      onOpenProfSettings={() => setIsProfSettingsOpen(true)}
-                      onToggleHideQuestion={handleToggleHideQuestion}
-                      onDeleteQuestion={handleDeleteQuestion}
-                    />
+                    <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                      <ProfessorDashboard
+                        questions={safeQuestions}
+                        selectedQuestionId={selectedQuestionId}
+                        onSelectQuestion={handleSelectQuestion}
+                        onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+                        onToggleHideQuestion={handleToggleHideQuestion}
+                        onDeleteQuestion={handleDeleteQuestion}
+                      />
+                    </Suspense>
                   ) : (
                     <QuestionList
                       questions={safeQuestions}
@@ -364,43 +369,49 @@ function MainApp() {
                   )}
                 </div>
                 <div className="forum-split-right">
-                  <QuestionDetail
-                    key={activeQuestion?.id || 'empty'}
-                    question={activeQuestion}
-                    onAddAnswer={handleAddAnswer}
-                    onAddFollowUp={handleAddFollowUp}
-                    onUpdateQuestion={handleUpdateQuestion}
-                    onToggleThreadOpen={handleToggleThreadOpen}
-                    onToggleHideQuestion={handleToggleHideQuestion}
-                    onToggleHideAnswer={handleToggleHideAnswer}
-                    onDeleteQuestion={handleDeleteQuestion}
-                    onDeleteAnswer={handleDeleteAnswer}
-                  />
+                  <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                    <QuestionDetail
+                      key={activeQuestion?.id || 'empty'}
+                      question={activeQuestion}
+                      onAddAnswer={handleAddAnswer}
+                      onAddFollowUp={handleAddFollowUp}
+                      onUpdateQuestion={handleUpdateQuestion}
+                      onToggleThreadOpen={handleToggleThreadOpen}
+                      onToggleHideQuestion={handleToggleHideQuestion}
+                      onToggleHideAnswer={handleToggleHideAnswer}
+                      onDeleteQuestion={handleDeleteQuestion}
+                      onDeleteAnswer={handleDeleteAnswer}
+                    />
+                  </Suspense>
                 </div>
               </div>
             ) : currentView === 'detail' && activeQuestion ? (
-              <QuestionDetail
-                key={activeQuestion.id}
-                question={activeQuestion}
-                onAddAnswer={handleAddAnswer}
-                onAddFollowUp={handleAddFollowUp}
-                onUpdateQuestion={handleUpdateQuestion}
-                onToggleThreadOpen={handleToggleThreadOpen}
-                onToggleHideQuestion={handleToggleHideQuestion}
-                onToggleHideAnswer={handleToggleHideAnswer}
-                onDeleteQuestion={handleDeleteQuestion}
-                onDeleteAnswer={handleDeleteAnswer}
-                onBack={() => setCurrentView('list')}
-              />
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <QuestionDetail
+                  key={activeQuestion.id}
+                  question={activeQuestion}
+                  onAddAnswer={handleAddAnswer}
+                  onAddFollowUp={handleAddFollowUp}
+                  onUpdateQuestion={handleUpdateQuestion}
+                  onToggleThreadOpen={handleToggleThreadOpen}
+                  onToggleHideQuestion={handleToggleHideQuestion}
+                  onToggleHideAnswer={handleToggleHideAnswer}
+                  onDeleteQuestion={handleDeleteQuestion}
+                  onDeleteAnswer={handleDeleteAnswer}
+                  onBack={() => setCurrentView('list')}
+                />
+              </Suspense>
             ) : isProfessor ? (
-              <ProfessorDashboard
-                questions={safeQuestions}
-                selectedQuestionId={selectedQuestionId}
-                onSelectQuestion={handleSelectQuestion}
-                onOpenProfSettings={() => setIsProfSettingsOpen(true)}
-                onToggleHideQuestion={handleToggleHideQuestion}
-                onDeleteQuestion={handleDeleteQuestion}
-              />
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <ProfessorDashboard
+                  questions={safeQuestions}
+                  selectedQuestionId={selectedQuestionId}
+                  onSelectQuestion={handleSelectQuestion}
+                  onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+                  onToggleHideQuestion={handleToggleHideQuestion}
+                  onDeleteQuestion={handleDeleteQuestion}
+                />
+              </Suspense>
             ) : (
               <QuestionList
                 questions={safeQuestions}
@@ -428,25 +439,33 @@ function MainApp() {
         )}
       </div>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onCoursesUpdated={fetchQuestions}
-      />
+      <Suspense fallback={null}>
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            onCoursesUpdated={fetchQuestions}
+          />
+        )}
 
-      <NotificationSettingsModal
-        isOpen={isProfSettingsOpen}
-        onClose={() => setIsProfSettingsOpen(false)}
-        onCoursesUpdated={fetchQuestions}
-      />
+        {isProfSettingsOpen && (
+          <NotificationSettingsModal
+            isOpen={isProfSettingsOpen}
+            onClose={() => setIsProfSettingsOpen(false)}
+            onCoursesUpdated={fetchQuestions}
+          />
+        )}
 
-      <AdminModal
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
-        questions={safeQuestions}
-        onDataChanged={fetchQuestions}
-        onDeleteQuestion={handleDeleteQuestion}
-      />
+        {isAdminModalOpen && (
+          <AdminModal
+            isOpen={isAdminModalOpen}
+            onClose={() => setIsAdminModalOpen(false)}
+            questions={safeQuestions}
+            onDataChanged={fetchQuestions}
+            onDeleteQuestion={handleDeleteQuestion}
+          />
+        )}
+      </Suspense>
 
       <HelpOnboardingModal
         onOpenSettings={() => setIsSettingsOpen(true)}
