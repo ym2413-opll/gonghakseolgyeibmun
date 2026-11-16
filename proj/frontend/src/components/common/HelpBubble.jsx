@@ -8,6 +8,59 @@ import { useTheme } from '../../context/ThemeContext';
 // 전역 부동 말풍선 레지스트리 (인접 요소 위 말풍선/버튼이 옆으로 겹치지 않고 아래로 정돈 배치)
 const floatingRegistry = new Map();
 let globalRafId = null;
+let sharedResizeObserver = null;
+let sharedMutationObserver = null;
+let fontsHooked = false;
+
+function scheduleGlobalRecalc() {
+  if (typeof window === 'undefined') return;
+  if (globalRafId !== null) cancelAnimationFrame(globalRafId);
+  globalRafId = requestAnimationFrame(() => {
+    globalRafId = null;
+    recalculateAllFloatingBubbles();
+  });
+}
+
+function ensureGlobalObservers() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  if (!fontsHooked && document.fonts?.ready) {
+    fontsHooked = true;
+    document.fonts.ready.then(() => scheduleGlobalRecalc()).catch(() => {});
+  }
+
+  if (!sharedResizeObserver && typeof ResizeObserver !== 'undefined') {
+    sharedResizeObserver = new ResizeObserver(() => {
+      scheduleGlobalRecalc();
+    });
+    if (document.body) {
+      sharedResizeObserver.observe(document.body);
+    }
+  }
+
+  if (!sharedMutationObserver && typeof MutationObserver !== 'undefined' && document.body) {
+    sharedMutationObserver = new MutationObserver((mutations) => {
+      // 말풍선 자체 포털 DOM 변경은 무시하고, 모달/비동기 리스트 등 외부 레이아웃 변경만 감지
+      const hasExternalLayoutChange = mutations.some((m) => {
+        const targetEl = m.target instanceof Element ? m.target : null;
+        if (targetEl?.closest('.help-bubble-floating, .help-bubble-host')) return false;
+        const nodes = [...m.addedNodes, ...m.removedNodes];
+        if (nodes.length === 0) return false;
+        return nodes.some((n) => {
+          if (!(n instanceof Element)) return false;
+          return !n.classList.contains('help-bubble-floating');
+        });
+      });
+      if (hasExternalLayoutChange) {
+        scheduleGlobalRecalc();
+      }
+    });
+    sharedMutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+}
 
 function isBlockingOverlayOpen() {
   if (typeof document === 'undefined') return false;
@@ -158,15 +211,6 @@ function recalculateAllFloatingBubbles() {
   });
 }
 
-function scheduleGlobalRecalc() {
-  if (typeof window === 'undefined') return;
-  if (globalRafId !== null) cancelAnimationFrame(globalRafId);
-  globalRafId = requestAnimationFrame(() => {
-    globalRafId = null;
-    recalculateAllFloatingBubbles();
-  });
-}
-
 /**
  * R4 사용 도움말 말풍선 컴포넌트
  * - tier: 'SOME' (핵심 기능) | 'ALL' (상세 기능)
@@ -220,18 +264,39 @@ const HelpBubble = ({
       }
     });
 
-    scheduleGlobalRecalc();
+    ensureGlobalObservers();
 
-    const handleTrigger = () => scheduleGlobalRecalc();
+    const hostEl = hostRef.current;
+    const bubbleEl = bubbleRef.current;
+    if (sharedResizeObserver) {
+      if (hostEl) sharedResizeObserver.observe(hostEl);
+      if (bubbleEl) sharedResizeObserver.observe(bubbleEl);
+    }
+
+    recalculateAllFloatingBubbles();
+    scheduleGlobalRecalc();
+    const settleTimer1 = window.setTimeout(scheduleGlobalRecalc, 60);
+    const settleTimer2 = window.setTimeout(scheduleGlobalRecalc, 240);
+
+    const handleTrigger = () => {
+      scheduleGlobalRecalc();
+      window.setTimeout(scheduleGlobalRecalc, 0);
+    };
     window.addEventListener('resize', handleTrigger);
     window.addEventListener('scroll', handleTrigger, true);
-    window.addEventListener('click', handleTrigger, true);
+    window.addEventListener('click', handleTrigger, false);
 
     return () => {
+      window.clearTimeout(settleTimer1);
+      window.clearTimeout(settleTimer2);
       floatingRegistry.delete(id);
+      if (sharedResizeObserver) {
+        if (hostEl) sharedResizeObserver.unobserve(hostEl);
+        if (bubbleEl) sharedResizeObserver.unobserve(bubbleEl);
+      }
       window.removeEventListener('resize', handleTrigger);
       window.removeEventListener('scroll', handleTrigger, true);
-      window.removeEventListener('click', handleTrigger, true);
+      window.removeEventListener('click', handleTrigger, false);
       scheduleGlobalRecalc();
     };
   }, [mode, shouldShow, collapsed, placement, text]);

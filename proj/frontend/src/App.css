@@ -8340,22 +8340,31 @@ body,
   max-width: 100%;
 }
 
-/* 헤더/툴바 등 좁은 가로 배치 영역에서는 재열기(?) 버튼을 옆이 아니라 밑으로 배치 */
+/* 주 버튼의 세로 중앙 정렬을 흐트러뜨리지 않고, 접힘(?) 버튼만 아래에 붙임 */
 .help-bubble-host {
+  position: relative;
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-}
-
-.help-bubble-host.is-collapsed {
-  justify-content: flex-start;
+  gap: 0;
+  vertical-align: middle;
 }
 
 .help-bubble-reopen-btn {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
   width: 18px;
   height: 18px;
+  padding: 0;
   margin: 0;
+  z-index: 125;
+  box-shadow: var(--shadow-sm);
+}
+
+.content-toolbar-actions:has(.help-bubble-host.is-collapsed),
+.forum-thread-actions-right:has(.help-bubble-host.is-collapsed) {
+  padding-bottom: 14px;
 }
 
 .help-bubble-floating.no-arrow::before {
