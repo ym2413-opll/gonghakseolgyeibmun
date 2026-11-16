@@ -6085,13 +6085,31 @@ html[data-theme="dark"] .form-textarea:focus {
 .fontsize-option-item.active {
   border-color: var(--primary-color);
   background: var(--primary-light);
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.fontsize-option-item > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.fontsize-option-item svg {
+  flex-shrink: 0;
 }
 
 .fontsize-label {
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-bottom: 2px;
+}
+
+.help-level-option-list .fontsize-label,
+.exhibition-option-list .fontsize-label {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 3px;
 }
 
 .fontsize-sample {
@@ -7347,9 +7365,12 @@ html[data-theme="green-dark"] .image-viewer-modal-box {
 }
 
 .help-level-option-desc {
-  font-size: 0.76rem;
-  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.38;
+  color: var(--text-secondary);
   margin-top: 2px;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 /* 말풍선 도움말 (HelpBubble) */
@@ -8619,4 +8640,26 @@ body,
     padding: 7px 10px;
     font-size: 0.77rem;
   }
+}
+
+/* 질문·답변 등 본문 콘텐츠 영역은 Pretendard 글꼴 적용 */
+.forum-topic-title,
+.forum-topic-excerpt,
+.forum-thread-h2,
+.forum-post-text,
+.forum-post-line,
+.forum-thread-view .form-input,
+.forum-thread-view .form-textarea,
+.answer-textarea,
+.question-form-card .form-input,
+.question-form-card .textarea-content,
+.textarea-content,
+.ai-textarea,
+.detail-title,
+.detail-text,
+.detail-answers-section p,
+.summary-question-title,
+.sim-question-text,
+.sim-answer-bubble p {
+  font-family: var(--font-family-content);
 }

@@ -17,7 +17,7 @@ const FONT_SIZE_OPTIONS = [
 const HELP_LEVEL_OPTIONS = [
   { id: 'NONE', label: '필요 없음', desc: '표시 안 함' },
   { id: 'SOME', label: '조금', desc: '핵심 안내만 표시' },
-  { id: 'ALL', label: '모두', desc: '필터·알림·편집 팁 전체' }
+  { id: 'ALL', label: '모두', desc: '필터 · 알림 · 편집 팁 전체' }
 ];
 
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
