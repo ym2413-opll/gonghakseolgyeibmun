@@ -7,7 +7,7 @@ import { api } from '../../services/api';
 import { validateSecurity, formatFileSize, isSafeAttachmentUrl, MAX_ATTACHMENTS_COUNT } from '../../utils/fileSecurity';
 import { compressImageClient } from '../../utils/imageCompression';
 import { generateSummaryTitle } from '../../utils/textSummary';
-import { formatPrimaryProfessorLabel } from '../../utils/professorDisplay';
+import ProfessorNameList from '../common/ProfessorNameList';
 import AiRefineModal from './AiRefineModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
 import HelpBubble from '../common/HelpBubble';
@@ -383,7 +383,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 >
                   <span className="course-name">{c.name}</span>
                   <span className="course-prof">
-                    {formatPrimaryProfessorLabel(c)} ({c.section})
+                    <ProfessorNameList course={c} mode="primary" /> ({c.section})
                   </span>
                 </button>
               ))}

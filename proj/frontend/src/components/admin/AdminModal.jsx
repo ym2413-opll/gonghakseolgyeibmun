@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { formatCourseProfessorsSummary } from '../../utils/professorDisplay';
+import ProfessorNameList from '../common/ProfessorNameList';
 import {
   ShieldAlert,
   X,
@@ -451,19 +451,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 <div className="admin-chip-list-wrap">
                   <div className="admin-chip-header">등록된 교과목 ({allCourses.length}개)</div>
                   <div className="admin-chip-list">
-                    {allCourses.slice(0, 24).map((c) => {
-                      const profLabel = formatCourseProfessorsSummary(c);
-                      return (
-                        <span key={c.id} className="admin-dept-chip">
-                          {c.name}{' '}
-                          <small>
-                            ({c.code}
-                            {c.department ? ` · ${c.department}` : ''}
-                            {` · 담당: ${profLabel}`})
-                          </small>
-                        </span>
-                      );
-                    })}
+                    {allCourses.slice(0, 24).map((c) => (
+                      <span key={c.id} className="admin-dept-chip">
+                        {c.name}{' '}
+                        <small>
+                          ({c.code}
+                          {c.department ? ` · ${c.department}` : ''}
+                          {' · 담당: '}
+                          <ProfessorNameList course={c} mode="all" />)
+                        </small>
+                      </span>
+                    ))}
                   </div>
                 </div>
               </div>

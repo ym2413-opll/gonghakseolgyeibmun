@@ -7609,3 +7609,14 @@ html[data-theme="green-dark"] .image-viewer-modal-box {
     max-width: calc(100vw - 24px);
   }
 }
+
+.prof-name-registered {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.prof-name-unregistered {
+  color: var(--text-muted);
+  opacity: 0.72;
+  font-weight: 400;
+}

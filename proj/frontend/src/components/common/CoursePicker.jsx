@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { formatCourseProfessorsSummary } from '../../utils/professorDisplay';
+import ProfessorNameList from './ProfessorNameList';
 
 /**
  * Reusable searchable multi-course checkbox picker shared across
@@ -98,7 +99,8 @@ const CoursePicker = ({
                   {course.name}
                   {course.code ? ` (${course.code})` : ''}
                   {scopeLabel ? ` · ${scopeLabel}` : ''}
-                  {` · 담당: ${profLabel}`}
+                  {' · 담당: '}
+                  <ProfessorNameList course={course} mode="all" />
                 </span>
               </label>
             );
