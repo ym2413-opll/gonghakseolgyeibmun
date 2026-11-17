@@ -7895,10 +7895,7 @@ body,
 
 .forum-topic-title,
 .forum-thread-h2,
-.forum-post-text,
-.forum-post-line,
 .forum-post-author-name,
-.admin-email-log-subject,
 .admin-dept-chip,
 .auth-gate-desc,
 .notif-item-title,
@@ -7907,10 +7904,50 @@ body,
 .course-pill-text,
 .course-name,
 .course-prof,
+.stat-label,
+.stat-sub,
+.form-label,
+.modal-title,
+.settings-section-title,
+.category-toggle-title,
+.category-toggle-desc,
+.role-select-title,
+.fontsize-label,
+.help-level-option-desc {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.forum-post-text,
+.forum-post-line,
+.admin-email-log-subject,
 .attachment-filename,
 .file-name {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: break-word;
+}
+
+.badge,
+.status-pill,
+.forum-role-tag,
+.forum-status-chip,
+.anon-tag,
+.anon-badge,
+.badge-thread-open,
+.badge-thread-closed,
+.thread-lock-badge,
+.co-prof-available-badge,
+.post-seq-badge,
+.filter-chip,
+.admin-tab-btn,
+.md-mode-tab,
+.btn {
+  word-break: keep-all;
+  white-space: nowrap;
+}
+
+.forum-post-stream {
+  overflow-anchor: none;
 }
 
 .attachments-grid {
@@ -8366,12 +8403,11 @@ body,
   .forum-course-pill,
   .course-pill,
   .prof-pill,
-  .status-pill,
-  .forum-role-tag,
   .admin-dept-chip {
     max-width: 100%;
     white-space: normal;
-    word-break: break-word;
+    word-break: keep-all;
+    overflow-wrap: break-word;
   }
 
   .prof-summary-stats {
@@ -8624,9 +8660,13 @@ body,
   box-sizing: border-box;
 }
 
+.help-bubble-floating {
+  max-width: min(340px, calc(100vw - 24px));
+}
+
 .help-bubble-text {
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .help-bubble-reopen-pill {
@@ -8636,7 +8676,7 @@ body,
 
 @media (max-width: 640px) {
   .help-bubble-floating {
-    max-width: min(250px, calc(100vw - 20px));
+    max-width: min(300px, calc(100vw - 20px));
     padding: 7px 10px;
     font-size: 0.77rem;
   }

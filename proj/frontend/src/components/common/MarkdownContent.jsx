@@ -1,6 +1,6 @@
 // src/components/common/MarkdownContent.jsx
 // XSS 안전 GFM Markdown + 포럼 전용 토큰([사진 k], [#N 사진 k], #N 글 인용) 렌더러
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,6 +18,20 @@ import {
   remarkStripKoreanSentinels,
   safeMarkdownUrlTransform
 } from '../../utils/markdown';
+
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks, remarkStripKoreanSentinels];
+const REHYPE_PLUGINS = [
+  [
+    rehypeKatex,
+    {
+      strict: false,
+      throwOnError: false,
+      trust: false,
+      maxExpand: 200,
+      maxSize: 100
+    }
+  ]
+];
 
 const TOKEN_PATTERN_SOURCE =
   '(\\[#\\d+\\s*[-:]?\\s*사진\\s*\\d+\\]|\\[사진\\s*#\\d+\\s*[-:\\s]\\s*\\d+\\]|\\[사진\\s*\\d+\\]|#\\d+(?!\\d))';
@@ -277,7 +291,7 @@ function MarkdownInlineImage({ src, alt }) {
   );
 }
 
-export default function MarkdownContent({
+function MarkdownContentInner({
   content,
   currentSeq = 1,
   imagesBySeq = null,
@@ -313,130 +327,122 @@ export default function MarkdownContent({
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 
-  const safeContent = preprocessKoreanMarkdown(
-    typeof content === 'string' ? content : String(content || '')
+  const safeContent = useMemo(
+    () => preprocessKoreanMarkdown(typeof content === 'string' ? content : String(content || '')),
+    [content]
   );
-  const ctx = { currentSeq, imagesBySeq, validSeqSet, onJumpToSeq };
 
-  const renderBlockWithTokens = (Tag, children, appendFigures = true) => {
-    const figures = [];
-    const transformed =
-      imagesBySeq || validSeqSet
-        ? transformInlineChildren(children, ctx, figures, Tag)
-        : children;
-    return (
-      <>
-        <Tag>{transformed}</Tag>
-        {appendFigures && <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />}
-      </>
-    );
-  };
-
-  const components = {
-    p: ({ children }) => renderBlockWithTokens('p', children, true),
-    h1: ({ children }) => renderBlockWithTokens('h1', children, true),
-    h2: ({ children }) => renderBlockWithTokens('h2', children, true),
-    h3: ({ children }) => renderBlockWithTokens('h3', children, true),
-    h4: ({ children }) => renderBlockWithTokens('h4', children, true),
-    h5: ({ children }) => renderBlockWithTokens('h5', children, true),
-    h6: ({ children }) => renderBlockWithTokens('h6', children, true),
-    li: ({ node, className: liClass, children }) => {
-      const safeLiClass = typeof liClass === 'string' && liClass === 'task-list-item' ? liClass : undefined;
-      const hasParagraphChild = Boolean(
-        node?.children?.some((c) => c.type === 'element' && c.tagName === 'p')
-      );
-      if (hasParagraphChild || (!imagesBySeq && !validSeqSet)) {
-        return <li className={safeLiClass}>{children}</li>;
-      }
-      const figures = [];
-      const transformed = transformInlineChildren(children, ctx, figures, 'li');
-      return (
-        <li className={safeLiClass}>
-          {transformed}
-          <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />
-        </li>
-      );
-    },
-    td: ({ align, children }) => {
-      const safeAlign = align === 'left' || align === 'center' || align === 'right' ? align : undefined;
+  const components = useMemo(() => {
+    const ctx = { currentSeq, imagesBySeq, validSeqSet, onJumpToSeq };
+    const renderBlockWithTokens = (Tag, children, appendFigures = true) => {
       const figures = [];
       const transformed =
         imagesBySeq || validSeqSet
-          ? transformInlineChildren(children, ctx, figures, 'td')
+          ? transformInlineChildren(children, ctx, figures, Tag)
           : children;
       return (
-        <td style={safeAlign ? { textAlign: safeAlign } : undefined}>
-          {transformed}
-          <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />
-        </td>
+        <>
+          <Tag>{transformed}</Tag>
+          {appendFigures && <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />}
+        </>
       );
-    },
-    th: ({ align, children }) => {
-      const safeAlign = align === 'left' || align === 'center' || align === 'right' ? align : undefined;
-      const figures = [];
-      const transformed =
-        imagesBySeq || validSeqSet
-          ? transformInlineChildren(children, ctx, figures, 'th')
-          : children;
-      return <th style={safeAlign ? { textAlign: safeAlign } : undefined}>{transformed}</th>;
-    },
-    table: ({ children }) => (
-      <div className="md-table-wrap">
-        <table>{children}</table>
-      </div>
-    ),
-    a: ({ href, children }) => {
-      if (!isSafeMarkdownHref(href)) {
+    };
+
+    return {
+      p: ({ children }) => renderBlockWithTokens('p', children, true),
+      h1: ({ children }) => renderBlockWithTokens('h1', children, true),
+      h2: ({ children }) => renderBlockWithTokens('h2', children, true),
+      h3: ({ children }) => renderBlockWithTokens('h3', children, true),
+      h4: ({ children }) => renderBlockWithTokens('h4', children, true),
+      h5: ({ children }) => renderBlockWithTokens('h5', children, true),
+      h6: ({ children }) => renderBlockWithTokens('h6', children, true),
+      li: ({ node, className: liClass, children }) => {
+        const safeLiClass = typeof liClass === 'string' && liClass === 'task-list-item' ? liClass : undefined;
+        const hasParagraphChild = Boolean(
+          node?.children?.some((c) => c.type === 'element' && c.tagName === 'p')
+        );
+        if (hasParagraphChild || (!imagesBySeq && !validSeqSet)) {
+          return <li className={safeLiClass}>{children}</li>;
+        }
+        const figures = [];
+        const transformed = transformInlineChildren(children, ctx, figures, 'li');
         return (
-          <span className="md-blocked-link" title="보안 정책상 허용되지 않은 링크입니다.">
-            {children}
+          <li className={safeLiClass}>
+            {transformed}
+            <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />
+          </li>
+        );
+      },
+      td: ({ align, children }) => {
+        const safeAlign = align === 'left' || align === 'center' || align === 'right' ? align : undefined;
+        const figures = [];
+        const transformed =
+          imagesBySeq || validSeqSet
+            ? transformInlineChildren(children, ctx, figures, 'td')
+            : children;
+        return (
+          <td style={safeAlign ? { textAlign: safeAlign } : undefined}>
+            {transformed}
+            <InlinePhotoFigures figures={figures} onJumpToSeq={onJumpToSeq} />
+          </td>
+        );
+      },
+      th: ({ align, children }) => {
+        const safeAlign = align === 'left' || align === 'center' || align === 'right' ? align : undefined;
+        const figures = [];
+        const transformed =
+          imagesBySeq || validSeqSet
+            ? transformInlineChildren(children, ctx, figures, 'th')
+            : children;
+        return <th style={safeAlign ? { textAlign: safeAlign } : undefined}>{transformed}</th>;
+      },
+      table: ({ children }) => (
+        <div className="md-table-wrap">
+          <table>{children}</table>
+        </div>
+      ),
+      a: ({ href, children }) => {
+        if (!isSafeMarkdownHref(href)) {
+          return (
+            <span className="md-blocked-link" title="보안 정책상 허용되지 않은 링크입니다.">
+              {children}
+            </span>
+          );
+        }
+        return (
+          <span className="md-link-wrap">
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="md-link"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPendingLinkHref(href);
+              }}
+            >
+              {children}
+            </a>
+            {isAdmin && (
+              <span className="md-admin-link-url" title={`실제 이동 경로: ${href}`}>
+                ({href})
+              </span>
+            )}
           </span>
         );
-      }
-      return (
-        <span className="md-link-wrap">
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer nofollow"
-            className="md-link"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setPendingLinkHref(href);
-            }}
-          >
-            {children}
-          </a>
-          {isAdmin && (
-            <span className="md-admin-link-url" title={`실제 이동 경로: ${href}`}>
-              ({href})
-            </span>
-          )}
-        </span>
-      );
-    },
-    img: ({ node: _node, src, alt }) => <MarkdownInlineImage key={src} src={src} alt={alt} />
-  };
+      },
+      img: ({ node: _node, src, alt }) => <MarkdownInlineImage key={src} src={src} alt={alt} />
+    };
+  }, [currentSeq, imagesBySeq, validSeqSet, onJumpToSeq, isAdmin]);
 
   const isMailto = Boolean(pendingLinkHref && pendingLinkHref.toLowerCase().startsWith('mailto:'));
 
   return (
     <div className={`md-content ${className}`.trim()}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkStripKoreanSentinels]}
-        rehypePlugins={[
-          [
-            rehypeKatex,
-            {
-              strict: false,
-              throwOnError: false,
-              trust: false,
-              maxExpand: 200,
-              maxSize: 100
-            }
-          ]
-        ]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         urlTransform={safeMarkdownUrlTransform}
         components={components}
       >
@@ -506,3 +512,6 @@ export default function MarkdownContent({
     </div>
   );
 }
+
+const MarkdownContent = React.memo(MarkdownContentInner);
+export default MarkdownContent;

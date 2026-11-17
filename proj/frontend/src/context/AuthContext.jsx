@@ -42,7 +42,16 @@ export const AuthProvider = ({ children }) => {
           setCurrentUser(null);
           return null;
         }
-        setCurrentUser(updated);
+        setCurrentUser((prev) => {
+          try {
+            if (prev && JSON.stringify(prev) === JSON.stringify(updated)) {
+              return prev;
+            }
+          } catch {
+            // ignore serialization errors
+          }
+          return updated;
+        });
         return updated;
       }
     } catch (err) {

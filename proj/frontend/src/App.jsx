@@ -185,24 +185,42 @@ function MainApp() {
 
   const handleUpdateQuestion = async (questionId, updatedFields) => {
     const updated = await api.updateQuestion(questionId, updatedFields, currentUser?.id);
-    await fetchQuestions();
-    await fetchSelectedDetail(questionId);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
     showToast('질문 내용이 수정되었습니다.');
     return updated;
   };
 
   const handleAddAnswer = async (questionId, answerPayload) => {
     await api.createAnswer(questionId, answerPayload);
-    await fetchQuestions();
-    await fetchSelectedDetail(questionId);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
     setRefreshTrigger((prev) => prev + 1);
     showToast('답변이 등록되었습니다.');
   };
 
   const handleAddFollowUp = async (questionId, followUpPayload) => {
     await api.createFollowUp(questionId, followUpPayload);
-    await fetchQuestions();
-    await fetchSelectedDetail(questionId);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
     setRefreshTrigger((prev) => prev + 1);
     showToast('추가 질문(꼬리질문)이 등록되었습니다.');
   };

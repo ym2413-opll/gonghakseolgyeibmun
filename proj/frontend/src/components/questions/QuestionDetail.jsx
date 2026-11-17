@@ -1,6 +1,6 @@
 // src/components/questions/QuestionDetail.jsx
 // 서양식 포럼(Western-Style Forum) 스레드 포스트 스트림 (#1 OP -> #2, #3 Replies) 상세 컴포넌트
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
@@ -149,6 +149,41 @@ const QuestionDetail = ({
   const [isFollowUpPreview, setIsFollowUpPreview] = useState(false);
   const [isAnswerPreview, setIsAnswerPreview] = useState(false);
 
+  const answers = useMemo(
+    () => (Array.isArray(question?.answers) ? question.answers : []),
+    [question?.answers]
+  );
+
+  const { validSeqSet, imagesBySeq, nextSequenceNumber } = useMemo(() => {
+    const seqSet = new Set([1]);
+    const imgMap = new Map();
+    imgMap.set(1, getImageAttachments(question?.attachments));
+
+    let maxSeq = Number(question?.lastSequenceNumber || 1);
+    answers.forEach((ans, idx) => {
+      const seq = Number(ans.sequenceNumber || idx + 2);
+      seqSet.add(seq);
+      if (seq > maxSeq) maxSeq = seq;
+      imgMap.set(seq, getImageAttachments(ans.attachments));
+    });
+
+    return {
+      validSeqSet: seqSet,
+      imagesBySeq: imgMap,
+      nextSequenceNumber: maxSeq + 1
+    };
+  }, [question?.attachments, question?.lastSequenceNumber, answers]);
+
+  const handleJumpToSeq = useCallback((seqNum) => {
+    const target = document.getElementById(`post-seq-${seqNum}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedSeq(seqNum);
+    setTimeout(() => {
+      setHighlightedSeq((prev) => (prev === seqNum ? null : prev));
+    }, 1800);
+  }, []);
+
   if (!question) {
     return (
       <div className="question-detail-empty">
@@ -161,31 +196,7 @@ const QuestionDetail = ({
 
   const categoryKey = (question.category || 'lecture').toLowerCase();
   const category = CATEGORY_DEFINITIONS[categoryKey] || CATEGORY_DEFINITIONS.lecture;
-  const answers = Array.isArray(question.answers) ? question.answers : [];
   const isThreadOpen = Boolean(question.isThreadOpen);
-
-  const validSeqSet = new Set([1]);
-  const imagesBySeq = new Map();
-  imagesBySeq.set(1, getImageAttachments(question.attachments));
-
-  let maxSeq = Number(question.lastSequenceNumber || 1);
-  answers.forEach((ans, idx) => {
-    const seq = Number(ans.sequenceNumber || idx + 2);
-    validSeqSet.add(seq);
-    if (seq > maxSeq) maxSeq = seq;
-    imagesBySeq.set(seq, getImageAttachments(ans.attachments));
-  });
-  const nextSequenceNumber = maxSeq + 1;
-
-  const handleJumpToSeq = (seqNum) => {
-    const target = document.getElementById(`post-seq-${seqNum}`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setHighlightedSeq(seqNum);
-    setTimeout(() => {
-      setHighlightedSeq((prev) => (prev === seqNum ? null : prev));
-    }, 1800);
-  };
 
   const isPrimaryProf =
     isProfessor &&
