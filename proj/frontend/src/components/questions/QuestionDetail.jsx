@@ -348,6 +348,9 @@ const QuestionDetail = ({
       setErrorMsg('첨부 파일 보안 검사 및 업로드가 진행 중입니다. 잠시만 기다려 주세요.');
       return;
     }
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setErrorMsg('');
     setIsSubmitting(true);
     try {
@@ -388,6 +391,9 @@ const QuestionDetail = ({
     if (isProcessingFollowUpFiles) {
       setErrorMsg('첨부 파일 보안 검사 및 업로드가 진행 중입니다. 잠시만 기다려 주세요.');
       return;
+    }
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
     }
     setErrorMsg('');
     setIsSubmitting(true);
@@ -887,7 +893,7 @@ const QuestionDetail = ({
                       )}
                     </span>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                       {canModerateAns && onToggleHideAnswer && (
                         <button
                           type="button"

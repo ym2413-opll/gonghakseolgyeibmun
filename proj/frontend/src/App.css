@@ -5161,6 +5161,8 @@ html[data-theme="green-dark"] .browser-notif-active-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border-color);
   font-size: 0.76rem;
@@ -7938,14 +7940,30 @@ body,
 .thread-lock-badge,
 .co-prof-available-badge,
 .post-seq-badge,
+.post-index-badge,
+.seq-anchor-link,
+.inline-photo-token,
+.photo-insert-btn,
+.btn-admin-inline-hide,
+.btn-admin-inline-delete,
+.btn-ai-assist,
+.btn-ai-assist-inline,
+.btn-similar-search,
+.btn-view-similar,
+.btn-text-xs,
 .filter-chip,
 .admin-tab-btn,
 .md-mode-tab,
 .btn {
   word-break: keep-all;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
+html,
+body,
+.forum-split-right,
+.forum-thread-view,
 .forum-post-stream {
   overflow-anchor: none;
 }
