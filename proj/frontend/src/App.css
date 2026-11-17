@@ -8844,17 +8844,29 @@ body,
   display: block;
 }
 
+.md-content p:has(.katex),
+.md-content li:has(.katex) {
+  line-height: 2.05;
+}
+
 .md-content .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
   max-width: 100%;
-  margin: 0.65em 0;
-  padding: 4px 2px;
+  margin: 0.75em 0;
+  padding: 10px 4px;
+}
+
+.md-content .katex-display > .katex {
+  display: inline-block;
+  min-width: min-content;
+  text-align: center;
 }
 
 .md-content .katex {
-  font-size: 1.08em;
-  line-height: 1.2;
+  font-size: 1.06em;
+  line-height: 1.25;
+  padding: 0 2px;
   overflow-wrap: normal;
   word-break: normal;
   text-indent: 0;
