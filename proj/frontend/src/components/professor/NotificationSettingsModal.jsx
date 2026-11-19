@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { CATEGORY_LIST } from '../../services/mockData';
 import CoursePicker from '../common/CoursePicker';
+import HelpBubble from '../common/HelpBubble';
 import {
   X,
   BellOff,
@@ -146,6 +147,13 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
         </div>
 
         <div className="modal-body">
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="담당 과목, 이메일 수신 주소, 방해금지 시간대를 설정해요. 방해금지 중 알림은 종료 시각에 한꺼번에 전달돼요."
+            className="mb-help-bubble"
+          />
+
           <div className="settings-section">
             <div className="settings-title-group" style={{ marginBottom: 10 }}>
               <BookOpen size={17} className="text-primary" />
@@ -280,6 +288,12 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
           {/* 3. 같은 과목 다른 교수 질문 알림 수신 설정 */}
           <div className="settings-section">
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="타 분반 강의 질문 알림을 켜면 같은 과목의 열린 미답변 질문도 받고, 원치 않는 질문 유형은 잠시 끌 수 있어요."
+              className="mb-help-bubble"
+            />
             <div className="settings-header-row">
               <div className="settings-title-group">
                 <Users size={17} className="text-primary" />

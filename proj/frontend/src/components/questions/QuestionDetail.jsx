@@ -499,21 +499,28 @@ const QuestionDetail = ({
           )}
 
           {isAdmin && onToggleHideQuestion && (
-            <button
-              type="button"
-              className={`btn btn-sm ${question.isHidden ? 'btn-secondary' : 'btn-outline'}`}
-              onClick={() => onToggleHideQuestion(question)}
+            <HelpBubble
+              tier="ALL"
+              mode="floating"
+              placement="bottom-end"
+              text="부적절한 질문을 가리거나 영구 삭제하고, 익명 글의 실제 작성자를 확인할 수 있어요."
             >
-              {question.isHidden ? (
-                <>
-                  <Eye size={14} /> 가리기 해제
-                </>
-              ) : (
-                <>
-                  <EyeOff size={14} /> 가리기
-                </>
-              )}
-            </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${question.isHidden ? 'btn-secondary' : 'btn-outline'}`}
+                onClick={() => onToggleHideQuestion(question)}
+              >
+                {question.isHidden ? (
+                  <>
+                    <Eye size={14} /> 가리기 해제
+                  </>
+                ) : (
+                  <>
+                    <EyeOff size={14} /> 가리기
+                  </>
+                )}
+              </button>
+            </HelpBubble>
           )}
 
           {(isAdmin || canDeleteQuestion) && onDeleteQuestion && (
@@ -527,13 +534,20 @@ const QuestionDetail = ({
           )}
 
           {canEditQuestion && !isEditing && (
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={handleStartEdit}
+            <HelpBubble
+              tier="ALL"
+              mode="floating"
+              placement="bottom-end"
+              text="답변이 달리기 전까지 질문 제목·본문·익명 여부를 수정할 수 있어요."
             >
-              <Edit3 size={14} /> 수정
-            </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={handleStartEdit}
+              >
+                <Edit3 size={14} /> 수정
+              </button>
+            </HelpBubble>
           )}
         </div>
       </div>
@@ -608,7 +622,7 @@ const QuestionDetail = ({
       <HelpBubble
         tier="SOME"
         mode="inline"
-        text="#번호를 눌러 해당 글로 이동해요. 열림 상태면 다른 학생도 답변할 수 있어요."
+        text="#번호를 눌러 해당 글로 이동해요. 외부 링크는 안전 확인창을 거쳐 열리며, 작성자는 AI 초안을 다시 볼 수 있어요."
         className="mb-help-bubble"
       />
 
@@ -678,6 +692,12 @@ const QuestionDetail = ({
 
             {isEditing ? (
               <form className="edit-question-form" onSubmit={handleSaveEdit}>
+                <HelpBubble
+                  tier="ALL"
+                  mode="inline"
+                  text="편집/미리보기, 수식 입력, 문장 다듬기([[지시사항]] 포함)를 사용해 질문을 고칠 수 있어요."
+                  className="mb-help-bubble"
+                />
                 <div className="form-group">
                   <label className="form-label">질문 제목 수정</label>
                   <input
@@ -699,7 +719,7 @@ const QuestionDetail = ({
                         onClick={() => setFormulaModalTarget('edit')}
                       >
                         <Sigma size={14} />
-                        <span>AI 수식 도우미</span>
+                        <span>수식 입력</span>
                       </button>
                       <button
                         type="button"
@@ -1035,7 +1055,7 @@ const QuestionDetail = ({
           <HelpBubble
             tier="ALL"
             mode="inline"
-            text="#번호로 글을 인용하고, 파일 첨부 및 [사진 1] · [#1 사진 1] 태그로 본인 또는 다른 글의 이미지를 삽입해요."
+            text="#번호로 글을 인용하고 [사진 1]·[#1 사진 1]으로 이미지를 넣어요. 수식 입력과 문장 다듬기([[지시사항]])도 쓸 수 있어요."
             className="mb-help-bubble"
           />
 
@@ -1055,7 +1075,7 @@ const QuestionDetail = ({
                   onClick={() => setFormulaModalTarget('followUp')}
                 >
                   <Sigma size={14} />
-                  <span>AI 수식 도우미</span>
+                  <span>수식 입력</span>
                 </button>
                 <button
                   type="button"
@@ -1187,7 +1207,7 @@ const QuestionDetail = ({
               <HelpBubble
                 tier="ALL"
                 mode="inline"
-                text="#번호로 글을 인용하고, 파일 첨부 및 [사진 1] · [#1 사진 1] 태그로 본인 또는 다른 글의 이미지를 삽입해요."
+                text="마크다운, 수식 입력, #번호 인용, [사진 1]·[#1 사진 1] 태그를 지원해요. 미리보기 탭으로 확인한 뒤 등록하세요."
                 className="mb-help-bubble"
               />
               <div className="answer-form-header">
@@ -1221,7 +1241,7 @@ const QuestionDetail = ({
                     onClick={() => setFormulaModalTarget('answer')}
                   >
                     <Sigma size={14} />
-                    <span>AI 수식 도우미</span>
+                    <span>수식 입력</span>
                   </button>
                 </div>
               </div>

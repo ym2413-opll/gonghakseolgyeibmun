@@ -201,7 +201,7 @@ export default function AttachmentUploader({
         <HelpBubble
           tier="ALL"
           mode="inline"
-          text="파일을 첨부하고 [사진 1] 태그로 본문에 넣어요."
+          text="파일을 첨부하면 보안 검사·이미지 압축을 거쳐 올라가요. [사진 1] 버튼으로 본문에 넣을 수 있어요."
           className="mb-help-bubble"
         />
       )}

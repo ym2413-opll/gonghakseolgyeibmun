@@ -9087,8 +9087,12 @@ body,
 }
 
 /* =========================================================
-   AI 수식 입력 도우미 & 본문 [[지시사항]] UI 스타일
+   수식 입력 & 본문 [[지시사항]] UI 스타일
    ========================================================= */
+.notif-help-bubble {
+  margin: 8px 12px 2px;
+}
+
 .btn-ai-formula {
   background: var(--bg-card-subtle);
   border: 1px solid var(--border-color);
@@ -9124,17 +9128,10 @@ body,
   gap: 14px;
 }
 
-.formula-quick-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .formula-mode-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -9198,23 +9195,6 @@ body,
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.formula-result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.formula-engine-badge {
-  font-size: 0.74rem;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--bg-card-subtle);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
 }
 
 .formula-preview-box {

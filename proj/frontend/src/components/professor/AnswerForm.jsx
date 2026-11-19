@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import AiFormulaModal from '../common/AiFormulaModal';
+import HelpBubble from '../common/HelpBubble';
 import { Send, CheckCircle2, Lock, ShieldAlert, Users, Sigma } from 'lucide-react';
 
 export default function AnswerForm({ question, onAnswerAdded }) {
@@ -123,6 +124,12 @@ export default function AnswerForm({ question, onAnswerAdded }) {
 
       {canAnswer ? (
         <form onSubmit={handleSubmit} className="answer-form">
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="마크다운과 수식 입력으로 답변을 작성할 수 있어요."
+            className="mb-help-bubble"
+          />
           <div className="ans-input-header">
             <span className="ans-author-preview">
               작성자: <strong>{currentUser.name}</strong> (담당교수)
@@ -133,7 +140,7 @@ export default function AnswerForm({ question, onAnswerAdded }) {
               onClick={() => setIsFormulaModalOpen(true)}
             >
               <Sigma size={14} />
-              <span>AI 수식 도우미</span>
+              <span>수식 입력</span>
             </button>
           </div>
 

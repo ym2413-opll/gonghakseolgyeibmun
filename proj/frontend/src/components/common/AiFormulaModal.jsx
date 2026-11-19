@@ -1,17 +1,11 @@
 // src/components/common/AiFormulaModal.jsx
-// 자연어 설명을 KaTeX 호환 LaTeX 수식으로 변환해 본문 커서 위치에 삽입하는 AI 수식 입력 도우미 모달
+// 자연어 설명을 KaTeX 호환 LaTeX 수식으로 변환해 본문 커서 위치에 삽입하는 수식 입력 모달
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Sigma, Sparkles, X, Loader2, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import MarkdownContent from './MarkdownContent';
-
-const FORMULA_EXAMPLES = [
-  { label: '근의 공식', query: '이차방정식 근의 공식' },
-  { label: '코사인 테일러 급수', query: '코사인 함수의 테일러 급수' },
-  { label: '정적분', query: 'a부터 b까지 f(x)의 정적분' },
-  { label: '2×2 행렬', query: '2x2 행렬' }
-];
+import HelpBubble from './HelpBubble';
 
 const BLOCKED_LATEX_COMMANDS = new Set([
   'href', 'url', 'includegraphics', 'htmldata', 'htmlstyle', 'htmlclass', 'htmlid',
@@ -128,16 +122,17 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
   const [instruction, setInstruction] = useState('');
   const [displayMode, setDisplayMode] = useState('inline');
   const [latex, setLatex] = useState('');
-  const [hasResult, setHasResult] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [usedAi, setUsedAi] = useState(null);
 
   const instructionRef = useRef(null);
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const reqIdRef = useRef(0);
   const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -155,10 +150,9 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
     };
   }, []);
 
-  const handleGenerate = async (customQuery, customMode) => {
+  const handleGenerate = async () => {
     if (isLoading) return;
-    const query = (customQuery !== undefined ? customQuery : instruction).trim();
-    const mode = customMode || displayMode;
+    const query = instruction.trim();
     if (!query) {
       setErrorMsg('원하는 수식을 문장으로 입력해 주세요.');
       return;
@@ -168,11 +162,9 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
     setIsLoading(true);
     setErrorMsg('');
     try {
-      const result = await api.generateFormulaAI(query, mode);
+      const result = await api.generateFormulaAI(query, displayMode);
       if (!isMountedRef.current || reqId !== reqIdRef.current) return;
       setLatex(result.latex || '');
-      setHasResult(true);
-      setUsedAi(Boolean(result.usedAi));
     } catch (err) {
       if (!isMountedRef.current || reqId !== reqIdRef.current) return;
       setErrorMsg(err.message || '수식을 생성하지 못했습니다.');
@@ -218,7 +210,7 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
         <div className="modal-header ai-modal-header">
           <div className="modal-title" id="ai-formula-modal-title">
             <Sigma size={18} />
-            <span>AI 수식 입력 도우미</span>
+            <span>수식 입력</span>
           </div>
           <button
             type="button"
@@ -231,49 +223,15 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
         </div>
 
         <div className="modal-body ai-formula-body">
-          <div className="formula-quick-row">
-            <span className="template-label">예시:</span>
-            <div className="template-chips">
-              {FORMULA_EXAMPLES.map((ex) => (
-                <button
-                  key={ex.label}
-                  type="button"
-                  className="template-chip-btn"
-                  disabled={isLoading}
-                  onClick={() => {
-                    setInstruction(ex.query);
-                    handleGenerate(ex.query, displayMode);
-                  }}
-                >
-                  {ex.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="formula-mode-row">
-            <span className="ai-sub-label" style={{ marginBottom: 0 }}>표시 형식</span>
-            <div className="formula-mode-tabs" role="radiogroup" aria-label="수식 표시 형식">
-              <button
-                type="button"
-                className={`formula-mode-btn ${displayMode === 'inline' ? 'active' : ''}`}
-                onClick={() => setDisplayMode('inline')}
-              >
-                인라인 ($...$)
-              </button>
-              <button
-                type="button"
-                className={`formula-mode-btn ${displayMode === 'block' ? 'active' : ''}`}
-                onClick={() => setDisplayMode('block')}
-              >
-                블록 ($$...$$)
-              </button>
-            </div>
-          </div>
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="원하는 수식을 문장으로 적고 변환을 누르거나 LaTeX를 직접 입력해요. 줄과 같이/따로 놓기를 골라 본문에 넣을 수 있어요."
+          />
 
           <div className="formula-input-group">
             <label className="ai-sub-label" htmlFor="ai-formula-instruction">
-              수식 설명
+              원하는 수식
             </label>
             <div className="formula-instruction-row">
               <textarea
@@ -282,7 +240,7 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
                 className="form-textarea formula-instruction-input"
                 rows={2}
                 maxLength={500}
-                placeholder="원하는 수식을 문장으로 입력하세요."
+                placeholder="원하는 수식을 입력하세요."
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 onKeyDown={(e) => {
@@ -301,14 +259,37 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
                 {isLoading ? (
                   <>
                     <Loader2 size={14} className="spinning" />
-                    <span>생성 중...</span>
+                    <span>변환 중...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles size={14} />
-                    <span>수식 변환</span>
+                    <span>변환</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+
+          <div className="formula-mode-row">
+            <div className="formula-mode-tabs" role="radiogroup" aria-label="수식 배치 방식">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={displayMode === 'inline'}
+                className={`formula-mode-btn ${displayMode === 'inline' ? 'active' : ''}`}
+                onClick={() => setDisplayMode('inline')}
+              >
+                줄과 같이 놓기
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={displayMode === 'block'}
+                className={`formula-mode-btn ${displayMode === 'block' ? 'active' : ''}`}
+                onClick={() => setDisplayMode('block')}
+              >
+                줄과 따로 놓기
               </button>
             </div>
           </div>
@@ -319,37 +300,28 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
             </div>
           )}
 
-          {hasResult && (
-            <div className="formula-result-section">
-              <div className="formula-result-header">
-                <span className="ai-sub-label" style={{ marginBottom: 0 }}>수식 미리보기</span>
-                {usedAi !== null && (
-                  <span className="formula-engine-badge">
-                    {usedAi ? 'AI 변환' : '기본 변환'}
-                  </span>
-                )}
-              </div>
-              <div className="formula-preview-box">
-                {wrappedFormula ? (
-                  <MarkdownContent content={wrappedFormula} />
-                ) : (
-                  <span className="md-preview-empty">LaTeX 수식을 입력해 주세요.</span>
-                )}
-              </div>
-
-              <label className="ai-sub-label" htmlFor="ai-formula-latex" style={{ marginTop: 10 }}>
-                LaTeX 결과 (직접 수정 가능)
-              </label>
-              <textarea
-                id="ai-formula-latex"
-                className="form-textarea formula-latex-input"
-                rows={2}
-                maxLength={2000}
-                value={latex}
-                onChange={(e) => setLatex(e.target.value)}
-              />
+          <div className="formula-result-section">
+            <span className="ai-sub-label" style={{ marginBottom: 0 }}>수식 미리보기</span>
+            <div className="formula-preview-box">
+              {wrappedFormula ? (
+                <MarkdownContent content={wrappedFormula} />
+              ) : (
+                <span className="md-preview-empty">변환된 수식이 여기에 표시됩니다.</span>
+              )}
             </div>
-          )}
+
+            <label className="ai-sub-label" htmlFor="ai-formula-latex" style={{ marginTop: 10 }}>
+              LaTeX 결과
+            </label>
+            <textarea
+              id="ai-formula-latex"
+              className="form-textarea formula-latex-input"
+              rows={2}
+              maxLength={2000}
+              value={latex}
+              onChange={(e) => setLatex(e.target.value)}
+            />
+          </div>
         </div>
 
         <div className="modal-footer ai-modal-footer">

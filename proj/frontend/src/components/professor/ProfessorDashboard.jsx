@@ -266,6 +266,12 @@ const ProfessorDashboard = ({
       </div>
 
       {/* 질문 테이블 헤더 */}
+      <HelpBubble
+        tier="ALL"
+        mode="inline"
+        text="질문을 열어 답변을 달거나 열림/닫힘 상태를 전환해요. 열린 타 분반 미답변 질문은 공동 답변할 수 있어요."
+        className="mb-help-bubble"
+      />
       <div className="forum-table-header">
         <div className="forum-col-topic">질문</div>
         <div className="forum-col-users">참여자</div>

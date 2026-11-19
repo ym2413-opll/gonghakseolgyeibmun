@@ -33,7 +33,7 @@ const HELP_OPTIONS = [
     id: 'ALL',
     title: '모두',
     badge: '전체',
-    desc: '검색·필터·알림·#인용 등 세부 기능 안내까지 모두 표시해요.',
+    desc: '수식 입력·문장 다듬기·필터·알림·설정·관리자 기능까지 모든 안내를 표시해요.',
     icon: Sparkles
   }
 ];

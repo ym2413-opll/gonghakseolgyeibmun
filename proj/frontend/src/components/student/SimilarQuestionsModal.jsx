@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Search, CheckCircle, ChevronDown, ChevronUp, AlertCircle, BookOpen, X } from 'lucide-react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import MarkdownContent from '../common/MarkdownContent';
+import HelpBubble from '../common/HelpBubble';
 
 export default function SimilarQuestionsModal({
   isOpen,
@@ -33,6 +34,12 @@ export default function SimilarQuestionsModal({
         </div>
 
         <div className="modal-body">
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="질문을 눌러 기존 답변을 펼쳐보세요. 답변으로 해결됐다면 '해결됨 (작성 취소)'로 바로 마칠 수 있어요."
+            className="mb-help-bubble"
+          />
           <div className="similar-cards-list">
             {safeList.length === 0 ? (
               <div className="similar-empty">

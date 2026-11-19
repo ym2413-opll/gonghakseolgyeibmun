@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfessorNameList from '../common/ProfessorNameList';
 import AdminNicknameForm from './AdminNicknameForm';
+import HelpBubble from '../common/HelpBubble';
 import {
   ShieldAlert,
   X,
@@ -745,7 +746,14 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
           )}
 
           {activeTab === 'catalog' && (
-            <div className="admin-catalog-grid">
+            <>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="학과·단과대(구 명칭 별칭 포함)와 교과목을 추가·수정·삭제하고, 관리자 닉네임과 시연용 전시 모드를 설정해요."
+                className="mb-help-bubble"
+              />
+              <div className="admin-catalog-grid">
               <div className="admin-panel-card">
                 <h3 className="admin-panel-title">
                   <Building2 size={18} />
@@ -1343,10 +1351,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 </div>
               </div>
             </div>
+            </>
           )}
 
           {activeTab === 'users' && (
             <div>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="제한 기간을 고른 뒤 계정별 질문·답변 제한이나 강제 탈퇴·복구를 적용해요."
+                className="mb-help-bubble"
+              />
               <div className="admin-sanction-toolbar">
                 <div>
                   <strong>질문/답변 제한 기간 설정:</strong> 제재 버튼 클릭 시 아래 선택한 기간만큼 작성 권한이 제한됩니다.
@@ -1504,6 +1519,12 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
           {activeTab === 'posts' && (
             <div>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="익명 글의 실제 작성자를 확인하고 게시물을 가리거나 영구 삭제해요. 본문 외부 링크 옆에는 실제 주소도 보여요."
+                className="mb-help-bubble"
+              />
               <div className="admin-table-wrap">
                 <table className="admin-data-table">
                   <thead>
@@ -1589,6 +1610,12 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 <Mail size={18} />
                 교수 질문 알림 이메일 발송 내역 ({emailLogs.length}건)
               </h3>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="교수에게 발송된 질문 알림 이메일 기록과 발송 상태를 확인해요."
+                className="mb-help-bubble"
+              />
               <p className="text-xs text-muted" style={{ marginBottom: 8 }}>
                 <Terminal size={13} style={{ display: 'inline', marginRight: 4 }} />
                 보안 정책상 관리자 권한 부여/회수는 백엔드 서버 터미널 콘솔(<code>admin &lt;id&gt;</code>)에서만 수행할 수 있습니다.

@@ -116,15 +116,22 @@ const Header = ({
         <div className="header-actions">
           {/* 관리자 모드 버튼 (관리자 권한 보유 시 표시) */}
           {isAdmin && (
-            <button
-              type="button"
-              className="btn btn-danger btn-sm header-admin-btn"
-              onClick={onOpenAdminModal}
-              title="관리자 모드 (과목/학과 추가, 회원 제재, 익명 실명 열람, 게시물 가리기)"
+            <HelpBubble
+              tier="ALL"
+              mode="floating"
+              placement="bottom-end"
+              text="학과·과목, 계정 제재, 게시물 가리기, 익명 실명, 전시 모드를 관리해요."
             >
-              <ShieldAlert size={16} />
-              <span className="hide-mobile">관리 모드</span>
-            </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm header-admin-btn"
+                onClick={onOpenAdminModal}
+                title="관리자 모드 (과목/학과 추가, 회원 제재, 익명 실명 열람, 게시물 가리기)"
+              >
+                <ShieldAlert size={16} />
+                <span className="hide-mobile">관리 모드</span>
+              </button>
+            </HelpBubble>
           )}
 
           {/* 교수 전용 알림·이메일·카테고리 설정 버튼 */}
@@ -133,7 +140,7 @@ const Header = ({
               tier="ALL"
               mode="floating"
               placement="bottom-end"
-              text="방해금지 시간, 이메일·카테고리별 알림을 설정해요."
+              text="담당 과목, 이메일·방해금지, 공동교수 및 질문 유형 알림을 설정해요."
             >
               <button
                 type="button"
@@ -252,6 +259,13 @@ const Header = ({
                         </button>
                       </div>
                     </div>
+
+                    <HelpBubble
+                      tier="ALL"
+                      mode="inline"
+                      text="항목을 누르면 해당 질문으로 이동해요. 브라우저 알림을 허용하면 창을 보지 않아도 알림을 받아요."
+                      className="notif-help-bubble"
+                    />
 
                     {browserPermission === 'default' && (
                       <div className="browser-notif-bar">

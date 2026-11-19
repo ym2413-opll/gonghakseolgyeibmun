@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import CoursePicker from './CoursePicker';
 import AdminNicknameForm from '../admin/AdminNicknameForm';
+import HelpBubble from './HelpBubble';
 import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell, ShieldAlert } from 'lucide-react';
 
 const FONT_SIZE_OPTIONS = [
@@ -17,7 +18,7 @@ const FONT_SIZE_OPTIONS = [
 const HELP_LEVEL_OPTIONS = [
   { id: 'NONE', label: '필요 없음', desc: '표시 안 함' },
   { id: 'SOME', label: '조금', desc: '핵심 안내만 표시' },
-  { id: 'ALL', label: '모두', desc: '필터 · 알림 · 편집 팁 전체' }
+  { id: 'ALL', label: '모두', desc: '모든 기능·모달 안내 전체' }
 ];
 
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
@@ -99,6 +100,13 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
         </div>
 
         <div className="modal-body">
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="테마·글자 크기·도움말 표시 수준은 바꾸는 즉시 화면에 반영되고 계정에 저장돼요."
+            className="mb-help-bubble"
+          />
+
           <div className="settings-section">
             <h4 className="settings-section-title">테마</h4>
 
@@ -214,6 +222,12 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
           <div className="settings-divider" />
 
           <div className="settings-section" style={canManageCourses ? undefined : { marginBottom: 0 }}>
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="브라우저 알림을 허용하면 창을 보지 않아도 새 질문·답변을 바로 받을 수 있어요. (HTTPS 필요)"
+              className="mb-help-bubble"
+            />
             <div className="settings-title-group" style={{ marginBottom: 8 }}>
               <Bell size={17} className="text-primary" />
               <div>
@@ -330,6 +344,12 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
             <>
               <div className="settings-divider" />
               <div className="settings-section">
+                <HelpBubble
+                  tier="ALL"
+                  mode="inline"
+                  text="과목명·학수번호·학과(구 명칭 포함)·교수명으로 검색해 저장하면 게시판에 바로 반영돼요."
+                  className="mb-help-bubble"
+                />
                 <div className="settings-title-group" style={{ marginBottom: 10 }}>
                   <BookOpen size={17} className="text-primary" />
                   <div>

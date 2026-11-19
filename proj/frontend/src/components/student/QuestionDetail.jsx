@@ -9,6 +9,7 @@ import AnswerForm from '../professor/AnswerForm';
 import MarkdownContent from '../common/MarkdownContent';
 import AiFormulaModal from '../common/AiFormulaModal';
 import AiRefineModal from './AiRefineModal';
+import HelpBubble from '../common/HelpBubble';
 import {
   ArrowLeft,
   PenTool,
@@ -221,6 +222,12 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
 
               {/* 본문 수정 & 문장 다듬기 버튼 */}
               <div className="form-group">
+                <HelpBubble
+                  tier="ALL"
+                  mode="inline"
+                  text="수식 입력과 문장 다듬기([[지시사항]] 포함)를 사용해 질문을 수정해요."
+                  className="mb-help-bubble"
+                />
                 <div className="content-label-row">
                   <label className="form-label" htmlFor="edit-content">
                     질문 본문 <span className="req">*</span>
@@ -232,7 +239,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                       onClick={() => setIsFormulaModalOpen(true)}
                     >
                       <Sigma size={14} />
-                      <span>AI 수식 도우미</span>
+                      <span>수식 입력</span>
                     </button>
                     <button
                       type="button"

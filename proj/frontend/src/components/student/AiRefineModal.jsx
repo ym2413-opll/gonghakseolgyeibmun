@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { AI_INQUIRY_TEMPLATES } from '../../services/mockData';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
+import HelpBubble from '../common/HelpBubble';
 import { PenTool, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X, FileText, Loader2, Sparkles } from 'lucide-react';
 
 export default function AiRefineModal({
@@ -185,6 +186,13 @@ export default function AiRefineModal({
         </div>
 
         <div className="modal-body">
+          <HelpBubble
+            tier="ALL"
+            mode="inline"
+            text="원문과 다듬어진 글을 비교하고, 미리보기·수정으로 손본 뒤 적용해요. 본문의 [[지시사항]]은 AI 처리 결과로 바뀌어요."
+            className="mb-help-bubble"
+          />
+
           {directiveCount > 0 ? (
             <div className="ai-directive-notice">
               <Sparkles size={14} />

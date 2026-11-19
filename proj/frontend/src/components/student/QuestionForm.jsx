@@ -336,19 +336,26 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
               <div className="content-toolbar-actions">
                 <MarkdownModeTabs isPreview={isPreviewMode} onTogglePreview={setIsPreviewMode} />
-                <button
-                  type="button"
-                  className="btn-ai-formula"
-                  onClick={() => setIsFormulaModalOpen(true)}
-                >
-                  <Sigma size={14} />
-                  <span>AI 수식 도우미</span>
-                </button>
                 <HelpBubble
                   tier="ALL"
                   mode="floating"
                   placement="bottom-end"
-                  text="작성한 질문을 AI로 다듬고 [[지시사항]]을 처리해요."
+                  text="원하는 수식을 문장으로 적으면 LaTeX 수식으로 변환해 본문에 넣어줘요."
+                >
+                  <button
+                    type="button"
+                    className="btn-ai-formula"
+                    onClick={() => setIsFormulaModalOpen(true)}
+                  >
+                    <Sigma size={14} />
+                    <span>수식 입력</span>
+                  </button>
+                </HelpBubble>
+                <HelpBubble
+                  tier="ALL"
+                  mode="floating"
+                  placement="bottom-end"
+                  text="작성한 질문을 정중하게 다듬고 본문의 [[지시사항]]을 AI 결과로 바꿔줘요."
                 >
                   <button
                     type="button"
@@ -380,6 +387,13 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 )}
               </div>
             </div>
+
+            <HelpBubble
+              tier="SOME"
+              mode="inline"
+              text="마크다운 서식, 수식($...$, $$...$$), 이미지 링크를 지원해요. 편집/미리보기 탭으로 결과를 바로 확인해요."
+              className="mb-help-bubble"
+            />
 
             {isPreviewMode ? (
               <div className="md-preview-box">
@@ -449,7 +463,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             <HelpBubble
               tier="ALL"
               mode="inline"
-              text="익명으로 질문해요. (성적 카테고리는 실명 필수예요)"
+              text="익명으로 올리면 이름·학번 등 신상 정보가 본문에서 자동 가림 처리돼요. (성적 카테고리는 실명 필수)"
               className="mb-help-bubble"
             />
             <div className="anon-check-wrapper">
@@ -507,7 +521,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         onApplyRefined={handleApplyAiRefined}
       />
 
-      {/* AI 수식 입력 도우미 모달 */}
+      {/* 수식 입력 모달 */}
       <AiFormulaModal
         isOpen={isFormulaModalOpen}
         onClose={() => setIsFormulaModalOpen(false)}

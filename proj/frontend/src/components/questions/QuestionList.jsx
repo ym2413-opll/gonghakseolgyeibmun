@@ -199,7 +199,7 @@ const QuestionList = ({
       <HelpBubble
         tier="ALL"
         mode="inline"
-        text="질문을 누르면 전체 답변을 보고, 작성자는 초안 확인·삭제를 할 수 있어요."
+        text="질문을 누르면 답변과 추가 질문을 보고, 본인 질문은 수정·삭제하거나 AI 초안을 확인할 수 있어요."
         className="mb-help-bubble"
       />
       <div className="forum-table-header">
