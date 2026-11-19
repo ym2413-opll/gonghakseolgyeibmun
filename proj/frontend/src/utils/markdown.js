@@ -173,6 +173,8 @@ export function safeMarkdownUrlTransform(url) {
 }
 
 const KOREAN_BOUNDARY_SENTINEL = '\u2063';
+export const DIRECTIVE_HL_START = '\uE000';
+export const DIRECTIVE_HL_END = '\uE001';
 const WORD_OR_HANGUL_REGEX = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF0-9A-Za-z]/;
 const HANGUL_OR_CJK_REGEX = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF]/;
 const PUNCT_BOUNDARY_REGEX = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~「」『』【】〈〉《》〔〕‘’“”·…]/;
@@ -266,7 +268,10 @@ function convertLatexDelimitersLinear(text) {
  */
 export function preprocessKoreanMarkdown(markdownText) {
   if (!markdownText || typeof markdownText !== 'string') return '';
-  const sanitized = markdownText.replaceAll(KOREAN_BOUNDARY_SENTINEL, '');
+  const sanitized = markdownText
+    .replaceAll(KOREAN_BOUNDARY_SENTINEL, '')
+    .replaceAll(DIRECTIVE_HL_START, '')
+    .replaceAll(DIRECTIVE_HL_END, '');
 
   // 코드 블록 / 인라인 코드 / 기존 $$...$$, $...$ 수식은 원형 보존
   return sanitized
@@ -295,6 +300,51 @@ export function preprocessKoreanMarkdown(markdownText) {
 }
 
 /**
+ * AI 지시사항 반영 인라인 구간에 내부 센티넬(\uE000..\uE001)을 삽입하여 강조용 Markdown 생성
+ */
+export function buildHighlightedMarkdown(text, inlineRanges = []) {
+  if (!text || typeof text !== 'string') return '';
+  if (!Array.isArray(inlineRanges) || inlineRanges.length === 0) {
+    return preprocessKoreanMarkdown(text);
+  }
+
+  let out = '';
+  let cursor = 0;
+  for (const range of inlineRanges) {
+    const s = Math.max(cursor, Math.min(range.start, text.length));
+    const e = Math.max(s, Math.min(range.end, text.length));
+    if (s > cursor) {
+      out += preprocessKoreanMarkdown(text.slice(cursor, s));
+    }
+    const rawSlice = text.slice(s, e);
+    const leadMatch = rawSlice.match(/^([ \t]*)/);
+    const trailMatch = rawSlice.match(/([ \t]*)$/);
+    const leadWs = leadMatch ? leadMatch[1] : '';
+    const trailWs = trailMatch ? trailMatch[1] : '';
+    const inner = rawSlice.slice(leadWs.length, rawSlice.length - trailWs.length);
+    if (inner) {
+      out +=
+        leadWs +
+        DIRECTIVE_HL_START +
+        KOREAN_BOUNDARY_SENTINEL +
+        ' ' +
+        preprocessKoreanMarkdown(inner) +
+        ' ' +
+        KOREAN_BOUNDARY_SENTINEL +
+        DIRECTIVE_HL_END +
+        trailWs;
+    } else {
+      out += rawSlice;
+    }
+    cursor = e;
+  }
+  if (cursor < text.length) {
+    out += preprocessKoreanMarkdown(text.slice(cursor));
+  }
+  return out;
+}
+
+/**
  * preprocessKoreanMarkdown이 삽입한 경계 센티넬(\u2063)을 MDAST 텍스트 노드에서 제거하는 remark 플러그인
  */
 export function remarkStripKoreanSentinels() {
@@ -313,6 +363,113 @@ export function remarkStripKoreanSentinels() {
   };
   return (tree) => {
     visitText(tree);
+  };
+}
+
+function splitTextByHighlightSentinels(node) {
+  if (!node || node.type !== 'text' || typeof node.value !== 'string') return [node];
+  const val = node.value;
+  if (!val.includes(DIRECTIVE_HL_START) && !val.includes(DIRECTIVE_HL_END)) return [node];
+
+  const pieces = [];
+  let buf = '';
+  for (let i = 0; i < val.length; i++) {
+    const ch = val[i];
+    if (ch === DIRECTIVE_HL_START) {
+      if (buf) {
+        pieces.push({ ...node, value: buf });
+        buf = '';
+      }
+      pieces.push({ __hlMarker: 'START' });
+    } else if (ch === DIRECTIVE_HL_END) {
+      if (buf) {
+        pieces.push({ ...node, value: buf });
+        buf = '';
+      }
+      pieces.push({ __hlMarker: 'END' });
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf) {
+    pieces.push({ ...node, value: buf });
+  }
+  return pieces;
+}
+
+function stripRemainingHighlightSentinels(node) {
+  if (!node || typeof node !== 'object') return;
+  if (typeof node.value === 'string' && (node.value.includes(DIRECTIVE_HL_START) || node.value.includes(DIRECTIVE_HL_END))) {
+    node.value = node.value
+      .replaceAll(DIRECTIVE_HL_START, '')
+      .replaceAll(DIRECTIVE_HL_END, '');
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      stripRemainingHighlightSentinels(child);
+    }
+  }
+}
+
+/**
+ * \uE000...\uE001 마커로 감싼 AI 지시사항 반영 구간을 <mark class="ai-directive-highlight-inline"> MDAST 노드로 변환
+ */
+export function remarkHighlightDirectiveSentinels() {
+  const processChildren = (children) => {
+    const expanded = [];
+    for (const child of children) {
+      if (child && child.type === 'text') {
+        const splitParts = splitTextByHighlightSentinels(child);
+        expanded.push(...splitParts);
+      } else {
+        if (child && Array.isArray(child.children)) {
+          child.children = processChildren(child.children);
+        }
+        expanded.push(child);
+      }
+    }
+
+    const result = [];
+    let active = false;
+    let captured = [];
+    for (const item of expanded) {
+      if (item && item.__hlMarker === 'START') {
+        if (!active) {
+          active = true;
+          captured = [];
+        }
+      } else if (item && item.__hlMarker === 'END') {
+        if (active) {
+          if (captured.length > 0) {
+            result.push({
+              type: 'directiveHighlight',
+              data: {
+                hName: 'mark',
+                hProperties: { className: ['ai-directive-highlight-inline'] }
+              },
+              children: captured
+            });
+          }
+          active = false;
+          captured = [];
+        }
+      } else if (active) {
+        captured.push(item);
+      } else {
+        result.push(item);
+      }
+    }
+    if (active && captured.length > 0) {
+      result.push(...captured);
+    }
+    return result;
+  };
+
+  return (tree) => {
+    if (tree && Array.isArray(tree.children)) {
+      tree.children = processChildren(tree.children);
+    }
+    stripRemainingHighlightSentinels(tree);
   };
 }
 

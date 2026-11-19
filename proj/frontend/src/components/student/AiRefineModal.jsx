@@ -1,5 +1,5 @@
 // src/components/student/AiRefineModal.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +31,7 @@ export default function AiRefineModal({
   const [aiResult, setAiResult] = useState(null);
   const [isEditingRefined, setIsEditingRefined] = useState(false);
   const [isPreviewRefined, setIsPreviewRefined] = useState(false);
+  const [directiveHighlights, setDirectiveHighlights] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const requestIdRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -92,9 +93,48 @@ export default function AiRefineModal({
       const finalRefinedTitle = isAnonymous
         ? sanitizeAnonymousStudentText(result.refinedTitle || '', currentUser, { professorNames: profList })
         : (result.refinedTitle || '');
+      const nextHighlights = [];
+      let hlCursor = 0;
+      if (Array.isArray(result.directiveHighlights)) {
+        result.directiveHighlights.forEach((h, hIdx) => {
+          const rawRep = typeof h?.replacement === 'string' ? h.replacement : '';
+          if (!rawRep) return;
+          const cleanRep = isAnonymous
+            ? sanitizeAnonymousStudentText(rawRep, currentUser, { professorNames: profList })
+            : rawRep;
+          if (!cleanRep) return;
+          const cleanDir = isAnonymous
+            ? sanitizeAnonymousStudentText(String(h?.directive || ''), currentUser, { professorNames: profList })
+            : String(h?.directive || '');
+          let pos =
+            typeof h?.start === 'number' &&
+            typeof h?.end === 'number' &&
+            h.start >= hlCursor &&
+            finalRefined.slice(h.start, h.end) === cleanRep
+              ? h.start
+              : finalRefined.indexOf(cleanRep, hlCursor);
+          if (pos < 0) pos = finalRefined.indexOf(cleanRep);
+          if (pos >= 0) {
+            const endPos = pos + cleanRep.length;
+            nextHighlights.push({
+              index: typeof h?.index === 'number' ? h.index : hIdx,
+              directive: cleanDir,
+              replacement: cleanRep,
+              start: pos,
+              end: endPos
+            });
+            hlCursor = endPos;
+          }
+        });
+      }
       setAiResult({ ...result, refined: finalRefined, refinedTitle: finalRefinedTitle });
       setRefinedText(finalRefined);
       setRefinedTitle(finalRefinedTitle);
+      setDirectiveHighlights(nextHighlights);
+      if (nextHighlights.length > 0) {
+        setIsPreviewRefined(true);
+        setIsEditingRefined(false);
+      }
     } catch (err) {
       if (!isMountedRef.current || reqId !== requestIdRef.current) return;
       console.error('Text refinement error', err);
@@ -119,6 +159,7 @@ export default function AiRefineModal({
       setRefinedTitle('');
       setRefinedText('');
       setAiResult(null);
+      setDirectiveHighlights([]);
       setErrorMsg('');
       setIsEditingRefined(false);
       setIsPreviewRefined(false);
@@ -132,10 +173,36 @@ export default function AiRefineModal({
     wasOpenRef.current = isOpen;
   }, [isOpen, initialText, initialTitle]);
 
+  const activeHighlights = useMemo(() => {
+    if (!refinedText || directiveHighlights.length === 0) return [];
+    const resolved = [];
+    let cursor = 0;
+    for (const h of directiveHighlights) {
+      if (!h.replacement) continue;
+      if (
+        typeof h.start === 'number' &&
+        typeof h.end === 'number' &&
+        h.start >= cursor &&
+        refinedText.slice(h.start, h.end) === h.replacement
+      ) {
+        resolved.push(h);
+        cursor = h.end;
+      } else {
+        const pos = refinedText.indexOf(h.replacement, cursor);
+        if (pos >= 0) {
+          const endPos = pos + h.replacement.length;
+          resolved.push({ ...h, start: pos, end: endPos });
+          cursor = endPos;
+        }
+      }
+    }
+    return resolved;
+  }, [refinedText, directiveHighlights]);
+
   if (!isOpen || typeof document === 'undefined') return null;
 
   const directiveCount = (() => {
-    const matches = String(originalText || '').match(/\[\[([^\[\]\r\n]{1,300})\]\]/g);
+    const matches = String(originalText || '').match(/\[\[([^[\]]{1,500})\]\]/g);
     return matches ? Math.min(matches.length, 10) : 0;
   })();
 
@@ -316,10 +383,20 @@ export default function AiRefineModal({
                     )}
 
                     <div className="compare-field-wrap">
-                      <label className="ai-sub-label">본문</label>
+                      <div className="ai-refined-body-label-row">
+                        <label className="ai-sub-label" style={{ marginBottom: 0 }}>본문</label>
+                        {isPreviewRefined && activeHighlights.length > 0 && (
+                          <span className="ai-directive-legend">
+                            강조 표시: 지시사항 반영 ({activeHighlights.length}건)
+                          </span>
+                        )}
+                      </div>
                       {isPreviewRefined ? (
                         <div className="md-preview-box ai-refined-preview-box">
-                          <MarkdownContent content={refinedText} />
+                          <MarkdownContent
+                            content={refinedText}
+                            highlightRanges={activeHighlights}
+                          />
                         </div>
                       ) : (
                         <textarea

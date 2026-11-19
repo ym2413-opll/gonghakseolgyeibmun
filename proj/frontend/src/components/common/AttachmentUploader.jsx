@@ -36,7 +36,7 @@ function renderAttachmentIcon(att) {
 export function insertSnippetAtCursor(textareaRef, currentValue, setValue, snippet, onAfterInsert) {
   const textarea = textareaRef?.current;
   if (!textarea || typeof textarea.selectionStart !== 'number') {
-    setValue((prev) => (prev ? `${prev}\n${snippet}` : snippet));
+    setValue((prev) => (prev ? (/^\s/.test(snippet) ? `${prev}${snippet}` : `${prev}\n${snippet}`) : snippet));
     if (onAfterInsert) onAfterInsert();
     return;
   }

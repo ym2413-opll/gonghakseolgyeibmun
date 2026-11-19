@@ -3,6 +3,7 @@ package com.gonghak.routes
 import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.dto.ApiResponse
+import com.gonghak.dto.DirectiveHighlightDto
 import com.gonghak.dto.GenerateFormulaRequest
 import com.gonghak.dto.GenerateFormulaResponse
 import com.gonghak.dto.RefineQuestionRequest
@@ -115,7 +116,16 @@ fun Route.aiRoutes(
                         originalTitle = titleToRefine,
                         refinedTitle = result.title,
                         politenessScore = 98,
-                        changes = changesList
+                        changes = changesList,
+                        directiveHighlights = result.directiveHighlights.map {
+                            DirectiveHighlightDto(
+                                index = it.index,
+                                directive = it.directive,
+                                replacement = it.replacement,
+                                start = it.start,
+                                end = it.end
+                            )
+                        }
                     )
                 )
             )

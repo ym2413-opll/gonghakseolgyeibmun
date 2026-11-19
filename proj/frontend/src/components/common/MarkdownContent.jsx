@@ -12,14 +12,23 @@ import { AlertTriangle, ExternalLink, X } from 'lucide-react';
 import { useOptionalAuth } from '../../context/AuthContext';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import {
+  buildHighlightedMarkdown,
   isSafeMarkdownHref,
   isSafeMarkdownImageUrl,
   preprocessKoreanMarkdown,
+  remarkHighlightDirectiveSentinels,
   remarkStripKoreanSentinels,
   safeMarkdownUrlTransform
 } from '../../utils/markdown';
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks, remarkStripKoreanSentinels];
+const REMARK_PLUGINS_WITH_HIGHLIGHT = [
+  remarkGfm,
+  remarkMath,
+  remarkBreaks,
+  remarkStripKoreanSentinels,
+  remarkHighlightDirectiveSentinels
+];
 const REHYPE_PLUGINS = [
   [
     rehypeKatex,
@@ -291,12 +300,108 @@ function MarkdownInlineImage({ src, alt }) {
   );
 }
 
+function normalizeHighlightRanges(rawText, highlightRanges) {
+  if (!rawText || !Array.isArray(highlightRanges) || highlightRanges.length === 0) return [];
+  const candidates = highlightRanges
+    .map((h) => ({
+      start: Number(h?.start),
+      end: Number(h?.end),
+      directive: typeof h?.directive === 'string' ? h.directive : ''
+    }))
+    .filter((h) => Number.isFinite(h.start) && Number.isFinite(h.end))
+    .map((h) => ({
+      start: Math.max(0, Math.min(h.start, rawText.length)),
+      end: Math.max(0, Math.min(h.end, rawText.length)),
+      directive: h.directive
+    }))
+    .filter((h) => h.end > h.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const nonOverlapping = [];
+  let lastEnd = 0;
+  for (const r of candidates) {
+    if (r.start >= lastEnd) {
+      nonOverlapping.push(r);
+      lastEnd = r.end;
+    }
+  }
+  return nonOverlapping;
+}
+
+function isBlockHighlightSpan(rawText, start, end) {
+  const span = rawText.slice(start, end);
+  if (span.includes('\n')) return true;
+  if (/^(?:\$\$|\||[-*+]\s|\d+\.\s|>|#{1,6}\s|```)/.test(span.trim())) return true;
+  const before = rawText.slice(0, start);
+  const after = rawText.slice(end);
+  const atParagraphStart = start === 0 || /(?:^|\n)[ \t]*\n[ \t]*$/.test(before);
+  const atParagraphEnd = end === rawText.length || /^[ \t]*\n[ \t]*(?:\n|$)/.test(after);
+  return atParagraphStart && atParagraphEnd;
+}
+
+function partitionHighlightedSegments(rawText, ranges) {
+  const blockRanges = [];
+  const inlineRanges = [];
+  for (const r of ranges) {
+    if (isBlockHighlightSpan(rawText, r.start, r.end)) {
+      blockRanges.push(r);
+    } else {
+      inlineRanges.push(r);
+    }
+  }
+
+  if (blockRanges.length === 0) {
+    return [{ type: 'normal', text: rawText, inlineRanges }];
+  }
+
+  const segments = [];
+  let cursor = 0;
+  let inlineIdx = 0;
+
+  const pushNormalSegment = (segStart, segEnd) => {
+    if (segEnd <= segStart) {
+      while (inlineIdx < inlineRanges.length && inlineRanges[inlineIdx].start < segEnd) {
+        inlineIdx++;
+      }
+      return;
+    }
+    const segText = rawText.slice(segStart, segEnd);
+    const localInline = [];
+    while (inlineIdx < inlineRanges.length && inlineRanges[inlineIdx].start < segEnd) {
+      const ir = inlineRanges[inlineIdx];
+      if (ir.start >= segStart && ir.end <= segEnd) {
+        localInline.push({
+          start: ir.start - segStart,
+          end: ir.end - segStart,
+          directive: ir.directive
+        });
+      }
+      inlineIdx++;
+    }
+    if (segText.trim()) {
+      segments.push({ type: 'normal', text: segText, inlineRanges: localInline });
+    }
+  };
+
+  for (const br of blockRanges) {
+    pushNormalSegment(cursor, br.start);
+    const blockText = rawText.slice(br.start, br.end).trim();
+    if (blockText) {
+      segments.push({ type: 'block', text: blockText, directive: br.directive });
+    }
+    cursor = br.end;
+  }
+  pushNormalSegment(cursor, rawText.length);
+  return segments;
+}
+
 function MarkdownContentInner({
   content,
   currentSeq = 1,
   imagesBySeq = null,
   validSeqSet = null,
   onJumpToSeq = null,
+  highlightRanges = null,
   className = ''
 }) {
   const auth = useOptionalAuth();
@@ -327,9 +432,25 @@ function MarkdownContentInner({
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 
+  const rawText = typeof content === 'string' ? content : String(content || '');
+  const normalizedHighlights = useMemo(
+    () => normalizeHighlightRanges(rawText, highlightRanges),
+    [rawText, highlightRanges]
+  );
+  const highlightedSegments = useMemo(() => {
+    if (normalizedHighlights.length === 0) return null;
+    return partitionHighlightedSegments(rawText, normalizedHighlights).map((seg) => ({
+      ...seg,
+      rendered:
+        seg.type === 'normal' && seg.inlineRanges.length > 0
+          ? buildHighlightedMarkdown(seg.text, seg.inlineRanges)
+          : preprocessKoreanMarkdown(seg.text)
+    }));
+  }, [rawText, normalizedHighlights]);
+
   const safeContent = useMemo(
-    () => preprocessKoreanMarkdown(typeof content === 'string' ? content : String(content || '')),
-    [content]
+    () => (normalizedHighlights.length === 0 ? preprocessKoreanMarkdown(rawText) : ''),
+    [rawText, normalizedHighlights.length]
   );
 
   const components = useMemo(() => {
@@ -440,14 +561,48 @@ function MarkdownContentInner({
 
   return (
     <div className={`md-content ${className}`.trim()}>
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        urlTransform={safeMarkdownUrlTransform}
-        components={components}
-      >
-        {safeContent}
-      </ReactMarkdown>
+      {highlightedSegments ? (
+        highlightedSegments.map((seg, idx) =>
+          seg.type === 'block' ? (
+            <div
+              key={`hl-block-${idx}`}
+              className="ai-directive-highlight-block"
+              title={seg.directive ? `지시사항: ${seg.directive}` : '지시사항 반영'}
+            >
+              <div className="ai-directive-highlight-badge">지시사항 반영</div>
+              <ReactMarkdown
+                remarkPlugins={REMARK_PLUGINS}
+                rehypePlugins={REHYPE_PLUGINS}
+                urlTransform={safeMarkdownUrlTransform}
+                components={components}
+              >
+                {seg.rendered}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <ReactMarkdown
+              key={`hl-norm-${idx}`}
+              remarkPlugins={
+                seg.inlineRanges.length > 0 ? REMARK_PLUGINS_WITH_HIGHLIGHT : REMARK_PLUGINS
+              }
+              rehypePlugins={REHYPE_PLUGINS}
+              urlTransform={safeMarkdownUrlTransform}
+              components={components}
+            >
+              {seg.rendered}
+            </ReactMarkdown>
+          )
+        )
+      ) : (
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          urlTransform={safeMarkdownUrlTransform}
+          components={components}
+        >
+          {safeContent}
+        </ReactMarkdown>
+      )}
       {pendingLinkHref &&
         typeof document !== 'undefined' &&
         createPortal(

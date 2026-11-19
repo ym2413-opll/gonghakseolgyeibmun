@@ -2562,7 +2562,7 @@ export const api = {
     if (USE_REMOTE_BACKEND) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         const res = await fetch(`${API_BASE_URL}/ai/refine`, {
           method: 'POST',
           credentials: 'include',
@@ -2600,9 +2600,44 @@ export const api = {
             (rawTitle
               ? `[${catLabel} 문의] ${rawTitle.replace(/[\[\]!?~]+/g, '').trim()} 관련 질의의 건`
               : `[${catLabel} 문의] 학업 및 학습 관련 질의의 건`);
+          const finalRefinedText = replaceAiPlaceholders(result.refined || result.refinedContent, placeholderCtx);
+          const syncedHighlights = [];
+          let hlCursor = 0;
+          if (Array.isArray(result.directiveHighlights)) {
+            result.directiveHighlights.forEach((h, hIdx) => {
+              const rawRep = typeof h?.replacement === 'string' ? h.replacement : '';
+              if (!rawRep) return;
+              const rep = replaceAiPlaceholders(rawRep, placeholderCtx);
+              if (!rep) return;
+              const dir = isAnonymous
+                ? replaceAiPlaceholders(String(h?.directive || ''), placeholderCtx)
+                : String(h?.directive || '');
+              let pos =
+                typeof h?.start === 'number' &&
+                typeof h?.end === 'number' &&
+                h.start >= hlCursor &&
+                finalRefinedText.slice(h.start, h.end) === rep
+                  ? h.start
+                  : finalRefinedText.indexOf(rep, hlCursor);
+              if (pos < 0) {
+                pos = finalRefinedText.indexOf(rep);
+              }
+              if (pos >= 0) {
+                const endPos = pos + rep.length;
+                syncedHighlights.push({
+                  index: typeof h?.index === 'number' ? h.index : hIdx,
+                  directive: dir,
+                  replacement: rep,
+                  start: pos,
+                  end: endPos
+                });
+                hlCursor = endPos;
+              }
+            });
+          }
           return {
             original: result.original || result.rawContent || rawText,
-            refined: replaceAiPlaceholders(result.refined || result.refinedContent, placeholderCtx),
+            refined: finalRefinedText,
             originalTitle: result.originalTitle || rawTitle || '',
             refinedTitle: replaceAiPlaceholders(rawRefinedTitle, placeholderCtx),
             politenessScore: result.politenessScore || 98,
@@ -2610,7 +2645,9 @@ export const api = {
               '원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성',
               '질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색',
               '경어체 및 대학 질의응답 표준 예절 적용'
-            ]
+            ],
+            directiveHighlights: syncedHighlights,
+            processedDirectivesCount: syncedHighlights.length
           };
         }
       } catch (e) {
@@ -2647,14 +2684,17 @@ export const api = {
     const cleanTitle = (rawTitle || '').replace(/[\[\]!?~]+/g, '').trim();
 
     const inlineDirectives = [];
-    const directiveRegex = /\[\[([^\[\]\r\n]{1,300})\]\]/g;
+    const directiveRegex = /\[\[([^[\]]{1,500})\]\]/g;
     let dMatch;
     while ((dMatch = directiveRegex.exec(String(rawText || ''))) !== null && inlineDirectives.length < 10) {
-      const inner = dMatch[1].trim();
+      const inner = dMatch[1].replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       if (inner) inlineDirectives.push(inner);
     }
-    const directiveNote = inlineDirectives.length > 0
-      ? `\n\n${inlineDirectives.map((d) => `요청하신 사항(${d})에 대해서도 함께 안내를 부탁드립니다.`).join('\n')}`
+    const directiveSentences = inlineDirectives.map(
+      (d) => `특히 ${d} 부분에 관하여 구체적인 설명과 조언을 부탁드립니다.`
+    );
+    const directiveNote = directiveSentences.length > 0
+      ? `\n\n${directiveSentences.join('\n')}`
       : '';
 
     const isFollowUp = Boolean(courseContext?.isFollowUp);
@@ -2686,9 +2726,27 @@ export const api = {
       refinedBody = `안녕하십니까, {{PROFESSOR_TITLE}}.\n${courseLabel} 수강하고 있는 {{STUDENT_INTRO}}입니다. 늘 알차고 유익한 강의를 준비해 주셔서 감사드립니다.\n\n수업 시간에 다루어 주신 강의 내용 및 핵심 개념을 복습하던 중 개념 정리와 원리 이해에 다소 부족한 부분이 있어 교수님의 고견과 조언을 조심스럽게 구하고자 질문을 올립니다.${directiveNote}\n\n바쁘신 일정 중 시간 내어 주셔서 감사드립니다.`;
     }
 
+    const localRefinedText = replaceAiPlaceholders(refinedBody, placeholderCtx);
+    const localHighlights = [];
+    let localCursor = 0;
+    inlineDirectives.forEach((dir, idx) => {
+      const rep = replaceAiPlaceholders(directiveSentences[idx], placeholderCtx);
+      const pos = localRefinedText.indexOf(rep, localCursor);
+      if (pos >= 0) {
+        localHighlights.push({
+          index: idx,
+          directive: isAnonymous ? replaceAiPlaceholders(dir, placeholderCtx) : dir,
+          replacement: rep,
+          start: pos,
+          end: pos + rep.length
+        });
+        localCursor = pos + rep.length;
+      }
+    });
+
     return {
       original: rawText,
-      refined: replaceAiPlaceholders(refinedBody, placeholderCtx),
+      refined: localRefinedText,
       originalTitle: rawTitle || '',
       refinedTitle: replaceAiPlaceholders(refinedTitle, placeholderCtx),
       politenessScore: 96,
@@ -2697,7 +2755,9 @@ export const api = {
         '원문 텍스트를 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성',
         '질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색',
         '경어체 및 대학 질의응답 표준 예절 적용'
-      ]
+      ],
+      directiveHighlights: localHighlights,
+      processedDirectivesCount: localHighlights.length
     };
   },
 
@@ -2718,7 +2778,7 @@ export const api = {
             ...getAuthHeaders(getCurrentUserId())
           },
           body: JSON.stringify({ instruction: cleanInstruction, displayMode: mode })
-        }, 15000);
+        }, 25000);
 
         const body = await parseJsonSafe(res);
         if (!res.ok || body.success === false) {

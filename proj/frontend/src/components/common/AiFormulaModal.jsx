@@ -181,11 +181,16 @@ function AiFormulaModalInner({ onClose, onInsertFormula }) {
       ? `$$\n${safeLatex}\n$$`
       : `$${safeLatex}$`
     : '';
+  const insertableFormula = safeLatex
+    ? displayMode === 'block'
+      ? `\n\n$$\n${safeLatex}\n$$\n\n`
+      : ` $${safeLatex}$ `
+    : '';
 
   const handleInsert = () => {
-    if (!wrappedFormula || isLoading) return;
+    if (!insertableFormula || isLoading) return;
     if (typeof onInsertFormula === 'function') {
-      onInsertFormula(wrappedFormula);
+      onInsertFormula(insertableFormula);
     }
     onCloseRef.current?.();
   };

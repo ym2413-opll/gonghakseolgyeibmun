@@ -398,6 +398,15 @@ data class RefineQuestionRequest(
 }
 
 @Serializable
+data class DirectiveHighlightDto(
+    val index: Int = 0,
+    val directive: String = "",
+    val replacement: String = "",
+    val start: Int = -1,
+    val end: Int = -1
+)
+
+@Serializable
 data class RefineQuestionResponse(
     val original: String = "",
     val refined: String = "",
@@ -406,7 +415,8 @@ data class RefineQuestionResponse(
     val originalTitle: String? = null,
     val refinedTitle: String? = null,
     val politenessScore: Int = 98,
-    val changes: List<String> = listOf("원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성", "질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색", "경어체 및 대학 질의응답 표준 예절 적용")
+    val changes: List<String> = listOf("원문 문장을 직접 인용하지 않고 정중한 학술 문장으로 전면 재구성", "질문 제목을 명확하고 품격 있는 학업 문의 양식으로 윤색", "경어체 및 대학 질의응답 표준 예절 적용"),
+    val directiveHighlights: List<DirectiveHighlightDto> = emptyList()
 )
 
 @Serializable
