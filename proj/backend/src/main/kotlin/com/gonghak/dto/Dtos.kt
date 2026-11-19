@@ -410,6 +410,21 @@ data class RefineQuestionResponse(
 )
 
 @Serializable
+data class GenerateFormulaRequest(
+    val instruction: String = "",
+    val displayMode: String = "inline"
+)
+
+@Serializable
+data class GenerateFormulaResponse(
+    val instruction: String = "",
+    val latex: String = "",
+    val wrapped: String = "",
+    val displayMode: String = "inline",
+    val usedAi: Boolean = false
+)
+
+@Serializable
 data class CreateQuestionRequest(
     val courseId: String = "",
     val courseName: String? = null,

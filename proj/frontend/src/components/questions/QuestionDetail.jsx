@@ -8,6 +8,7 @@ import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import AiRefineModal from '../student/AiRefineModal';
+import AiFormulaModal from '../common/AiFormulaModal';
 import HelpBubble from '../common/HelpBubble';
 import {
   Send,
@@ -33,7 +34,8 @@ import {
   Eye,
   AlertCircle,
   Trash2,
-  PenTool
+  PenTool,
+  Sigma
 } from 'lucide-react';
 
 function getImageAttachments(attachments) {
@@ -146,8 +148,23 @@ const QuestionDetail = ({
   const [editAnonymous, setEditAnonymous] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditPreview, setIsEditPreview] = useState(false);
+  const [isEditAiModalOpen, setIsEditAiModalOpen] = useState(false);
+  const editTextareaRef = useRef(null);
   const [isFollowUpPreview, setIsFollowUpPreview] = useState(false);
   const [isAnswerPreview, setIsAnswerPreview] = useState(false);
+  const [formulaModalTarget, setFormulaModalTarget] = useState(null); // null | 'edit' | 'followUp' | 'answer'
+
+  const handleInsertFormula = (wrapped) => {
+    if (formulaModalTarget === 'edit') {
+      insertSnippetAtCursor(editTextareaRef, editContent, setEditContent, wrapped);
+    } else if (formulaModalTarget === 'followUp') {
+      insertSnippetAtCursor(followUpTextareaRef, followUpText, setFollowUpText, wrapped, () => {
+        if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
+      });
+    } else if (formulaModalTarget === 'answer') {
+      insertSnippetAtCursor(answerTextareaRef, answerText, setAnswerText, wrapped);
+    }
+  };
 
   const answers = useMemo(
     () => (Array.isArray(question?.answers) ? question.answers : []),
@@ -674,7 +691,25 @@ const QuestionDetail = ({
                 <div className="form-group">
                   <div className="md-editor-label-row">
                     <label className="form-label" style={{ marginBottom: 0 }}>질문 본문 수정</label>
-                    <MarkdownModeTabs isPreview={isEditPreview} onTogglePreview={setIsEditPreview} />
+                    <div className="md-editor-header-actions">
+                      <MarkdownModeTabs isPreview={isEditPreview} onTogglePreview={setIsEditPreview} />
+                      <button
+                        type="button"
+                        className="btn-ai-formula"
+                        onClick={() => setFormulaModalTarget('edit')}
+                      >
+                        <Sigma size={14} />
+                        <span>AI 수식 도우미</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ai-assist"
+                        onClick={() => setIsEditAiModalOpen(true)}
+                      >
+                        <PenTool size={14} />
+                        <span>문장 다듬기</span>
+                      </button>
+                    </div>
                   </div>
                   {isEditPreview ? (
                     <div className="md-preview-box">
@@ -698,6 +733,7 @@ const QuestionDetail = ({
                     </div>
                   ) : (
                     <textarea
+                      ref={editTextareaRef}
                       className="form-textarea"
                       rows={6}
                       value={editContent}
@@ -1015,6 +1051,14 @@ const QuestionDetail = ({
                 />
                 <button
                   type="button"
+                  className="btn-ai-formula"
+                  onClick={() => setFormulaModalTarget('followUp')}
+                >
+                  <Sigma size={14} />
+                  <span>AI 수식 도우미</span>
+                </button>
+                <button
+                  type="button"
                   className={`btn-ai-assist ${hasFollowUpAiRefined ? 'refined-active' : ''}`}
                   onClick={() => setIsFollowUpAiModalOpen(true)}
                 >
@@ -1166,10 +1210,20 @@ const QuestionDetail = ({
                     </>
                   )}
                 </span>
-                <MarkdownModeTabs
-                  isPreview={isAnswerPreview}
-                  onTogglePreview={setIsAnswerPreview}
-                />
+                <div className="md-editor-header-actions">
+                  <MarkdownModeTabs
+                    isPreview={isAnswerPreview}
+                    onTogglePreview={setIsAnswerPreview}
+                  />
+                  <button
+                    type="button"
+                    className="btn-ai-formula"
+                    onClick={() => setFormulaModalTarget('answer')}
+                  >
+                    <Sigma size={14} />
+                    <span>AI 수식 도우미</span>
+                  </button>
+                </div>
               </div>
               {isAnswerPreview ? (
                 <div className="md-preview-box">
@@ -1236,6 +1290,42 @@ const QuestionDetail = ({
           )}
         </div>
       )}
+
+      <AiRefineModal
+        isOpen={isEditAiModalOpen}
+        onClose={() => setIsEditAiModalOpen(false)}
+        initialTitle={editTitle}
+        initialText={editContent}
+        category={categoryKey}
+        courseName={question.courseName || ''}
+        professorName={question.profName || question.assignedProfessorName || ''}
+        isFollowUp={false}
+        isAnonymous={Boolean(category.allowAnonymous && editAnonymous)}
+        onApplyRefined={(refinedText, _origText, refinedAiTitle) => {
+          const profList = [question.profName, question.assignedProfessorName].filter(Boolean);
+          const anonActive = Boolean(category.allowAnonymous && editAnonymous);
+          if (refinedText) {
+            setEditContent(
+              anonActive
+                ? sanitizeAnonymousStudentText(refinedText, currentUser, { professorNames: profList })
+                : refinedText
+            );
+          }
+          if (refinedAiTitle) {
+            setEditTitle(
+              anonActive
+                ? sanitizeAnonymousStudentText(refinedAiTitle, currentUser, { professorNames: profList })
+                : refinedAiTitle
+            );
+          }
+        }}
+      />
+
+      <AiFormulaModal
+        isOpen={Boolean(formulaModalTarget)}
+        onClose={() => setFormulaModalTarget(null)}
+        onInsertFormula={handleInsertFormula}
+      />
     </div>
   );
 };

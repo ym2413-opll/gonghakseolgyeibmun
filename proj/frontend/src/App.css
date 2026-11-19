@@ -7948,6 +7948,7 @@ body,
 .btn-admin-inline-delete,
 .btn-ai-assist,
 .btn-ai-assist-inline,
+.btn-ai-formula,
 .btn-similar-search,
 .btn-view-similar,
 .btn-text-xs,
@@ -9083,4 +9084,208 @@ body,
 .md-preview-empty {
   font-size: 0.86rem;
   color: var(--text-muted);
+}
+
+/* =========================================================
+   AI 수식 입력 도우미 & 본문 [[지시사항]] UI 스타일
+   ========================================================= */
+.btn-ai-formula {
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.btn-ai-formula:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+}
+
+.ai-formula-overlay {
+  z-index: 3100;
+}
+
+.modal-content.ai-formula-modal {
+  max-width: 600px;
+  width: calc(100% - 28px);
+}
+
+.ai-formula-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.formula-quick-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formula-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.formula-mode-tabs {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+.formula-mode-btn {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.formula-mode-btn.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.formula-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formula-instruction-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.formula-instruction-input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.formula-generate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.formula-result-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formula-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.formula-engine-badge {
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.formula-preview-box {
+  padding: 14px 16px;
+  min-height: 54px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.formula-latex-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.ai-directive-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-focus);
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.ai-directive-tip {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-subtle);
+  border: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.ai-directive-notice code,
+.ai-directive-tip code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 0.88em;
+}
+
+.refined-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-refined-preview-box {
+  min-height: 170px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  .formula-instruction-row {
+    flex-direction: column;
+  }
+
+  .formula-generate-btn {
+    padding: 9px 14px;
+  }
 }

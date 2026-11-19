@@ -1,15 +1,19 @@
 // src/components/professor/AnswerForm.jsx
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
-import { Send, CheckCircle2, Lock, ShieldAlert, Users } from 'lucide-react';
+import { insertSnippetAtCursor } from '../common/AttachmentUploader';
+import AiFormulaModal from '../common/AiFormulaModal';
+import { Send, CheckCircle2, Lock, ShieldAlert, Users, Sigma } from 'lucide-react';
 
 export default function AnswerForm({ question, onAnswerAdded }) {
   const { currentUser, isProfessor, refreshCurrentUser } = useAuth();
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
+  const textareaRef = useRef(null);
 
   if (!isProfessor) return null;
 
@@ -123,11 +127,20 @@ export default function AnswerForm({ question, onAnswerAdded }) {
             <span className="ans-author-preview">
               작성자: <strong>{currentUser.name}</strong> (담당교수)
             </span>
+            <button
+              type="button"
+              className="btn-ai-formula"
+              onClick={() => setIsFormulaModalOpen(true)}
+            >
+              <Sigma size={14} />
+              <span>AI 수식 도우미</span>
+            </button>
           </div>
 
           {errorMsg && <p className="ans-err-text">{errorMsg}</p>}
 
           <textarea
+            ref={textareaRef}
             rows={5}
             className="ans-textarea"
             placeholder="답변 내용을 입력하세요."
@@ -147,6 +160,14 @@ export default function AnswerForm({ question, onAnswerAdded }) {
           <p>현재 상태에서는 답변을 작성할 수 없습니다.</p>
         </div>
       )}
+
+      <AiFormulaModal
+        isOpen={isFormulaModalOpen}
+        onClose={() => setIsFormulaModalOpen(false)}
+        onInsertFormula={(wrapped) =>
+          insertSnippetAtCursor(textareaRef, content, setContent, wrapped)
+        }
+      />
     </div>
   );
 }

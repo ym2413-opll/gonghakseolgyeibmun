@@ -170,7 +170,7 @@ class WebPushServiceTest {
                     name = "푸시학생",
                     department = "소프트웨어학과",
                     identifier = "AUTO",
-                    entryYear = 2029
+                    entryYear = 2032
                 )
             )
         }.also { assertEquals(HttpStatusCode.Created, it.status) }

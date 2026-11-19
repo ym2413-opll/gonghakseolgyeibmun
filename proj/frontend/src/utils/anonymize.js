@@ -5,7 +5,7 @@ const ANON_EMAIL_REGEX = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const ANON_PHONE_REGEX =
   /(?<!\d)(?:\+?82[-\s.]?0?1[016789]|01[016789])[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)/g;
 const ANON_STUDENT_ID_REGEX = /(?<!\d)(?:19|20)\d{6,8}(?!\d)/g;
-const ANON_ENTRY_YEAR_BATCH_REGEX = /(?<!\d)\d{2}\s*학번/g;
+const ANON_ENTRY_YEAR_BATCH_REGEX = /(?<!\d)(?:(?:19|20)?\d{2})\s*학번/g;
 
 function stripInvisibleChars(str) {
   let out = '';
@@ -16,10 +16,14 @@ function stripInvisibleChars(str) {
       (c >= 0x7f && c <= 0x9f) ||
       c === 0x00ad ||
       c === 0x034f ||
+      c === 0x061c ||
+      c === 0x180e ||
       (c >= 0x200b && c <= 0x200f) ||
-      (c >= 0x202a && c <= 0x202e) ||
+      (c >= 0x2028 && c <= 0x202e) ||
       (c >= 0x2060 && c <= 0x206f) ||
-      c === 0xfeff
+      c === 0x3164 ||
+      c === 0xfeff ||
+      c === 0xffa0
     ) {
       continue;
     }
@@ -111,29 +115,35 @@ export function sanitizeAnonymousStudentText(text, user = null, { professorNames
 
   const uniqueIntros = [...new Set(compoundIntros)].sort((a, b) => b.length - a.length);
   for (const phrase of uniqueIntros) {
-    result = result.split(phrase).join('학생');
+    result = result.replace(new RegExp(escapeRegex(phrase), 'gi'), '학생');
   }
 
   if (cleanEmail) {
-    result = result.split(cleanEmail).join('');
+    result = result.replace(new RegExp(escapeRegex(cleanEmail), 'gi'), '');
   }
   result = result
     .replace(ANON_EMAIL_REGEX, '')
     .replace(ANON_PHONE_REGEX, '');
 
   if (cleanId.length >= 2) {
-    result = result.split(cleanId).join('');
+    result = result.replace(new RegExp(escapeRegex(cleanId), 'gi'), '');
   }
   if (cleanUsername.length >= 3 && !profTokens.has(cleanUsername)) {
-    result = result.split(cleanUsername).join('');
+    result = result.replace(new RegExp(escapeRegex(cleanUsername), 'gi'), '');
   }
   result = result
     .replace(ANON_STUDENT_ID_REGEX, '')
     .replace(ANON_ENTRY_YEAR_BATCH_REGEX, '학생');
 
   if (cleanName.length >= 2) {
-    // 학생과 교수가 동명이인이어도 'OOO 교수(님)' 호칭은 보존하고 본인 이름 표기만 마스킹
-    result = result.replace(new RegExp(`${escapeRegex(cleanName)}(?!\\s*(?:교수|님))`, 'g'), '학생');
+    // 학생과 교수가 동명이인인 경우에만 'OOO 교수' 호칭을 보존하고, 학생 본인 이름(+님)은 무조건 마스킹
+    const nameMatchesProf = Array.from(profTokens).some(
+      (t) => t.toLowerCase() === cleanName.toLowerCase()
+    );
+    const namePattern = nameMatchesProf
+      ? `${escapeRegex(cleanName)}(?!\\s*교수)`
+      : escapeRegex(cleanName);
+    result = result.replace(new RegExp(namePattern, 'gi'), '학생');
   }
 
   result = result
@@ -148,13 +158,16 @@ export function sanitizeAnonymousStudentText(text, user = null, { professorNames
       result = result
         .replace(
           new RegExp(
-            `${escapedDept}\\s*(?:\\d\\s*학년\\s*)?(?:소속\\s*)?(?:재학생|학생|수강생)`,
-            'g'
+            `${escapedDept}\\s*(?:\\d\\s*학년\\s*)?(?:소속\\s*)?(?:재학생|학생|수강생|전공(?:자|생)?)`,
+            'gi'
           ),
           '학생'
         )
         .replace(
-          new RegExp(`${escapedDept}(?=\\s*(?:입니다|인데|에서|소속|재학생|학생|수강생|\\d\\s*학년))`, 'g'),
+          new RegExp(
+            `${escapedDept}(?=\\s*(?:입니다|인데|이고|이며|에서|의|소속|전공|재학생|학생|수강생|\\d\\s*학년))`,
+            'gi'
+          ),
           '학생'
         );
     }

@@ -1,15 +1,18 @@
 // src/components/student/QuestionDetail.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
+import { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import AnswerForm from '../professor/AnswerForm';
 import MarkdownContent from '../common/MarkdownContent';
+import AiFormulaModal from '../common/AiFormulaModal';
 import AiRefineModal from './AiRefineModal';
 import {
   ArrowLeft,
   PenTool,
+  Sigma,
   User,
   EyeOff,
   Clock,
@@ -52,8 +55,10 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
   const [editHasAiRefined, setEditHasAiRefined] = useState(false);
   const [editOriginalContent, setEditOriginalContent] = useState('');
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const editTextareaRef = useRef(null);
 
   useEffect(() => {
     if (question) {
@@ -220,17 +225,28 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                   <label className="form-label" htmlFor="edit-content">
                     질문 본문 <span className="req">*</span>
                   </label>
-                  <button
-                    type="button"
-                    className="btn-ai-assist"
-                    onClick={() => setIsAiModalOpen(true)}
-                  >
-                    <PenTool size={14} />
-                    <span>문장 다듬기</span>
-                  </button>
+                  <div className="content-toolbar-actions">
+                    <button
+                      type="button"
+                      className="btn-ai-formula"
+                      onClick={() => setIsFormulaModalOpen(true)}
+                    >
+                      <Sigma size={14} />
+                      <span>AI 수식 도우미</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ai-assist"
+                      onClick={() => setIsAiModalOpen(true)}
+                    >
+                      <PenTool size={14} />
+                      <span>문장 다듬기</span>
+                    </button>
+                  </div>
                 </div>
 
                 <textarea
+                  ref={editTextareaRef}
                   id="edit-content"
                   rows={8}
                   className="textarea-content"
@@ -297,6 +313,16 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
               professorName={question.profName || question.assignedProfessorName || ''}
               isAnonymous={editIsAnonymous}
               onApplyRefined={handleApplyAiInEdit}
+            />
+
+            <AiFormulaModal
+              isOpen={isFormulaModalOpen}
+              onClose={() => setIsFormulaModalOpen(false)}
+              onInsertFormula={(wrapped) =>
+                insertSnippetAtCursor(editTextareaRef, editContent, setEditContent, wrapped, () => {
+                  if (editHasAiRefined) setEditHasAiRefined(false);
+                })
+              }
             />
           </div>
         ) : (

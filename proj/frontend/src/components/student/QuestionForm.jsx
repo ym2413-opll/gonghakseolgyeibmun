@@ -10,6 +10,7 @@ import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentU
 import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import ProfessorNameList from '../common/ProfessorNameList';
 import AiRefineModal from './AiRefineModal';
+import AiFormulaModal from '../common/AiFormulaModal';
 import SimilarQuestionsModal from './SimilarQuestionsModal';
 import HelpBubble from '../common/HelpBubble';
 import {
@@ -17,7 +18,8 @@ import {
   PenTool,
   Search,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Sigma
 } from 'lucide-react';
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
@@ -49,6 +51,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
   // 모달 및 제출 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
   const [isSimilarModalOpen, setIsSimilarModalOpen] = useState(false);
   const [similarList, setSimilarList] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -333,11 +336,19 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
 
               <div className="content-toolbar-actions">
                 <MarkdownModeTabs isPreview={isPreviewMode} onTogglePreview={setIsPreviewMode} />
+                <button
+                  type="button"
+                  className="btn-ai-formula"
+                  onClick={() => setIsFormulaModalOpen(true)}
+                >
+                  <Sigma size={14} />
+                  <span>AI 수식 도우미</span>
+                </button>
                 <HelpBubble
                   tier="ALL"
                   mode="floating"
                   placement="bottom-end"
-                  text="작성한 질문을 AI로 다듬어요."
+                  text="작성한 질문을 AI로 다듬고 [[지시사항]]을 처리해요."
                 >
                   <button
                     type="button"
@@ -494,6 +505,17 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         professorName={currentCourse?.profName || currentCourse?.assignedProfessorName || ''}
         isAnonymous={isAnonymous}
         onApplyRefined={handleApplyAiRefined}
+      />
+
+      {/* AI 수식 입력 도우미 모달 */}
+      <AiFormulaModal
+        isOpen={isFormulaModalOpen}
+        onClose={() => setIsFormulaModalOpen(false)}
+        onInsertFormula={(wrapped) =>
+          insertSnippetAtCursor(contentTextareaRef, content, setContent, wrapped, () => {
+            if (hasAiRefined) setHasAiRefined(false);
+          })
+        }
       />
 
       {/* 유사 질답 검색 모달 */}

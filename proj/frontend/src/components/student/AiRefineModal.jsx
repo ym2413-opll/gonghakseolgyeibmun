@@ -1,10 +1,12 @@
 // src/components/student/AiRefineModal.jsx
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AI_INQUIRY_TEMPLATES } from '../../services/mockData';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
-import { PenTool, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X, FileText, Loader2 } from 'lucide-react';
+import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
+import { PenTool, Check, ArrowRight, RotateCw, AlertTriangle, Edit3, CheckCircle2, X, FileText, Loader2, Sparkles } from 'lucide-react';
 
 export default function AiRefineModal({
   isOpen,
@@ -27,9 +29,13 @@ export default function AiRefineModal({
   const [isLoading, setIsLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [isEditingRefined, setIsEditingRefined] = useState(false);
+  const [isPreviewRefined, setIsPreviewRefined] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const requestIdRef = useRef(0);
   const isMountedRef = useRef(true);
+  const wasOpenRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -38,6 +44,17 @@ export default function AiRefineModal({
       requestIdRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onCloseRef.current?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   const userName = currentUser?.name || '';
   const userStudentId = currentUser?.identifier || currentUser?.studentId || '';
@@ -88,10 +105,14 @@ export default function AiRefineModal({
     }
   }, [currentUser, userName, userStudentId, userDept, category, courseName, professorName, isFollowUp, previousAnswer, isAnonymous]);
 
+  const handleTriggerAIRef = useRef(handleTriggerAI);
+  handleTriggerAIRef.current = handleTriggerAI;
+
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
       const initTtl = initialTitle || '';
       const initTxt = initialText || '';
+      setIsLoading(false);
       setOriginalTitle(initTtl);
       setOriginalText(initTxt);
       setRefinedTitle('');
@@ -99,15 +120,23 @@ export default function AiRefineModal({
       setAiResult(null);
       setErrorMsg('');
       setIsEditingRefined(false);
+      setIsPreviewRefined(false);
       if (initTxt.trim().length > 3 || initTtl.trim().length > 2) {
-        handleTriggerAI(initTxt, initTtl);
+        handleTriggerAIRef.current(initTxt, initTtl);
       }
-    } else {
+    } else if (!isOpen && wasOpenRef.current) {
       requestIdRef.current += 1;
+      setIsLoading(false);
     }
-  }, [isOpen, initialText, initialTitle, handleTriggerAI]);
+    wasOpenRef.current = isOpen;
+  }, [isOpen, initialText, initialTitle]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
+
+  const directiveCount = (() => {
+    const matches = String(originalText || '').match(/\[\[([^\[\]\r\n]{1,300})\]\]/g);
+    return matches ? Math.min(matches.length, 10) : 0;
+  })();
 
   const handleApply = () => {
     if (typeof onApplyRefined === 'function') {
@@ -137,9 +166,15 @@ export default function AiRefineModal({
     handleTriggerAI(tmplText, tmplTitle);
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content ai-modal" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="modal-content ai-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header ai-modal-header">
           <div className="modal-title">
             <span>{isFollowUp ? '추가 질문 문장 다듬기' : '문장 다듬기'}</span>
@@ -150,6 +185,17 @@ export default function AiRefineModal({
         </div>
 
         <div className="modal-body">
+          {directiveCount > 0 ? (
+            <div className="ai-directive-notice">
+              <Sparkles size={14} />
+              <span>본문 내 <code>[[지시사항]]</code> {directiveCount}건을 AI가 처리하여 결과로 대체합니다.</span>
+            </div>
+          ) : (
+            <div className="ai-directive-tip">
+              <span>본문에 <code>[[지시사항]]</code>을 넣으면 AI가 해당 부분을 처리 결과로 대체합니다.</span>
+            </div>
+          )}
+
           {/* 학업 문의 추천 서식 템플릿 (일반 질문에서만 표시) */}
           {!isFollowUp && (
             <div className="ai-quick-templates">
@@ -158,7 +204,9 @@ export default function AiRefineModal({
                 {AI_INQUIRY_TEMPLATES.map((tmpl, idx) => (
                   <button
                     key={idx}
+                    type="button"
                     className="template-chip-btn"
+                    disabled={isLoading}
                     onClick={() => loadTemplate(tmpl)}
                   >
                     {tmpl.title}
@@ -211,13 +259,26 @@ export default function AiRefineModal({
                   <span className="compare-tag ai-tag">정제 결과</span>
                 </div>
                 {aiResult && (
-                  <button
-                    className={`edit-toggle-btn ${isEditingRefined ? 'active' : ''}`}
-                    onClick={() => setIsEditingRefined(!isEditingRefined)}
-                  >
-                    <Edit3 size={13} />
-                    {isEditingRefined ? '완료' : '수정'}
-                  </button>
+                  <div className="refined-header-actions">
+                    <MarkdownModeTabs
+                      isPreview={isPreviewRefined}
+                      onTogglePreview={(nextPreview) => {
+                        setIsPreviewRefined(nextPreview);
+                        if (nextPreview) setIsEditingRefined(false);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={`edit-toggle-btn ${isEditingRefined ? 'active' : ''}`}
+                      onClick={() => {
+                        setIsPreviewRefined(false);
+                        setIsEditingRefined(!isEditingRefined);
+                      }}
+                    >
+                      <Edit3 size={13} />
+                      {isEditingRefined ? '완료' : '수정'}
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -248,13 +309,19 @@ export default function AiRefineModal({
 
                     <div className="compare-field-wrap">
                       <label className="ai-sub-label">본문</label>
-                      <textarea
-                        value={refinedText}
-                        onChange={(e) => setRefinedText(e.target.value)}
-                        readOnly={!isEditingRefined}
-                        className={`ai-textarea refined-textarea ${isEditingRefined ? 'editable' : ''}`}
-                        rows={8}
-                      />
+                      {isPreviewRefined ? (
+                        <div className="md-preview-box ai-refined-preview-box">
+                          <MarkdownContent content={refinedText} />
+                        </div>
+                      ) : (
+                        <textarea
+                          value={refinedText}
+                          onChange={(e) => setRefinedText(e.target.value)}
+                          readOnly={!isEditingRefined}
+                          className={`ai-textarea refined-textarea ${isEditingRefined ? 'editable' : ''}`}
+                          rows={8}
+                        />
+                      )}
                     </div>
                   </>
                 ) : (
@@ -268,10 +335,11 @@ export default function AiRefineModal({
         </div>
 
         <div className="modal-footer ai-modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
             취소
           </button>
           <button
+            type="button"
             className="btn btn-primary"
             onClick={handleApply}
             disabled={(!refinedText && !refinedTitle) || isLoading}
@@ -280,6 +348,7 @@ export default function AiRefineModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
