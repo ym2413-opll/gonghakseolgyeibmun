@@ -473,24 +473,75 @@ export function remarkHighlightDirectiveSentinels() {
   };
 }
 
+const LATEX_MATH_DETECT_REGEX =
+  /\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]*?\\\]|\\\([^\r\n]+?\\\)|\\(?:int|sum|prod|frac|sqrt|lim|infty|alpha|beta|gamma|theta|pi|sigma|sin|cos|tan|log|ln|begin)\b/;
+
 /**
- * 목록 미리보기 및 자동 요약 제목용 Markdown 기호 제거 평문 추출
+ * 수식 구문($$...$$, $...$, \[...\], \(...\))을 평문 표시용 치환 문자열로 정리
  */
-export function stripMarkdownForPreview(markdownText) {
+export function replaceMathForPlainText(text, replacement = '[수식]', { preserveNewlines = false } = {}) {
+  if (!text || typeof text !== 'string') return '';
+  const pad = replacement ? ` ${replacement} ` : ' ';
+
+  // 코드 블록과 인라인 코드는 보호하고 나머지 영역의 수식만 치환
+  const parts = text.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  const replaced = parts
+    .map((part, idx) => {
+      if (!part) return '';
+      if (idx % 2 === 1) return part;
+
+      return part
+        .replace(/\$\$[\s\S]*?\$\$/g, pad)
+        .replace(/\\\[[\s\S]*?\\\]/g, pad)
+        .replace(/\\\([^\r\n]+?\\\)/g, pad)
+        .replace(/\$([^$\r\n]+?)\$/g, (full, inner) => {
+          const trimmed = String(inner || '').trim();
+          if (!trimmed) return full;
+          // "$100에서 $200" 같은 통화 표기는 수식으로 오인하지 않음
+          if (/^\d+(?:[.,]\d+)?\s*[가-힣]/.test(trimmed)) return full;
+          return pad;
+        })
+        // 잘린(미닫힘) 블록 수식 꼬리 정리
+        .replace(/\$\$[\s\S]*$/g, pad);
+    })
+    .join('');
+
+  if (preserveNewlines) {
+    return replaced
+      .split(/\r?\n/)
+      .map((line) =>
+        replacement
+          ? line.replace(/(?:\[수식\]\s*){2,}/g, `${replacement} `).replace(/[ \t]+/g, ' ').trim()
+          : line.replace(/[ \t]+/g, ' ').trim()
+      )
+      .join('\n');
+  }
+
+  return replacement
+    ? replaced.replace(/(?:\[수식\]\s*){2,}/g, `${replacement} `)
+    : replaced;
+}
+
+export function containsMathSyntax(text) {
+  return typeof text === 'string' && LATEX_MATH_DETECT_REGEX.test(text);
+}
+
+/**
+ * 목록 미리보기 및 자동 요약 제목용 Markdown·수식 기호 제거 평문 추출
+ */
+export function stripMarkdownForPreview(markdownText, { mathReplacement = '[수식]', preserveNewlines = false } = {}) {
   if (!markdownText || typeof markdownText !== 'string') return '';
   const bounded = markdownText.slice(0, 4000);
 
-  return bounded
+  const withoutMath = replaceMathForPlainText(bounded, mathReplacement, { preserveNewlines });
+
+  const stripped = withoutMath
     .replace(/```[\s\S]*?```/g, (block) =>
       block
         .replace(/^```[^\n]*\n?/, '')
         .replace(/```$/, '')
         .trim()
     )
-    .replace(/\$\$([\s\S]*?)\$\$/g, ' $1 ')
-    .replace(/\$([^$\r\n]+?)\$/g, '$1')
-    .replace(/\\\[([\s\S]*?)\\\]/g, ' $1 ')
-    .replace(/\\\(([^\r\n]+?)\\\)/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => (alt ? `[이미지: ${alt}]` : '[이미지]'))
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
@@ -500,7 +551,17 @@ export function stripMarkdownForPreview(markdownText) {
     .replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, '')
     .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '')
     .replace(/(\*\*|__|\*|_|~~)/g, '')
-    .replace(/\|/g, ' ')
+    .replace(/\|/g, ' ');
+
+  if (preserveNewlines) {
+    return stripped
+      .split(/\r?\n/)
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .join('\n')
+      .trim();
+  }
+
+  return stripped
     .replace(/\s+/g, ' ')
     .trim();
 }

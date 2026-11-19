@@ -1590,19 +1590,19 @@ class QuestionService(
                 if (simScore < 25) continue
 
                 val topAnswer = cand.answerDtos.firstOrNull()?.content
-                val snippet = cand.refinedContent.take(100)
+                val snippet = stripMarkdownAndMathForPreview(cand.refinedContent).take(120)
 
                 results.add(
                     SimilarQuestionDto(
                         id = cand.questionId.toString(),
                         title = cand.title,
                         snippet = snippet,
-                        content = snippet,
+                        content = cand.refinedContent,
                         category = category,
                         similarity = sim,
                         similarityScore = simScore,
                         answerCount = cand.answerDtos.size,
-                        topAnswerSnippet = topAnswer?.take(150),
+                        topAnswerSnippet = topAnswer?.let { stripMarkdownAndMathForPreview(it).take(150) },
                         answers = cand.answerDtos
                     )
                 )
@@ -1611,25 +1611,86 @@ class QuestionService(
         }
     }
 
-    private fun generateSummaryTitle(content: String): String {
-        val clean = content.trim()
-        if (clean.isBlank()) return "학업 질문"
-        val firstLine = clean.lines().firstOrNull { it.isNotBlank() } ?: clean
-        val stripped = firstLine
+    internal fun stripMarkdownAndMathForPreview(
+        content: String,
+        mathReplacement: String = "[수식]",
+        preserveNewlines: Boolean = false
+    ): String {
+        val bounded = content.take(4000)
+        val pad = if (mathReplacement.isNotEmpty()) " $mathReplacement " else " "
+        val codeSplitRegex = Regex("""(```[\s\S]*?```|`[^`\n]+`)""")
+        val sb = StringBuilder(bounded.length)
+        var cursor = 0
+        fun replaceMathSegment(seg: String): String {
+            return seg
+                .replace(Regex("""\$\$[\s\S]*?\$\$"""), pad)
+                .replace(Regex("""\\\[[\s\S]*?\\\]"""), pad)
+                .replace(Regex("""\\\([^\r\n]+?\\\)"""), pad)
+                .replace(Regex("""\$([^$\r\n]+?)\$""")) { mr ->
+                    val inner = mr.groupValues[1].trim()
+                    if (inner.isBlank() || Regex("""^\d+(?:[.,]\d+)?\s*[가-힣]""").containsMatchIn(inner)) {
+                        mr.value
+                    } else {
+                        pad
+                    }
+                }
+                .replace(Regex("""\$\$[\s\S]*$"""), pad)
+        }
+        for (match in codeSplitRegex.findAll(bounded)) {
+            if (match.range.first > cursor) {
+                sb.append(replaceMathSegment(bounded.substring(cursor, match.range.first)))
+            }
+            sb.append(match.value)
+            cursor = match.range.last + 1
+        }
+        if (cursor < bounded.length) {
+            sb.append(replaceMathSegment(bounded.substring(cursor)))
+        }
+        var stripped = sb.toString()
+            .replace(Regex("""```[\s\S]*?```""")) { mr ->
+                mr.value.replace(Regex("""^```[^\n]*\n?"""), "").replace(Regex("""```$"""), "").trim()
+            }
             .replace(Regex("""!\[([^\]]*)\]\([^)]*\)""")) { mr ->
                 mr.groupValues[1].takeIf { it.isNotBlank() }?.let { "[이미지: $it]" } ?: "[이미지]"
             }
             .replace(Regex("""\[([^\]]+)\]\([^)]*\)"""), "$1")
             .replace(Regex("""`([^`]+)`"""), "$1")
-            .replace(Regex("""^[#*\-•\d.>]+\s*"""), "")
+            .replace(Regex("""(?m)^#{1,6}\s+"""), "")
+            .replace(Regex("""(?m)^>\s?"""), "")
+            .replace(Regex("""(?m)^[-*_]{3,}\s*$"""), " ")
+            .replace(Regex("""(?m)^\s*[-*+]\s+\[[ xX]\]\s+"""), "")
+            .replace(Regex("""(?m)^\s*(?:[-*+]|\d+\.)\s+"""), "")
             .replace(Regex("""(\*\*|__|\*|_|~~)"""), "")
+            .replace("|", " ")
+
+        if (mathReplacement.isNotEmpty()) {
+            val escapedRepl = Regex.escape(mathReplacement)
+            stripped = stripped.replace(Regex("""(?:$escapedRepl\s*){2,}"""), "$mathReplacement ")
+        }
+        return if (preserveNewlines) {
+            stripped.lines().joinToString("\n") { it.replace(Regex("""[ \t]+"""), " ").trim() }.trim()
+        } else {
+            stripped.replace(Regex("""\s+"""), " ").trim()
+        }
+    }
+
+    internal fun generateSummaryTitle(content: String): String {
+        val clean = content.trim()
+        if (clean.isBlank()) return "학업 질문"
+        val hasMath = Regex("""\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]*?\\\]|\\\([^\r\n]+?\\\)""").containsMatchIn(clean)
+        val plainMultiline = stripMarkdownAndMathForPreview(clean, mathReplacement = "", preserveNewlines = true)
+        val firstLine = plainMultiline.lines().firstOrNull { it.isNotBlank() }.orEmpty()
+        val stripped = firstLine
             .replace(Regex("""[\[\]]"""), "")
+            .replace(Regex("""^(?:은|는|가|을|를|의|에서|와|과|으로|로)\s+"""), "")
+            .replace(Regex("""\s+"""), " ")
             .trim()
+        if (stripped.isBlank()) return if (hasMath) "수식 관련 질문" else "학업 질문"
         val sentenceMatch = Regex("^(.+?[.!?])(\\s|$)").find(stripped)
         if (sentenceMatch != null && sentenceMatch.groupValues[1].length in 10..45) {
             return sentenceMatch.groupValues[1]
         }
-        return if (stripped.length <= 45) stripped.ifBlank { "학업 질문" } else stripped.take(45) + "..."
+        return if (stripped.length <= 45) stripped else stripped.take(45) + "..."
     }
 
     private fun calculateCanAnswer(

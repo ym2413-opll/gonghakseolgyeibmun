@@ -75,7 +75,9 @@ export default function QuestionCard({ question, onClick }) {
         </div>
       </div>
 
-      <h4 className="card-title">{question.title || generateSummaryTitle(question.content)}</h4>
+      <h4 className="card-title">
+        {question.title ? stripMarkdownForPreview(question.title) : generateSummaryTitle(question.content)}
+      </h4>
 
       <p className="card-snippet">
         {(() => {

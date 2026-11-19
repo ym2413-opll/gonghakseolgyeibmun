@@ -172,7 +172,9 @@ const QuestionCard = ({
                 <Users size={12} /> 공동 답변 가능
               </span>
             )}
-            <h3 className="forum-topic-title">{question.title}</h3>
+            <h3 className="forum-topic-title">
+              {stripMarkdownForPreview(question.title || '') || '학업 질문'}
+            </h3>
           </div>
 
           <p className="forum-topic-excerpt">
