@@ -212,20 +212,28 @@ function fulfillLocalInlineDirective(directiveText, { rawProfName = '', category
   const clean = stripAiZeroWidthAndControl(directiveText).replace(/[[\]［］]/g, '').trim();
   if (!clean) return '';
   const lower = clean.toLowerCase();
+  const compact = lower.replace(/\s+/g, '');
 
+  const isSatirical = /(?:까는|까줘|까라|까서|디스|풍자|돌려까|비판|비꼬|비난|팩폭|저격|불만|불평|원망|극딜|놀리|놀려|욕하|하소연|투덜|반어)/.test(compact);
   const isAcrostic =
-    /(?:세로드립|삼행시|이행시|사행시|오행시|행시|n행시)/.test(lower) ||
-    ((lower.includes('이름') || lower.includes('성함') || lower.includes('초성')) &&
-      /(?:드립|이용|활용|까는|풍자|디스|돌려까)/.test(lower));
+    /(?:세로드립|세로글|세로로읽|[23456n이삼사오육]행시|행시|머리글자|첫글자|초성|운을띄|운띄)/.test(compact) ||
+    (/(?:이름|성함|호칭|professor_title)/.test(compact) &&
+      /(?:드립|이용|활용|사용|가지고|써서|넣어|따서|맞춰|바탕|기반|삼아|통해|까는|까줘|까라|풍자|디스|돌려|비판|비꼬|놀리|시|작성|써줘|적어|만들)/.test(compact));
 
-  if (isAcrostic) {
-    const cleanedProfRoot = stripAiZeroWidthAndControl(rawProfName)
-      .trim()
+  if (isAcrostic || (isSatirical && /(?:교수|성함|이름|담당)/.test(clean))) {
+    const rawTrimmedProf = stripAiZeroWidthAndControl(rawProfName).trim();
+    const cleanedProfRoot = rawTrimmedProf
       .replace(/님$/, '')
       .replace(/교수$/, '')
       .trim();
-    const profSyllables = Array.from(cleanedProfRoot).filter((ch) => /[가-힣A-Za-z0-9]/.test(ch)).slice(0, 6);
-    const asksProf = clean.includes('교수') || clean.includes('성함');
+    const rootSyllables = Array.from(cleanedProfRoot).filter((ch) => /[가-힣A-Za-z0-9]/.test(ch)).slice(0, 6);
+    const profSyllables =
+      rootSyllables.length >= 2
+        ? rootSyllables
+        : rootSyllables.length === 1 && /(?:교수|교수님)$/.test(rawTrimmedProf)
+          ? [rootSyllables[0], '교', '수']
+          : rootSyllables;
+    const asksProf = clean.includes('교수') || clean.includes('성함') || clean.includes('담당');
     let syllables = [];
     if (asksProf) {
       if (profSyllables.length >= 2) syllables = profSyllables;
@@ -233,14 +241,16 @@ function fulfillLocalInlineDirective(directiveText, { rawProfName = '', category
       else syllables = ['교', '수', '님'];
     } else {
       const quoted = clean.match(/['"‘“]([가-힣]{2,6})['"’”]/);
-      const before = clean.match(/([가-힣]{2,6})(?:으로|로|을|를)?\s*(?:세로드립|삼행시|이행시|사행시|오행시|행시)/);
+      const before = clean.match(/([가-힣]{2,6})(?:으로|로|을|를)?\s*(?:세로\s*드립|세로\s*글|[23456n이삼사오육]\s*행\s*시|행시)/);
       const cand = quoted?.[1] || before?.[1] || '';
-      const skip = new Set(['이름을', '이름으로', '글을', '문장을', '내용을', '까는', '이용하여', '활용하여']);
+      const skip = new Set([
+        '이름을', '이름으로', '성함을', '성함으로', '글을', '문장을', '내용을',
+        '까는', '비판하는', '비꼬는', '풍자하는', '돌려까는', '이용하여', '이용해', '활용하여', '활용해', '써서', '가지고'
+      ]);
       if (cand && !skip.has(cand)) syllables = Array.from(cand);
       else if (profSyllables.length >= 2) syllables = profSyllables;
       else syllables = ['교', '수', '님'];
     }
-    const isSatirical = /(?:까는|디스|풍자|돌려까|비판|팩폭|저격|불만|원망|극딜|까줘)/.test(lower);
     const bank = isSatirical ? LOCAL_SATIRICAL_ACROSTIC_LINES : LOCAL_POLITE_ACROSTIC_LINES;
     return syllables
       .map((ch, idx) => {
@@ -254,7 +264,11 @@ function fulfillLocalInlineDirective(directiveText, { rawProfName = '', category
       .join('\n');
   }
 
-  if (/(?:수식|공식|latex|테일러|급수|근의|피타고라스|오일러|적분|미분)/.test(lower)) {
+  if (isSatirical) {
+    return '수업 시간에는 명확해 보였던 개념들이 과제와 시험 문제에서는 예상보다 훨씬 높은 응용 난이도로 출제되어 밤을 새워 씨름하고 있습니다. 평가 기준과 핵심 출제 의도를 조금 더 구체적으로 안내해 주시면 큰 도움이 되겠습니다.';
+  }
+
+  if (/(?:수식|공식|방정식|latex|테일러|급수|근의|피타고라스|오일러|적분|미분)/.test(compact)) {
     const mode = /(?:블록|따로|줄 바꿈|별도 줄)/.test(lower) ? 'block' : 'inline';
     let expr = clean.replace(/[\r\n$]+/g, ' ').slice(0, 120);
     if ((lower.includes('코사인') || lower.includes('cos')) && (lower.includes('테일러') || lower.includes('급수'))) {
@@ -265,36 +279,39 @@ function fulfillLocalInlineDirective(directiveText, { rawProfName = '', category
     return mode === 'block' ? `$$\n${expr}\n$$` : `$${expr}$`;
   }
 
-  if (lower.includes('비교표') || /(?<![가-힣])표(?![가-힣])/.test(lower) || lower.includes('table')) {
-    const topic = clean.replace(/(?:비교표|표로|표|작성해\s*줘|만들어\s*줘|정리해\s*줘|넣어\s*줘|추가해\s*줘)/g, '').trim() || clean;
+  if (lower.includes('비교표') || lower.includes('테이블') || /(?<![가-힣])표(?![가-힣])/.test(lower) || lower.includes('table')) {
+    const topic = clean.replace(/(?:비교표|테이블|표로|표|작성해\s*(?:줘|라|봐)?|만들어\s*(?:줘|라|봐)?|정리해\s*(?:줘|라|봐)?|넣어\s*(?:줘|라|봐)?|추가해\s*(?:줘|라|봐)?|적어\s*(?:줘|라|봐)?)/g, '').trim() || clean;
     return `| 구분 | 핵심 내용 |\n| --- | --- |\n| ${topic} | 세부 확인 필요 |`;
   }
-  if (/(?:목록|불릿|항목|단계|리스트)/.test(lower)) {
+  if (/(?:목록|불릿|항목|단계|리스트|나열|가지로)/.test(lower)) {
     const parts = clean.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
     return parts.length >= 2 ? parts.map((p) => `- ${p}`).join('\n') : `- ${clean}`;
   }
   if (lower.includes('코드') || lower.includes('code')) {
-    const topic = clean.replace(/(?:코드|예시|작성해\s*줘|넣어\s*줘)/g, '').trim() || 'example';
+    const topic = clean.replace(/(?:코드|예시|작성해\s*(?:줘|라|봐)?|넣어\s*(?:줘|라|봐)?|적어\s*(?:줘|라|봐)?)/g, '').trim() || 'example';
     return `\`\`\`text\n// ${topic}\n\`\`\``;
   }
-  if (lower.includes('감사') || lower.includes('인사')) {
+  if (/(?:사과|양해|선처|기한 연장|지각|유예|재제출|미뤄)/.test(lower)) {
+    return '일정 관리에 미흡한 점이 있어 송구하오며, 부득이한 사정을 너그러이 양해해 주시어 보완 및 제출 기회를 주신다면 성실히 마무리하겠습니다.';
+  }
+  if (/(?:감사|고마|인사|칭찬|존경)/.test(lower)) {
     return '한 학기 동안 열정적으로 강의해 주시고 세심하게 지도해 주신 점에 진심으로 감사드립니다.';
   }
-  if (lower.includes('요약') || lower.includes('정리')) {
+  if (/(?:요약|정리|핵심)/.test(lower)) {
     return '핵심 내용을 정리하자면, 해당 개념의 기본 원리와 적용 조건을 단계별로 명확히 확인하고자 합니다.';
   }
-  if (lower.includes('예시') || lower.includes('사례')) {
+  if (/(?:예시|사례|비유)/.test(lower)) {
     return '이해를 돕기 위한 대표적인 예시와 함께 실제 적용 시 유의할 부분을 함께 안내해 주시면 감사하겠습니다.';
   }
 
   const strippedMeta = clean
-    .replace(/(?:교수님|교수)\s*(?:이름|성함)(?:을|를|으로|로)?\s*(?:이용하여|활용하여|사용하여|가지고)?/g, '')
-    .replace(/(?:이용하여|활용하여|사용하여|바탕으로|기준으로|참고하여|넣어서|담아서)/g, '')
-    .replace(/\s*(?:세로드립|삼행시|이행시|사행시|오행시|행시|글을|글|문장을|문장|내용을|내용)\s*(?:넣어\s*줘|작성해\s*줘|써\s*줘|만들어\s*줘|생성해\s*줘|부탁해\s*줘|해\s*줘)?[.!?]?\s*$/g, '')
-    .replace(/\s*(?:넣어\s*줘|작성해\s*줘|써\s*줘|만들어\s*줘|설명해\s*줘|정리해\s*줘|알려\s*줘|추가해\s*줘|바꿔\s*줘|변환해\s*줘|부탁해|해줘)[.!?]?\s*$/g, '')
+    .replace(/(?:담당\s*)?(?:교수님|교수)\s*(?:이름|성함|호칭)(?:을|를|으로|로)?\s*(?:이용하여|이용해|활용하여|활용해|사용하여|사용해|가지고|써서|통해|넣어서|넣어|따서)?/g, '')
+    .replace(/(?:이용하여|이용해|활용하여|활용해|사용하여|사용해|바탕으로|기준으로|참고하여|넣어서|담아서|가지고|써서|통해|따서)/g, '')
+    .replace(/\s*(?:세로\s*드립|삼행시|이행시|사행시|오행시|[2-6n]\s*행시|행시|글을|글|문장을|문장|내용을|내용)\s*(?:넣어\s*(?:줘|라|봐)?|작성해\s*(?:줘|라|봐)?|써\s*(?:줘|라|봐)?|적어\s*(?:줘|라|봐)?|만들어\s*(?:줘|라|봐)?|생성해\s*(?:줘|라|봐)?|부탁해\s*(?:줘)?|해\s*(?:줘|라|봐)?)?[.!?]?\s*$/g, '')
+    .replace(/\s*(?:넣어\s*(?:줘|라|봐)?|작성해\s*(?:줘|라|봐)?|써\s*(?:줘|라|봐)?|적어\s*(?:줘|라|봐)?|만들어\s*(?:줘|라|봐)?|설명해\s*(?:줘|라|봐)?|정리해\s*(?:줘|라|봐)?|알려\s*(?:줘|라|봐)?|추가해\s*(?:줘|라|봐)?|바꿔\s*(?:줘|라|봐)?|변환해\s*(?:줘|라|봐)?|부탁해|해줘|해라|해봐)[.!?]?\s*$/g, '')
     .replace(/[을를이가은는에]\s*$/, '')
     .trim();
-  const hasResidualCommand = /(?:작성해|써줘|만들어|까는|세로드립|삼행시|지시사항)/.test(strippedMeta);
+  const hasResidualCommand = /(?:작성|써줘|써라|적어|만들|까는|비판|비꼬|풍자|디스|세로|행시|지시사항|프롬프트)/.test(strippedMeta);
   if (strippedMeta.length >= 2 && strippedMeta.length <= 40 && !hasResidualCommand) {
     return `또한 ${strippedMeta}와 관련하여 보다 구체적인 원리와 적용 기준에 대한 설명을 부탁드립니다.`;
   }
@@ -2822,7 +2839,7 @@ export const api = {
     const cleanTitle = (rawTitle || '').replace(/[\[\]!?~]+/g, '').trim();
 
     const inlineDirectives = [];
-    const directiveRegex = /\[\[([^[\]]{1,500})\]\]/g;
+    const directiveRegex = /(?:\[\[|［［)\s*([\s\S]{1,1000}?)\s*(?:\]\]|］］)/g;
     let dMatch;
     while ((dMatch = directiveRegex.exec(String(rawText || ''))) !== null && inlineDirectives.length < 10) {
       const inner = dMatch[1].replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();

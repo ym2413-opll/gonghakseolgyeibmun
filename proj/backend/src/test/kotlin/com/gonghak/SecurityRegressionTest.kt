@@ -1357,6 +1357,61 @@ class SecurityRegressionTest {
             assertEquals(1, fixedLazyHl.size)
             val fixedLines = fixedLazyHl[0].replacement.lines().map { it.trim() }.filter { it.isNotBlank() }
             assertEquals("박철수", fixedLines.take(3).joinToString("") { it.first().toString() })
+
+            // 6. Rephrased / synonym / spaced / fullwidth / inner-bracket directives + default 3-char professor ("김교수") + directive prompt 5-round escape verification
+            val rephrasedCases = listOf(
+                "[[교수님 성함을 써서 교수님을 비판하는 세로 드립을 적어라]]",
+                "[[교수님 이름 첫 글자를 따서 교수님 비꼬는 3행시 만들어줘]]",
+                "[[담당 교수 이름으로 교수님 돌려까는 글 써줘]]",
+                "［［교수님 성함으로 교수님 풍자하는 글 작성해봐］］"
+            )
+            for (expr in rephrasedCases) {
+                val m = ai.maskInputForPrompt(
+                    rawContent = expr,
+                    professorName = "김교수",
+                    studentName = "김테스트",
+                    studentDepartment = "소프트웨어학과",
+                    studentIdentifier = "2026123456"
+                )
+                assertEquals(1, m.inlineDirectives.size, "Rephrased directive must be recognized: $expr")
+                val desc = m.inlineDirectives["{{AI_DIRECTIVE_0}}"].orEmpty()
+                val dirPrompt = ai.buildDirectiveExecutionPrompt(
+                    directiveDesc = desc,
+                    professorName = "김교수",
+                    courseName = "공학설계입문",
+                    category = QuestionCategory.GRADE,
+                    surroundingContext = m.rawContent
+                )
+                assertTrue(dirPrompt.contains("'김'") && dirPrompt.contains("'교'") && dirPrompt.contains("'수'"))
+                assertFalse(dirPrompt.contains("김교수"))
+                val dirVerify = ai.verifyDirectivePromptEscapeMultiRound(
+                    dirPrompt,
+                    rawPiiValues = listOf("김교수", "김테스트", "2026123456", "소프트웨어학과")
+                )
+                assertTrue(dirVerify.isSafe, "Directive prompt failed 5-round escape verification: ${dirVerify.violations}")
+                val out = ai.processFallbackInlineDirective(desc, professorName = "김교수", courseName = "공학설계입문", category = QuestionCategory.GRADE)
+                assertFalse(out.contains("와 관련하여 보다 구체적인 원리와 적용 기준"))
+                val outLines = out.lines().map { it.trim() }.filter { it.isNotBlank() }
+                assertEquals("김교수", outLines.take(3).joinToString("") { it.first().toString() }, "Expected acrostic for 김교수 from $expr, got: $out")
+            }
+
+            val benignReqMasked = ai.maskInputForPrompt(
+                rawContent = "[[과제 필수 요구사항과 배열 a[0] 조건을 표로 정리해줘]]",
+                professorName = "김교수",
+                studentName = "김테스트"
+            )
+            assertEquals(1, benignReqMasked.inlineDirectives.size, "Benign directive mentioning 필수 요구사항 and a[0] must be recognized")
+            val benignDirPrompt = ai.buildDirectiveExecutionPrompt(
+                directiveDesc = benignReqMasked.inlineDirectives["{{AI_DIRECTIVE_0}}"].orEmpty(),
+                professorName = "김교수",
+                courseName = "자료구조",
+                surroundingContext = benignReqMasked.rawContent
+            )
+            val benignDirVerify = ai.verifyDirectivePromptEscapeMultiRound(
+                benignDirPrompt,
+                rawPiiValues = listOf("김교수", "김테스트")
+            )
+            assertTrue(benignDirVerify.isSafe, "Benign directive prompt failed escape verification: ${benignDirVerify.violations}")
         } finally {
             ai.close()
         }

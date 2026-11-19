@@ -202,7 +202,7 @@ export default function AiRefineModal({
   if (!isOpen || typeof document === 'undefined') return null;
 
   const directiveCount = (() => {
-    const matches = String(originalText || '').match(/\[\[([^[\]]{1,500})\]\]/g);
+    const matches = String(originalText || '').match(/(?:\[\[|［［)\s*([\s\S]{1,1000}?)\s*(?:\]\]|］］)/g);
     return matches ? Math.min(matches.length, 10) : 0;
   })();
 

@@ -43,7 +43,8 @@ fun Application.module() {
     val emailService = EmailService(workerManager)
     val webPushService = WebPushService(workerManager = workerManager)
     val notificationService = NotificationService(emailService, workerManager, webPushService)
-    val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()
+    val geminiApiKey = environment.config.propertyOrNull("gemini.apiKey")?.getString()?.takeIf { it.isNotBlank() }
+        ?: EnvConfig.get("GEMINI_API_KEY")
     val aiRefineService = AiRefineService(geminiApiKey, workerManager)
     val userService = UserService()
     val uploadDirPath = System.getProperty("gonghak.uploadDir")
