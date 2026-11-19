@@ -169,6 +169,144 @@ function replaceAiPlaceholders(
   return replaced;
 }
 
+const LOCAL_SATIRICAL_ACROSTIC_LINES = {
+  김: ['김밥 한 줄 먹을 시간도 없이 밀려드는 과제 양에 밤을 새우고 있습니다.'],
+  이: ['이렇게까지 어려운 시험 문제를 내실 줄은 정말 상상도 하지 못했습니다.'],
+  박: ['박수 칠 만큼 명강의라 믿었는데 시험지 펼치는 순간 동공이 흔들렸습니다.'],
+  최: ['최선을 다해 복습했지만 시험 난이도 앞에서는 인간미가 살짝 아쉬웠습니다.'],
+  정: ['정말 열심히 공부했는데 점수를 보니 강의와 저 사이에 벽이 느껴집니다.'],
+  강: ['강의를 들을 땐 고개를 끄덕였는데 시험지를 받자마자 기억이 초기화되었습니다.'],
+  조: ['조금만 쉽게 내주셨어도 학생들 혈압이 조금은 평온했을 텐데 아쉽습니다.'],
+  윤: ['윤곽조차 잡히지 않는 시험 범위 덕분에 새벽까지 책상과 사투를 벌였습니다.'],
+  장: ['장학금은커녕 학점 방어만이라도 시켜 주시면 평생 감사히 여기겠습니다.'],
+  임: ['임기응변으로 풀 수 없는 극악 난이도 시험에 정신이 아득해졌습니다.'],
+  한: ['한 학기 동안 과제에 치여 살다 보니 이제 과제 공지만 떠도 심장이 뜁니다.'],
+  오: ['오늘도 과제 마감과 사투를 벌이며 이 난이도가 진심인지 조심스레 의심해 봅니다.'],
+  서: ['서러운 시험 점수를 마주하고 나니 교수님의 높은 기대치가 원망스럽기까지 합니다.'],
+  신: ['신선한 충격이었던 시험 문제 덕분에 졸업에 대한 소망이 더욱 절실해졌습니다.'],
+  권: ['권장 학습 시간을 아득히 뛰어넘는 과제량에 주말이 통째로 증발했습니다.'],
+  황: ['황당할 정도로 어려웠던 중간·기말 문제를 떠올리면 아직도 아찔합니다.'],
+  안: ['안 그래도 벅찬 학기에 시험 문제까지 너무 냉정하셔서 눈물이 고였습니다.'],
+  송: ['송구스럽지만 이번 시험 난이도는 학생 배려 기능이 잠시 꺼져 있던 것 같습니다.'],
+  유: ['유독 매운 시험 문제와 채점 기준 덕분에 강제 철야 체력이 길러졌습니다.'],
+  홍: ['홍수처럼 쏟아지는 과제 공지 알림에 매주 심박수가 최고치를 경신합니다.'],
+  철: ['철야 과제 폭탄에 커피로 연명하다 보니 이제 마감일 알림만 봐도 눈물이 납니다.'],
+  수: ['수업 땐 분명 쉽게 설명해 주셨는데 시험 문제는 대체 어느 차원에서 오신 건가요.'],
+  교: ['교수님 강의를 들을 때마다 높은 시험 벽 앞에서 제 멘탈이 조금씩 시험받고 있습니다.'],
+  님: ['님께서 내주신 과제 폭탄을 풀다 보니 주말과 밤잠이 소리 없이 증발했습니다.']
+};
+
+const LOCAL_POLITE_ACROSTIC_LINES = {
+  김: ['김밥 한 줄 챙길 여유도 없이 열심히 수업을 복습하며 배움을 이어가고 있습니다.'],
+  이: ['이번 학기 가르침을 바탕으로 부족한 개념을 끝까지 채워 나가고 싶습니다.'],
+  박: ['박학다식하신 교수님의 명강의를 통해 매주 새로운 통찰을 얻고 있습니다.'],
+  최: ['최선을 다해 학습 내용을 정리하며 교수님의 조언을 깊이 새기겠습니다.'],
+  정: ['정성스러운 강의와 세심한 지도에 진심으로 감사드립니다.'],
+  철: ['철저한 개념 정리를 위해 늘 힘써 주시는 모습에서 큰 동기부여를 얻습니다.'],
+  수: ['수업에서 배운 지식을 실제 문제 해결에 잘 적용해 나가도록 노력하겠습니다.'],
+  교: ['교수님의 열정적인 지도 덕분에 전공에 대한 이해가 한층 깊어졌습니다.'],
+  님: ['님께서 전해 주시는 소중한 학술적 조언을 밑거름 삼아 더욱 정진하겠습니다.']
+};
+
+function fulfillLocalInlineDirective(directiveText, { rawProfName = '', category = 'lecture' } = {}) {
+  const clean = stripAiZeroWidthAndControl(directiveText).replace(/[[\]［］]/g, '').trim();
+  if (!clean) return '';
+  const lower = clean.toLowerCase();
+
+  const isAcrostic =
+    /(?:세로드립|삼행시|이행시|사행시|오행시|행시|n행시)/.test(lower) ||
+    ((lower.includes('이름') || lower.includes('성함') || lower.includes('초성')) &&
+      /(?:드립|이용|활용|까는|풍자|디스|돌려까)/.test(lower));
+
+  if (isAcrostic) {
+    const cleanedProfRoot = stripAiZeroWidthAndControl(rawProfName)
+      .trim()
+      .replace(/님$/, '')
+      .replace(/교수$/, '')
+      .trim();
+    const profSyllables = Array.from(cleanedProfRoot).filter((ch) => /[가-힣A-Za-z0-9]/.test(ch)).slice(0, 6);
+    const asksProf = clean.includes('교수') || clean.includes('성함');
+    let syllables = [];
+    if (asksProf) {
+      if (profSyllables.length >= 2) syllables = profSyllables;
+      else if (profSyllables.length === 1) syllables = [...profSyllables, '교', '수'];
+      else syllables = ['교', '수', '님'];
+    } else {
+      const quoted = clean.match(/['"‘“]([가-힣]{2,6})['"’”]/);
+      const before = clean.match(/([가-힣]{2,6})(?:으로|로|을|를)?\s*(?:세로드립|삼행시|이행시|사행시|오행시|행시)/);
+      const cand = quoted?.[1] || before?.[1] || '';
+      const skip = new Set(['이름을', '이름으로', '글을', '문장을', '내용을', '까는', '이용하여', '활용하여']);
+      if (cand && !skip.has(cand)) syllables = Array.from(cand);
+      else if (profSyllables.length >= 2) syllables = profSyllables;
+      else syllables = ['교', '수', '님'];
+    }
+    const isSatirical = /(?:까는|디스|풍자|돌려까|비판|팩폭|저격|불만|원망|극딜|까줘)/.test(lower);
+    const bank = isSatirical ? LOCAL_SATIRICAL_ACROSTIC_LINES : LOCAL_POLITE_ACROSTIC_LINES;
+    return syllables
+      .map((ch, idx) => {
+        const list = bank[ch];
+        if (list && list.length > 0) return list[idx % list.length];
+        if (isSatirical) {
+          return `${ch}이라는 글자로 시작할 만큼 이번 시험과 과제 난이도는 정말 매콤해서 눈물이 고였습니다.`;
+        }
+        return `${ch}이라는 글자로 마음을 모아 한 학기 동안 열정적으로 지도해 주신 점에 깊이 감사드립니다.`;
+      })
+      .join('\n');
+  }
+
+  if (/(?:수식|공식|latex|테일러|급수|근의|피타고라스|오일러|적분|미분)/.test(lower)) {
+    const mode = /(?:블록|따로|줄 바꿈|별도 줄)/.test(lower) ? 'block' : 'inline';
+    let expr = clean.replace(/[\r\n$]+/g, ' ').slice(0, 120);
+    if ((lower.includes('코사인') || lower.includes('cos')) && (lower.includes('테일러') || lower.includes('급수'))) {
+      expr = String.raw`\cos x = \sum_{n=0}^{\infty} \frac{(-1)^n}{(2n)!} x^{2n}`;
+    } else if (lower.includes('근의')) {
+      expr = String.raw`x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`;
+    }
+    return mode === 'block' ? `$$\n${expr}\n$$` : `$${expr}$`;
+  }
+
+  if (lower.includes('비교표') || /(?<![가-힣])표(?![가-힣])/.test(lower) || lower.includes('table')) {
+    const topic = clean.replace(/(?:비교표|표로|표|작성해\s*줘|만들어\s*줘|정리해\s*줘|넣어\s*줘|추가해\s*줘)/g, '').trim() || clean;
+    return `| 구분 | 핵심 내용 |\n| --- | --- |\n| ${topic} | 세부 확인 필요 |`;
+  }
+  if (/(?:목록|불릿|항목|단계|리스트)/.test(lower)) {
+    const parts = clean.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+    return parts.length >= 2 ? parts.map((p) => `- ${p}`).join('\n') : `- ${clean}`;
+  }
+  if (lower.includes('코드') || lower.includes('code')) {
+    const topic = clean.replace(/(?:코드|예시|작성해\s*줘|넣어\s*줘)/g, '').trim() || 'example';
+    return `\`\`\`text\n// ${topic}\n\`\`\``;
+  }
+  if (lower.includes('감사') || lower.includes('인사')) {
+    return '한 학기 동안 열정적으로 강의해 주시고 세심하게 지도해 주신 점에 진심으로 감사드립니다.';
+  }
+  if (lower.includes('요약') || lower.includes('정리')) {
+    return '핵심 내용을 정리하자면, 해당 개념의 기본 원리와 적용 조건을 단계별로 명확히 확인하고자 합니다.';
+  }
+  if (lower.includes('예시') || lower.includes('사례')) {
+    return '이해를 돕기 위한 대표적인 예시와 함께 실제 적용 시 유의할 부분을 함께 안내해 주시면 감사하겠습니다.';
+  }
+
+  const strippedMeta = clean
+    .replace(/(?:교수님|교수)\s*(?:이름|성함)(?:을|를|으로|로)?\s*(?:이용하여|활용하여|사용하여|가지고)?/g, '')
+    .replace(/(?:이용하여|활용하여|사용하여|바탕으로|기준으로|참고하여|넣어서|담아서)/g, '')
+    .replace(/\s*(?:세로드립|삼행시|이행시|사행시|오행시|행시|글을|글|문장을|문장|내용을|내용)\s*(?:넣어\s*줘|작성해\s*줘|써\s*줘|만들어\s*줘|생성해\s*줘|부탁해\s*줘|해\s*줘)?[.!?]?\s*$/g, '')
+    .replace(/\s*(?:넣어\s*줘|작성해\s*줘|써\s*줘|만들어\s*줘|설명해\s*줘|정리해\s*줘|알려\s*줘|추가해\s*줘|바꿔\s*줘|변환해\s*줘|부탁해|해줘)[.!?]?\s*$/g, '')
+    .replace(/[을를이가은는에]\s*$/, '')
+    .trim();
+  const hasResidualCommand = /(?:작성해|써줘|만들어|까는|세로드립|삼행시|지시사항)/.test(strippedMeta);
+  if (strippedMeta.length >= 2 && strippedMeta.length <= 40 && !hasResidualCommand) {
+    return `또한 ${strippedMeta}와 관련하여 보다 구체적인 원리와 적용 기준에 대한 설명을 부탁드립니다.`;
+  }
+  if (String(category || '').toLowerCase() === 'grade') {
+    return '아울러 평가 항목별 세부 기준과 채점 반영 비율에 관해서도 조금 더 자세한 안내를 부탁드립니다.';
+  }
+  if (String(category || '').toLowerCase() === 'assignment') {
+    return '아울러 과제 수행 시 우선적으로 고려해야 할 핵심 기준과 참고 방향에 대해서도 조언을 부탁드립니다.';
+  }
+  return '아울러 핵심 개념의 원리와 실제 문제 적용 기준에 관해서도 조금 더 자세한 설명을 부탁드립니다.';
+}
+
 function getAuthHeaders() {
   // Authentication is carried exclusively by the HttpOnly; Secure; SameSite=Lax cookie.
   // Any legacy localStorage token is purged to prevent XSS token harvesting.
@@ -2690,11 +2828,11 @@ export const api = {
       const inner = dMatch[1].replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       if (inner) inlineDirectives.push(inner);
     }
-    const directiveSentences = inlineDirectives.map(
-      (d) => `특히 ${d} 부분에 관하여 구체적인 설명과 조언을 부탁드립니다.`
+    const directiveSentences = inlineDirectives.map((d) =>
+      fulfillLocalInlineDirective(d, { rawProfName, category })
     );
     const directiveNote = directiveSentences.length > 0
-      ? `\n\n${directiveSentences.join('\n')}`
+      ? `\n\n${directiveSentences.join('\n\n')}`
       : '';
 
     const isFollowUp = Boolean(courseContext?.isFollowUp);

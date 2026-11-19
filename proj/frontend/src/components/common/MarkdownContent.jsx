@@ -569,7 +569,6 @@ function MarkdownContentInner({
               className="ai-directive-highlight-block"
               title={seg.directive ? `지시사항: ${seg.directive}` : '지시사항 반영'}
             >
-              <div className="ai-directive-highlight-badge">지시사항 반영</div>
               <ReactMarkdown
                 remarkPlugins={REMARK_PLUGINS}
                 rehypePlugins={REHYPE_PLUGINS}

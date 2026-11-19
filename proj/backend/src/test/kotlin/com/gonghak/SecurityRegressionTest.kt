@@ -1100,6 +1100,34 @@ class SecurityRegressionTest {
         assertTrue(firstHl.start >= 0 && firstHl.end > firstHl.start)
         assertEquals(firstHl.replacement, directiveRefineRes.refined.substring(firstHl.start, firstHl.end))
 
+        // Acrostic / 세로드립 directive via POST /api/ai/refine (must never echo raw command phrasing)
+        val acrosticRefineRes = client.post("/api/ai/refine") {
+            header(HttpHeaders.Authorization, "Bearer ${stuAuth.token}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                RefineQuestionRequest(
+                    rawTitle = "성적 문의",
+                    rawContent = "[[교수님 이름을 이용하여 교수님을 까는 세로드립 글을 작성해줘]]",
+                    courseName = "공학설계입문",
+                    professorName = "박철수",
+                    studentName = "질문학생",
+                    studentDepartment = "소프트웨어학과",
+                    studentIdentifier = stuAuth.user.identifier,
+                    category = QuestionCategory.GRADE
+                )
+            )
+        }.also { assertEquals(HttpStatusCode.OK, it.status) }
+            .body<ApiResponse<RefineQuestionResponse>>().data!!
+
+        assertFalse(acrosticRefineRes.refined.contains("특히 교수님 이름을 이용하여"))
+        assertFalse(acrosticRefineRes.refined.contains("세로드립 글을"))
+        assertEquals(1, acrosticRefineRes.directiveHighlights.size)
+        val acrosticHl = acrosticRefineRes.directiveHighlights.first()
+        val acrosticLines = acrosticHl.replacement.lines().map { it.trim() }.filter { it.isNotBlank() }
+        assertTrue(acrosticLines.size >= 3, "Acrostic output must contain multiple lines for professor name")
+        assertEquals("박철수", acrosticLines.take(3).joinToString("") { it.first().toString() })
+        assertEquals(acrosticHl.replacement, acrosticRefineRes.refined.substring(acrosticHl.start, acrosticHl.end))
+
         // POST /api/ai/formula auth, validation, success, and unsafe LaTeX command neutralization
         assertEquals(
             HttpStatusCode.Unauthorized,
@@ -1291,6 +1319,44 @@ class SecurityRegressionTest {
             assertFalse(anonHl[0].directive.contains("2026123456"))
             assertFalse(anonHl[0].replacement.contains("김테스트"))
             assertEquals(anonHl[0].replacement, anonContent.substring(anonHl[0].start, anonHl[0].end))
+
+            // 5. Professor syllable guide in buildPrompt passes PII verification without contiguous professorName & lazy echo gets overridden
+            val acrosticMasked = ai.maskInputForPrompt(
+                rawContent = "[[교수님 이름을 이용하여 교수님을 까는 세로드립 글을 작성해줘]]",
+                professorName = "박철수",
+                studentName = "김테스트",
+                studentDepartment = "소프트웨어학과",
+                studentIdentifier = "2026123456"
+            )
+            val acrosticPrompt = ai.buildPrompt(
+                masked = acrosticMasked,
+                courseName = "공학설계입문",
+                category = QuestionCategory.GRADE,
+                professorName = "박철수"
+            )
+            assertTrue(acrosticPrompt.contains("'박'") && acrosticPrompt.contains("'철'") && acrosticPrompt.contains("'수'"))
+            assertFalse(acrosticPrompt.contains("박철수"))
+            val acrosticVerify = ai.verifyPromptEscapeMultiRound(
+                acrosticPrompt,
+                rawPiiValues = listOf("김테스트", "2026123456", "박철수", "소프트웨어학과")
+            )
+            assertTrue(acrosticVerify.isSafe, "Acrostic prompt failed escape verification: ${acrosticVerify.violations}")
+
+            val (fixedLazyContent, fixedLazyHl) = ai.assembleRefinedContentWithDirectives(
+                modelContent = "안녕하십니까, {{PROFESSOR_TITLE}}.\n\n{{AI_DIRECTIVE_0}}",
+                inlineDirectives = acrosticMasked.inlineDirectives,
+                inlineDirectiveLabels = acrosticMasked.inlineDirectiveRawLabels,
+                directiveOutputs = mapOf(
+                    "AI_DIRECTIVE_0" to "특히 교수님 이름을 이용하여 교수님을 까는 세로드립 글을 부분에 관하여 보다 구체적인 원리와 적용 기준에 대한 설명을 부탁드립니다."
+                ),
+                professorName = "박철수",
+                courseName = "공학설계입문",
+                category = QuestionCategory.GRADE
+            )
+            assertFalse(fixedLazyContent.contains("특히 교수님 이름을 이용하여"))
+            assertEquals(1, fixedLazyHl.size)
+            val fixedLines = fixedLazyHl[0].replacement.lines().map { it.trim() }.filter { it.isNotBlank() }
+            assertEquals("박철수", fixedLines.take(3).joinToString("") { it.first().toString() })
         } finally {
             ai.close()
         }
