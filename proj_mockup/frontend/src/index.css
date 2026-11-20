@@ -1,0 +1,258 @@
+/* src/index.css */
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFExtraLight.woff2') format('woff2');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFLight.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFRegular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFBold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumHuman';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2501-1@1.1/NanumHumanTTFHeavy.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-family-ui: 'NanumHuman', 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Noto Sans KR', sans-serif;
+  --font-family-content: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Noto Sans KR', sans-serif;
+  --font-family: var(--font-family-ui);
+
+  /* 기본 폰트 크기 매핑 */
+  --font-size-base: 16px;
+  --font-size-sm: 0.875rem;
+  --font-size-xs: 0.75rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+
+  /* 라이트 테마 변수 */
+  --bg-app: #f4f4f5;
+  --bg-card: #ffffff;
+  --bg-card-subtle: #fafafa;
+  --bg-input: #ffffff;
+  --bg-hover: #f4f4f5;
+  --border-color: #e4e4e7;
+  --border-focus: #18181b;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #71717a;
+  --text-inverse: #ffffff;
+
+  --primary-color: #18181b;
+  --primary-hover: #27272a;
+  --primary-light: #f4f4f5;
+  --primary-border: #d4d4d8;
+
+  --success-color: #15803d;
+  --success-bg: #dcfce7;
+  --warning-color: #b45309;
+  --warning-bg: #fef3c7;
+  --directive-hl-bg: rgba(245, 158, 11, 0.07);
+  --directive-hl-border: rgba(217, 119, 6, 0.28);
+  --danger-color: #dc2626;
+  --danger-bg: #fee2e2;
+  --ai-purple: #27272a;
+  --ai-purple-light: #f4f4f5;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+}
+
+/* 폰트 크기 동적 조절 */
+html[data-font-size="sm"] {
+  --font-size-base: 14px;
+}
+html[data-font-size="md"] {
+  --font-size-base: 16px;
+}
+html[data-font-size="lg"] {
+  --font-size-base: 18px;
+}
+html[data-font-size="xl"] {
+  --font-size-base: 20px;
+}
+
+/* 눈이 편한 초록색조 테마 (R3 Green Eye-Care Theme: 세이지 & 포레스트 그린 톤) */
+html[data-theme="green"] {
+  --bg-app: #eaf2ec;
+  --bg-card: #f6fbf7;
+  --bg-card-subtle: #e2ede5;
+  --bg-input: #f9fdf9;
+  --bg-hover: #dbe8df;
+  --border-color: #bfd3c5;
+  --border-focus: #1f6e43;
+
+  --text-primary: #132a1d;
+  --text-secondary: #2d4d3a;
+  --text-muted: #527360;
+  --text-inverse: #f6fbf7;
+
+  --primary-color: #1f6e43;
+  --primary-hover: #175634;
+  --primary-light: #d6ebe0;
+  --primary-border: #9ec4ad;
+
+  --success-color: #166534;
+  --success-bg: #d1fae5;
+  --warning-color: #92400e;
+  --warning-bg: #fef3c7;
+  --directive-hl-bg: rgba(31, 110, 67, 0.06);
+  --directive-hl-border: rgba(31, 110, 67, 0.26);
+  --danger-color: #b91c1c;
+  --danger-bg: #fee2e2;
+  --ai-purple: #1f6e43;
+  --ai-purple-light: #d6ebe0;
+
+  --shadow-sm: 0 1px 2px 0 rgba(19, 42, 29, 0.06);
+  --shadow-md: 0 4px 8px -1px rgba(19, 42, 29, 0.08);
+  --shadow-lg: 0 10px 18px -3px rgba(19, 42, 29, 0.12);
+  --shadow-xl: 0 20px 26px -5px rgba(19, 42, 29, 0.16);
+}
+
+/* 다크 모드 속성 */
+html[data-theme="dark"] {
+  --bg-app: #09090b;
+  --bg-card: #18181b;
+  --bg-card-subtle: #27272a;
+  --bg-input: #18181b;
+  --bg-hover: #27272a;
+  --border-color: #27272a;
+  --border-focus: #f4f4f5;
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --text-inverse: #09090b;
+
+  --primary-color: #f4f4f5;
+  --primary-hover: #e4e4e7;
+  --primary-light: #32323a;
+  --primary-border: #3f3f46;
+
+  --success-color: #4ade80;
+  --success-bg: #14532d;
+  --warning-color: #fbbf24;
+  --warning-bg: #451a03;
+  --directive-hl-bg: rgba(250, 204, 21, 0.055);
+  --directive-hl-border: rgba(250, 204, 21, 0.22);
+  --danger-color: #f87171;
+  --danger-bg: #450a0a;
+  --ai-purple: #e4e4e7;
+  --ai-purple-light: #27272a;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
+}
+
+/* 초록 다크 배색 테마 (Soft Sage Dark Green - 눈이 편한 연화된 세이지 다크 톤) */
+html[data-theme="green-dark"] {
+  --bg-app: #111714;
+  --bg-card: #18211c;
+  --bg-card-subtle: #202c25;
+  --bg-input: #141c18;
+  --bg-hover: #26352c;
+  --border-color: #2c3d33;
+  --border-focus: #6ca684;
+
+  --text-primary: #e4ede7;
+  --text-secondary: #aec2b6;
+  --text-muted: #7f9688;
+  --text-inverse: #0f1713;
+
+  --primary-color: #74b08b;
+  --primary-hover: #5e9b75;
+  --primary-light: #1e3126;
+  --primary-border: #355743;
+
+  --success-color: #82c49b;
+  --success-bg: #1c3526;
+  --warning-color: #eab308;
+  --warning-bg: #3b260b;
+  --directive-hl-bg: rgba(116, 176, 139, 0.08);
+  --directive-hl-border: rgba(116, 176, 139, 0.25);
+  --danger-color: #f08a8a;
+  --danger-bg: #3e1518;
+  --ai-purple: #86bfa0;
+  --ai-purple-light: #1e3126;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 8px -1px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 10px 18px -3px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 20px 28px -5px rgba(0, 0, 0, 0.6);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

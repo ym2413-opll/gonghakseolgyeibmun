@@ -1,0 +1,19 @@
+[Unit]
+Description=Cistus Q&A Mockup Backend (Ktor)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/gonghak/proj_mockup/backend
+EnvironmentFile=-/opt/gonghak/proj_mockup/backend/.env
+Environment="PORT=8081"
+ExecStart=/opt/gonghak/proj_mockup/backend/build/install/backend/bin/backend
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

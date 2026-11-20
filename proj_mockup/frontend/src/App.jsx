@@ -1,0 +1,504 @@
+// src/App.jsx
+// 광운대학교 학업 Q&A 포럼 메인 애플리케이션 (R3 Overhaul: 서양식 포럼 / 3단계 반응형 / 블러 인증 게이트 / 관리 모드)
+
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { NotificationProvider } from './context/NotificationContext';
+import ErrorBoundary from './components/common/ErrorBoundary';
+import Header from './components/common/Header';
+import BottomNav from './components/common/BottomNav';
+import QuestionList from './components/questions/QuestionList';
+import HelpOnboardingModal from './components/common/HelpOnboardingModal';
+import { api } from './services/api';
+import './App.css';
+
+const QuestionDetail = lazy(() => import('./components/questions/QuestionDetail'));
+const QuestionForm = lazy(() => import('./components/student/QuestionForm'));
+const ProfessorDashboard = lazy(() => import('./components/professor/ProfessorDashboard'));
+const SettingsModal = lazy(() => import('./components/common/SettingsModal'));
+const NotificationSettingsModal = lazy(() => import('./components/professor/NotificationSettingsModal'));
+const AdminModal = lazy(() => import('./components/admin/AdminModal'));
+
+function getDeviceTier(width) {
+  if (width <= 640) return 'smartphone';
+  if (width <= 1024) return 'tablet'; // 태블릿 + 스마트폰 가로모드 + Galaxy Z Fold 펼침 화면
+  return 'desktop';
+}
+
+function MainApp() {
+  const { currentUser, isAuthenticated, isStudent, isProfessor, isAdmin } = useAuth();
+
+  const [questions, setQuestions] = useState([]);
+  const [selectedQuestionId, setSelectedQuestionId] = useState(null);
+  const [selectedQuestionDetail, setSelectedQuestionDetail] = useState(null);
+  const [currentView, setCurrentView] = useState('list'); // 'list' | 'detail' | 'new'
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfSettingsOpen, setIsProfSettingsOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // 3단계 반응형 디바이스 티어 감지 (Smartphone / Tablet+ZFold / Desktop)
+  const [deviceTier, setDeviceTier] = useState(() =>
+    typeof window !== 'undefined' ? getDeviceTier(window.innerWidth) : 'desktop'
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDeviceTier(getDeviceTier(window.innerWidth));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const toastTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const showToast = useCallback((msg) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMessage(msg);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage('');
+      toastTimerRef.current = null;
+    }, 3200);
+  }, []);
+
+  const fetchQuestions = useCallback(async () => {
+    if (!isAuthenticated || !currentUser?.id) {
+      setQuestions([]);
+      return;
+    }
+    try {
+      const data = await api.getQuestions(currentUser.id);
+      setQuestions(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load questions:', err);
+      setQuestions([]);
+    }
+  }, [isAuthenticated, currentUser?.id]);
+
+  const fetchSelectedDetail = useCallback(
+    async (qid) => {
+      if (!isAuthenticated || !currentUser?.id || !qid) {
+        setSelectedQuestionDetail(null);
+        return;
+      }
+      try {
+        const detail = await api.getQuestion(qid, currentUser.id);
+        setSelectedQuestionDetail(detail);
+      } catch (err) {
+        console.warn('Failed to load question detail:', err);
+      }
+    },
+    [isAuthenticated, currentUser?.id]
+  );
+
+  useEffect(() => {
+    fetchQuestions();
+  }, [fetchQuestions, isAuthenticated, isAdmin]);
+
+  useEffect(() => {
+    if (!isAuthenticated || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const qid = params.get('questionId');
+    if (qid) {
+      setSelectedQuestionId(qid);
+      setCurrentView('detail');
+      params.delete('questionId');
+      const nextSearch = params.toString();
+      const cleanUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
+      window.history.replaceState({}, '', cleanUrl);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    const handleNotifsUpdated = (e) => {
+      void fetchQuestions();
+      if (selectedQuestionId) {
+        void fetchSelectedDetail(selectedQuestionId);
+      }
+      const latestTitle = e?.detail?.latestTitle;
+      if (latestTitle) {
+        showToast(latestTitle);
+      }
+    };
+    const handleOpenQuestion = (e) => {
+      const qid = e?.detail?.questionId;
+      if (qid) {
+        setSelectedQuestionId(qid);
+        setCurrentView('detail');
+      }
+    };
+    window.addEventListener('cistus:notifications-updated', handleNotifsUpdated);
+    window.addEventListener('cistus:open-question', handleOpenQuestion);
+    return () => {
+      window.removeEventListener('cistus:notifications-updated', handleNotifsUpdated);
+      window.removeEventListener('cistus:open-question', handleOpenQuestion);
+    };
+  }, [fetchQuestions, fetchSelectedDetail, selectedQuestionId, showToast]);
+
+  useEffect(() => {
+    if (isAuthenticated && selectedQuestionId) {
+      fetchSelectedDetail(selectedQuestionId);
+    } else {
+      setSelectedQuestionDetail(null);
+    }
+  }, [isAuthenticated, selectedQuestionId, fetchSelectedDetail, isAdmin]);
+
+  // 계정 전환 또는 로그아웃 시 작성 중이던 화면·상세·모달 상태를 초기화하여 권한 혼선 방지
+  useEffect(() => {
+    setCurrentView('list');
+    setSelectedQuestionId(null);
+    setSelectedQuestionDetail(null);
+    setIsSettingsOpen(false);
+    setIsProfSettingsOpen(false);
+    setIsAdminModalOpen(false);
+  }, [currentUser?.id, currentUser?.role, isAuthenticated]);
+
+  const handleSelectQuestion = (id) => {
+    if (!id) {
+      setSelectedQuestionId(null);
+      setSelectedQuestionDetail(null);
+      setCurrentView('list');
+      return;
+    }
+    setSelectedQuestionId(id);
+    setCurrentView('detail');
+  };
+
+  const handleQuestionCreated = async (newQ) => {
+    if (!newQ) return;
+    await fetchQuestions();
+    setSelectedQuestionId(newQ.id);
+    setCurrentView('detail');
+    setRefreshTrigger((prev) => prev + 1);
+    showToast('새 질문이 등록되었습니다. (담당 교수님 이메일 알림 발송)');
+  };
+
+  const handleUpdateQuestion = async (questionId, updatedFields) => {
+    const updated = await api.updateQuestion(questionId, updatedFields, currentUser?.id);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
+    showToast('질문 내용이 수정되었습니다.');
+    return updated;
+  };
+
+  const handleAddAnswer = async (questionId, answerPayload) => {
+    await api.createAnswer(questionId, answerPayload);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
+    setRefreshTrigger((prev) => prev + 1);
+    showToast('답변이 등록되었습니다.');
+  };
+
+  const handleAddFollowUp = async (questionId, followUpPayload) => {
+    await api.createFollowUp(questionId, followUpPayload);
+    const [listData, detailData] = await Promise.all([
+      currentUser?.id ? api.getQuestions(currentUser.id).catch(() => null) : Promise.resolve(null),
+      currentUser?.id && questionId
+        ? api.getQuestion(questionId, currentUser.id).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(listData)) setQuestions(listData);
+    if (detailData) setSelectedQuestionDetail(detailData);
+    setRefreshTrigger((prev) => prev + 1);
+    showToast('추가 질문(꼬리질문)이 등록되었습니다.');
+  };
+
+  const handleToggleThreadOpen = async (questionId, isThreadOpen) => {
+    try {
+      const updated = await api.setQuestionThreadOpen(questionId, isThreadOpen);
+      const nextOpen = updated?.isThreadOpen ?? isThreadOpen;
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, isThreadOpen: Boolean(nextOpen) } : q))
+      );
+      if (selectedQuestionId === questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast(nextOpen ? '질문이 열림 상태로 전환되었습니다.' : '질문이 닫힘 상태로 전환되었습니다.');
+    } catch (err) {
+      showToast(err.message || '공개 상태 변경에 실패했습니다.');
+    }
+  };
+
+  const handleToggleHideQuestion = async (q) => {
+    try {
+      await api.toggleHideQuestion(q.id, !q.isHidden);
+      await fetchQuestions();
+      if (selectedQuestionId === q.id) {
+        await fetchSelectedDetail(q.id);
+      }
+      showToast(
+        !q.isHidden
+          ? '해당 질문이 가리기(비표시) 처리되었습니다.'
+          : '질문 가리기가 해제되었습니다.'
+      );
+    } catch (err) {
+      showToast(err.message || '질문 가리기 상태 변경에 실패했습니다.');
+    }
+  };
+
+  const handleToggleHideAnswer = async (ans, questionId) => {
+    try {
+      if (questionId) {
+        await api.toggleHideAnswerByQuestion(questionId, ans.id, !ans.isHidden);
+      } else {
+        await api.toggleHideAnswer(ans.id, !ans.isHidden, questionId);
+      }
+      await fetchQuestions();
+      if (questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast(
+        !ans.isHidden
+          ? '해당 답변이 가리기(비표시) 처리되었습니다.'
+          : '답변 가리기가 해제되었습니다.'
+      );
+    } catch (err) {
+      showToast(err.message || '답변 가리기 상태 변경에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteQuestion = async (q) => {
+    if (!q?.id) return;
+    const isAdminUser = Boolean(currentUser?.isAdmin || currentUser?.role === 'admin');
+    const confirmMsg = isAdminUser
+      ? '이 질문 게시물을 영구 삭제하시겠습니까? (DB에서 완전히 제거됩니다)'
+      : '질문을 삭제하시겠습니까?\n삭제 후 내 목록 및 다른 학생에게는 보이지 않으며, 담당 교수님 화면에는 삭제됨 표지가 남습니다.';
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      await api.deleteQuestion(q.id, { isAdmin: isAdminUser });
+      if (selectedQuestionId === q.id) {
+        setSelectedQuestionId(null);
+        setSelectedQuestionDetail(null);
+        setCurrentView('list');
+      }
+      await fetchQuestions();
+      showToast(isAdminUser ? '질문이 영구 삭제되었습니다.' : '질문이 삭제되었습니다.');
+    } catch (err) {
+      showToast(err.message || '질문 삭제에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteAnswer = async (ans, questionId) => {
+    if (!ans?.id) return;
+    if (!window.confirm('이 답변을 영구 삭제하시겠습니까?')) return;
+    try {
+      if (questionId) {
+        await api.deleteAnswerByQuestion(questionId, ans.id);
+      } else {
+        await api.deleteAnswer(ans.id, questionId);
+      }
+      await fetchQuestions();
+      if (questionId) {
+        await fetchSelectedDetail(questionId);
+      }
+      showToast('답변이 영구 삭제되었습니다.');
+    } catch (err) {
+      showToast(err.message || '답변 삭제에 실패했습니다.');
+    }
+  };
+
+  const safeQuestions = Array.isArray(questions) ? questions : [];
+  const activeQuestion =
+    selectedQuestionDetail || safeQuestions.find((q) => q.id === selectedQuestionId) || null;
+
+  const isDesktopSplit = deviceTier === 'desktop' && currentView !== 'new';
+
+  return (
+    <div
+      className={`app-root tier-${deviceTier} ${
+        deviceTier === 'smartphone' ? 'is-mobile' : 'is-desktop'
+      }`}
+    >
+      {toastMessage && (
+        <div className="toast-notification">
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      <div className="app-shell">
+        <Header
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+          onOpenAdminModal={() => setIsAdminModalOpen(true)}
+          onSelectQuestion={handleSelectQuestion}
+          refreshTrigger={refreshTrigger}
+        />
+
+        {/* 헤더 아래 포럼 영역: 비로그인 시 블러 처리 + 로그인/회원가입 오버레이 표시 */}
+        <div className="forum-stage-wrapper">
+          <main
+            className={`main-content-area forum-main-stage ${
+              !isAuthenticated ? 'is-blurred-locked' : ''
+            }`}
+            aria-hidden={!isAuthenticated}
+          >
+            {currentView === 'new' && isAuthenticated && isStudent ? (
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <QuestionForm
+                  onQuestionCreated={handleQuestionCreated}
+                  onCancel={() => setCurrentView('list')}
+                />
+              </Suspense>
+            ) : isDesktopSplit ? (
+              <div className="forum-desktop-split">
+                <div className="forum-split-left">
+                  {isProfessor ? (
+                    <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                      <ProfessorDashboard
+                        questions={safeQuestions}
+                        selectedQuestionId={selectedQuestionId}
+                        onSelectQuestion={handleSelectQuestion}
+                        onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+                        onToggleHideQuestion={handleToggleHideQuestion}
+                        onDeleteQuestion={handleDeleteQuestion}
+                      />
+                    </Suspense>
+                  ) : (
+                    <QuestionList
+                      questions={safeQuestions}
+                      selectedQuestionId={selectedQuestionId}
+                      onSelectQuestion={handleSelectQuestion}
+                      onOpenNewQuestion={() => setCurrentView('new')}
+                      onToggleHideQuestion={handleToggleHideQuestion}
+                      onDeleteQuestion={handleDeleteQuestion}
+                    />
+                  )}
+                </div>
+                <div className="forum-split-right">
+                  <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                    <QuestionDetail
+                      key={activeQuestion?.id || 'empty'}
+                      question={activeQuestion}
+                      onAddAnswer={handleAddAnswer}
+                      onAddFollowUp={handleAddFollowUp}
+                      onUpdateQuestion={handleUpdateQuestion}
+                      onToggleThreadOpen={handleToggleThreadOpen}
+                      onToggleHideQuestion={handleToggleHideQuestion}
+                      onToggleHideAnswer={handleToggleHideAnswer}
+                      onDeleteQuestion={handleDeleteQuestion}
+                      onDeleteAnswer={handleDeleteAnswer}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            ) : currentView === 'detail' && activeQuestion ? (
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <QuestionDetail
+                  key={activeQuestion.id}
+                  question={activeQuestion}
+                  onAddAnswer={handleAddAnswer}
+                  onAddFollowUp={handleAddFollowUp}
+                  onUpdateQuestion={handleUpdateQuestion}
+                  onToggleThreadOpen={handleToggleThreadOpen}
+                  onToggleHideQuestion={handleToggleHideQuestion}
+                  onToggleHideAnswer={handleToggleHideAnswer}
+                  onDeleteQuestion={handleDeleteQuestion}
+                  onDeleteAnswer={handleDeleteAnswer}
+                  onBack={() => setCurrentView('list')}
+                />
+              </Suspense>
+            ) : isProfessor ? (
+              <Suspense fallback={<div className="empty-state">불러오는 중...</div>}>
+                <ProfessorDashboard
+                  questions={safeQuestions}
+                  selectedQuestionId={selectedQuestionId}
+                  onSelectQuestion={handleSelectQuestion}
+                  onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+                  onToggleHideQuestion={handleToggleHideQuestion}
+                  onDeleteQuestion={handleDeleteQuestion}
+                />
+              </Suspense>
+            ) : (
+              <QuestionList
+                questions={safeQuestions}
+                selectedQuestionId={selectedQuestionId}
+                onSelectQuestion={handleSelectQuestion}
+                onOpenNewQuestion={() => setCurrentView('new')}
+                onToggleHideQuestion={handleToggleHideQuestion}
+                onDeleteQuestion={handleDeleteQuestion}
+              />
+            )}
+          </main>
+        </div>
+
+        {/* 스마트폰 환경 전용 하단 내비게이션 바 */}
+        {deviceTier === 'smartphone' && isAuthenticated && (
+          <BottomNav
+            currentView={currentView}
+            onGoHome={() => setCurrentView('list')}
+            onOpenNewQuestion={() => setCurrentView('new')}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
+        )}
+      </div>
+
+      <Suspense fallback={null}>
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            onCoursesUpdated={fetchQuestions}
+          />
+        )}
+
+        {isProfSettingsOpen && (
+          <NotificationSettingsModal
+            isOpen={isProfSettingsOpen}
+            onClose={() => setIsProfSettingsOpen(false)}
+            onCoursesUpdated={fetchQuestions}
+          />
+        )}
+
+        {isAdminModalOpen && (
+          <AdminModal
+            isOpen={isAdminModalOpen}
+            onClose={() => setIsAdminModalOpen(false)}
+            questions={safeQuestions}
+            onDataChanged={fetchQuestions}
+            onDeleteQuestion={handleDeleteQuestion}
+          />
+        )}
+      </Suspense>
+
+      <HelpOnboardingModal
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenProfSettings={() => setIsProfSettingsOpen(true)}
+      />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AuthProvider>
+        <ThemeProvider>
+          <NotificationProvider>
+            <MainApp />
+          </NotificationProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </ErrorBoundary>
+  );
+}

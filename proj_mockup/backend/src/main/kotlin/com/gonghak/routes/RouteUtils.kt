@@ -1,0 +1,296 @@
+package com.gonghak.routes
+
+import com.gonghak.config.EnvConfig
+import com.gonghak.dto.ApiResponse
+import com.gonghak.dto.UserDto
+import com.gonghak.models.UserRole
+import com.gonghak.service.PasswordSecurity
+import com.gonghak.service.UserService
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.plugins.origin
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+
+const val AUTH_COOKIE_NAME = "cistus_auth_token"
+
+val DEMO_USER_ID_MAP = mapOf(
+    "user-stu-001" to UUID.fromString("11111111-1111-1111-1111-111111111101"),
+    "user-stu-002" to UUID.fromString("11111111-1111-1111-1111-111111111102"),
+    "user-stu-003" to UUID.fromString("11111111-1111-1111-1111-111111111103"),
+    "user-stu-004" to UUID.fromString("11111111-1111-1111-1111-111111111104"),
+    "user-prof-001" to UUID.fromString("22222222-2222-2222-2222-222222222201"),
+    "user-prof-002" to UUID.fromString("22222222-2222-2222-2222-222222222202"),
+    "user-prof-003" to UUID.fromString("22222222-2222-2222-2222-222222222203"),
+    "user-prof-004" to UUID.fromString("22222222-2222-2222-2222-222222222204")
+)
+
+private val DEMO_USER_UUIDS: Set<UUID> = DEMO_USER_ID_MAP.values.toSet()
+
+val DEMO_COURSE_ID_MAP = mapOf(
+    "course-001" to UUID.fromString("33333333-3333-3333-3333-333333333301"),
+    "course-002" to UUID.fromString("33333333-3333-3333-3333-333333333302"),
+    "course-003" to UUID.fromString("33333333-3333-3333-3333-333333333303")
+)
+
+val DEMO_QUESTION_ID_MAP = mapOf(
+    "q-001" to UUID.fromString("44444444-4444-4444-4444-444444444401"),
+    "q-002" to UUID.fromString("44444444-4444-4444-4444-444444444402")
+)
+
+val DEFAULT_STUDENT_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
+val DEFAULT_COURSE_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333301")
+
+/**
+ * 목업 환경에서는 기본적으로 데모 계정 전환 모드를 활성화합니다.
+ */
+fun isDemoModeEnabled(): Boolean =
+    EnvConfig.get("ENABLE_DEMO_USERS")?.equals("false", ignoreCase = true) != true
+
+fun parseDemoUserIdOrNull(input: String?): UUID? {
+    if (input.isNullOrBlank()) return null
+    val trimmed = input.trim()
+    DEMO_USER_ID_MAP[trimmed.lowercase()]?.let { return it }
+    val parsed = runCatching { UUID.fromString(trimmed) }.getOrNull() ?: return null
+    return if (parsed in DEMO_USER_UUIDS) parsed else null
+}
+
+fun parseUserIdOrNull(input: String?): UUID? {
+    if (input.isNullOrBlank()) return null
+    val trimmed = input.trim()
+    PasswordSecurity.verifyAuthToken(trimmed)?.let { return it }
+    parseDemoUserIdOrNull(trimmed)?.let { return it }
+    return runCatching { UUID.fromString(trimmed) }.getOrNull()
+}
+
+fun parseCourseIdOrNull(input: String?): UUID? {
+    if (input.isNullOrBlank()) return null
+    val trimmed = input.trim()
+    DEMO_COURSE_ID_MAP[trimmed.lowercase()]?.let { return it }
+    return runCatching { UUID.fromString(trimmed) }.getOrNull()
+}
+
+fun parseCourseIdStrict(input: String?): UUID {
+    if (input.isNullOrBlank()) {
+        throw IllegalArgumentException("강의 ID가 필요합니다.")
+    }
+    return parseCourseIdOrNull(input)
+        ?: throw IllegalArgumentException("유효하지 않은 강의 ID 형식입니다: $input")
+}
+
+fun parseCourseId(input: String?): UUID = parseCourseIdStrict(input)
+
+fun parseQuestionId(input: String?): UUID {
+    if (input.isNullOrBlank()) {
+        throw IllegalArgumentException("질문 ID가 필요합니다.")
+    }
+    val trimmed = input.trim()
+    DEMO_QUESTION_ID_MAP[trimmed.lowercase()]?.let { return it }
+    return try {
+        UUID.fromString(trimmed)
+    } catch (_: Exception) {
+        throw IllegalArgumentException("유효하지 않은 질문 ID 형식입니다: $input")
+    }
+}
+
+/**
+ * Extracts and cryptographically verifies an HMAC-signed token from either the
+ * Authorization: Bearer header or the HttpOnly session cookie.
+ */
+fun ApplicationCall.getVerifiedTokenClaims(): PasswordSecurity.VerifiedAuthToken? {
+    val authHeader = request.headers["Authorization"]
+    val bearerToken = if (authHeader != null && authHeader.startsWith("Bearer ", ignoreCase = true)) {
+        authHeader.substring(7).trim().takeIf { it.isNotEmpty() }
+    } else {
+        null
+    }
+    val bearerClaims = bearerToken?.let { PasswordSecurity.verifyAuthTokenClaims(it) }
+    if (bearerClaims != null) {
+        return bearerClaims
+    }
+    val cookieToken = request.cookies[AUTH_COOKIE_NAME]?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    return PasswordSecurity.verifyAuthTokenClaims(cookieToken)
+}
+
+fun ApplicationCall.getVerifiedTokenUserId(): UUID? = getVerifiedTokenClaims()?.userId
+
+fun ApplicationCall.isSecureTransport(): Boolean {
+    if (EnvConfig.get("FORCE_HTTPS_COOKIES")?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    if (EnvConfig.get("PRODUCTION_MODE")?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    if (isTrustedProxyRemoteAddress(request.local.remoteAddress)) {
+        val forwardedProto = request.headers["X-Forwarded-Proto"]?.split(",")?.lastOrNull()?.trim()
+        if (!forwardedProto.isNullOrEmpty()) {
+            return forwardedProto.equals("https", ignoreCase = true)
+        }
+    }
+    return request.origin.scheme.equals("https", ignoreCase = true)
+}
+
+fun ApplicationCall.setAuthCookie(token: String) {
+    response.cookies.append(
+        Cookie(
+            name = AUTH_COOKIE_NAME,
+            value = token,
+            httpOnly = true,
+            secure = isSecureTransport(),
+            path = "/api",
+            maxAge = 7 * 24 * 3600,
+            extensions = mapOf("SameSite" to "Lax")
+        )
+    )
+}
+
+fun ApplicationCall.clearAuthCookie() {
+    response.cookies.append(
+        Cookie(
+            name = AUTH_COOKIE_NAME,
+            value = "",
+            httpOnly = true,
+            secure = isSecureTransport(),
+            path = "/api",
+            maxAge = 0,
+            extensions = mapOf("SameSite" to "Lax")
+        )
+    )
+}
+
+/**
+ * Requires an active, non-withdrawn authenticated user via HMAC token (or explicit demo header
+ * strictly when ENABLE_DEMO_USERS=true). Responds 401/403 and returns null if unauthorized.
+ */
+suspend fun ApplicationCall.requireAuthenticatedUser(
+    userService: UserService,
+    allowDemoHeader: Boolean = true
+): UserDto? {
+    val claims = getVerifiedTokenClaims()
+    if (claims != null) {
+        val activeUser = userService.getActiveAuthenticatedUser(claims.userId, claims.tokenVersion)
+        if (activeUser == null) {
+            respond(
+                HttpStatusCode.Unauthorized,
+                ApiResponse<String>(success = false, message = "인증이 만료되었거나 유효하지 않습니다. 다시 로그인해 주세요.")
+            )
+            return null
+        }
+        return activeUser
+    }
+
+    if (allowDemoHeader && isDemoModeEnabled()) {
+        val demoUserId = parseDemoUserIdOrNull(request.headers["X-User-Id"])
+            ?: parseDemoUserIdOrNull(request.queryParameters["userId"])
+        if (demoUserId != null) {
+            val demoUser = userService.getActiveAuthenticatedUser(demoUserId, 0)
+            if (demoUser != null) return demoUser
+        }
+    }
+
+    respond(
+        HttpStatusCode.Unauthorized,
+        ApiResponse<String>(success = false, message = "로그인이 필요한 기능입니다.")
+    )
+    return null
+}
+
+suspend fun ApplicationCall.requireProfessorOrAdmin(userService: UserService): UserDto? {
+    val user = requireAuthenticatedUser(userService) ?: return null
+    val isAllowed = user.role == UserRole.PROFESSOR || user.role == UserRole.ADMIN || user.isAdmin
+    if (!isAllowed) {
+        respond(
+            HttpStatusCode.Forbidden,
+            ApiResponse<String>(success = false, message = "교수자 또는 관리자 권한이 필요합니다.")
+        )
+        return null
+    }
+    return user
+}
+
+fun isTrustedProxyRemoteAddress(remote: String?): Boolean {
+    val clean = remote?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return false
+    if (clean == "127.0.0.1" || clean == "localhost" || clean == "::1" || clean == "0:0:0:0:0:0:0:1") {
+        return true
+    }
+    val extraTrusted = EnvConfig.get("TRUSTED_PROXY_IPS")
+        ?.split(",")
+        ?.map { it.trim().lowercase() }
+        ?.filter { it.isNotEmpty() }
+        ?: emptyList()
+    return clean in extraTrusted
+}
+
+fun ApplicationCall.clientRateLimitKey(): String {
+    val remote = request.local.remoteAddress
+    val forwardedFor = if (isTrustedProxyRemoteAddress(remote)) {
+        // Prefer X-Real-IP set by the local reverse proxy, or the rightmost hop appended by the local proxy.
+        request.headers["X-Real-IP"]?.trim()?.takeIf { it.isNotEmpty() }
+            ?: request.headers["X-Forwarded-For"]?.split(",")?.lastOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+    } else {
+        null
+    }
+    return forwardedFor ?: remote
+}
+
+class SlidingWindowRateLimiter(
+    private val maxRequests: Int,
+    private val windowMillis: Long,
+    private val maxBuckets: Int = 4096
+) {
+    private val buckets = ConcurrentHashMap<String, ArrayDeque<Long>>()
+    private val pruneLock = ReentrantLock()
+    private val lastPruneAt = AtomicLong(0L)
+
+    fun allow(key: String, nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val cutoff = nowMillis - windowMillis
+        if (buckets.size > maxBuckets) {
+            pruneExpiredBuckets(cutoff, nowMillis)
+        }
+
+        // Reject brand-new keys when saturated even after pruning so memory cannot grow unboundedly under flood.
+        if (buckets.size >= maxBuckets * 2 && !buckets.containsKey(key)) {
+            return false
+        }
+
+        var allowed = false
+        // ConcurrentHashMap.compute locks only the single bucket key (no nested locks -> deadlock-free).
+        buckets.compute(key) { _, existing ->
+            val queue = existing ?: ArrayDeque()
+            while (queue.isNotEmpty() && queue.first() <= cutoff) {
+                queue.removeFirst()
+            }
+            if (queue.size < maxRequests) {
+                queue.addLast(nowMillis)
+                allowed = true
+            }
+            if (queue.isEmpty()) null else queue
+        }
+        return allowed
+    }
+
+    private fun pruneExpiredBuckets(cutoff: Long, nowMillis: Long) {
+        val prevPrune = lastPruneAt.get()
+        if (nowMillis - prevPrune < 1_000L && buckets.size <= maxBuckets * 2) return
+        if (!pruneLock.tryLock()) return
+        try {
+            lastPruneAt.set(nowMillis)
+            val keys = buckets.keys().toList()
+            for (k in keys) {
+                buckets.computeIfPresent(k) { _, queue ->
+                    while (queue.isNotEmpty() && queue.first() <= cutoff) {
+                        queue.removeFirst()
+                    }
+                    if (queue.isEmpty()) null else queue
+                }
+            }
+        } finally {
+            pruneLock.unlock()
+        }
+    }
+}

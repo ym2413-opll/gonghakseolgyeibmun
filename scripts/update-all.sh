@@ -11,10 +11,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+PROJECT_DIR="${PROJECT_DIR:-proj}"
 BRANCH="${BRANCH:-main}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 SERVICE_USER="${SERVICE_USER:-www-data}"
-BACKEND_PORT="${BACKEND_PORT:-8080}"
+BACKEND_PORT="${BACKEND_PORT:-}"
 
 DO_PULL=1
 DO_FE=1
@@ -35,6 +36,8 @@ usage() {
 
 옵션:
   --repo-dir <경로>       저장소 루트 경로 지정 (기본값: 스크립트 상위 폴더)
+  --project-dir <폴더>    프로젝트 하위 폴더 지정 (기본값: proj)
+  --mockup                목업 프로젝트(proj_mockup) 배포 (기본 서비스 cistus-mockup-be, 포트 8081)
   --branch <브랜치>       배포할 Git 브랜치 지정 (기본값: main)
   --service <이름>        백엔드 systemd 서비스명 (기본값: cistus-be 자동 감지)
   --service-user <계정>   백엔드 실행 리눅스 계정 (기본값: www-data)
@@ -67,6 +70,11 @@ while [[ $# -gt 0 ]]; do
     --repo-dir)
       [[ $# -ge 2 ]] || { echo "[ERROR] --repo-dir 값이 필요합니다." >&2; exit 1; }
       REPO_DIR="$2"; shift 2 ;;
+    --project-dir)
+      [[ $# -ge 2 ]] || { echo "[ERROR] --project-dir 값이 필요합니다." >&2; exit 1; }
+      PROJECT_DIR="$2"; shift 2 ;;
+    --mockup)
+      PROJECT_DIR="proj_mockup"; shift ;;
     --branch)
       [[ $# -ge 2 ]] || { echo "[ERROR] --branch 값이 필요합니다." >&2; exit 1; }
       BRANCH="$2"; shift 2 ;;
@@ -118,6 +126,14 @@ case "$MUSIC_MODE" in
     usage
     exit 1 ;;
 esac
+
+if [[ -z "$BACKEND_PORT" ]]; then
+  if [[ "$PROJECT_DIR" == "proj_mockup" ]]; then
+    BACKEND_PORT="8081"
+  else
+    BACKEND_PORT="8080"
+  fi
+fi
 
 # ------------------------------------------------------------------------------
 # 터미널 / 로그 / 버블 시스템 UI & Morning Music 상태 관리
@@ -1180,8 +1196,8 @@ if [[ "$BUBBLE_DEMO" -eq 1 ]]; then
   run_bubble_demo
 fi
 
-if [[ ! -d "$REPO_DIR/proj/frontend" || ! -d "$REPO_DIR/proj/backend" ]]; then
-  die "유효한 프로젝트 경로가 아닙니다: $REPO_DIR (proj/frontend, proj/backend 없음)"
+if [[ ! -d "$REPO_DIR/$PROJECT_DIR/frontend" || ! -d "$REPO_DIR/$PROJECT_DIR/backend" ]]; then
+  die "유효한 프로젝트 경로가 아닙니다: $REPO_DIR ($PROJECT_DIR/frontend, $PROJECT_DIR/backend 없음)"
 fi
 REPO_DIR="$(cd "$REPO_DIR" && pwd)"
 
@@ -1271,6 +1287,18 @@ detect_backend_service() {
     echo "$BACKEND_SERVICE"
     return 0
   fi
+  if [[ "$PROJECT_DIR" == "proj_mockup" ]]; then
+    if command -v systemctl >/dev/null 2>&1; then
+      for candidate in cistus-mockup-be gonghak-mockup-backend; do
+        if systemctl list-unit-files "${candidate}.service" --no-legend 2>/dev/null | grep -q "$candidate"; then
+          echo "$candidate"
+          return 0
+        fi
+      done
+    fi
+    echo "cistus-mockup-be"
+    return 0
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     for candidate in cistus-be gonghak-backend; do
       if systemctl list-unit-files "${candidate}.service" --no-legend 2>/dev/null | grep -q "$candidate"; then
@@ -1294,8 +1322,8 @@ sha256_or_empty() {
 # ------------------------------------------------------------------------------
 # 사전 sudo 인증 (애니메이션 시작 전 대화형 프롬프트 처리)
 # ------------------------------------------------------------------------------
-FE_DIR="$REPO_DIR/proj/frontend"
-BE_DIR="$REPO_DIR/proj/backend"
+FE_DIR="$REPO_DIR/$PROJECT_DIR/frontend"
+BE_DIR="$REPO_DIR/$PROJECT_DIR/backend"
 LOCK_FILE="$FE_DIR/package-lock.json"
 PREV_LOCK_HASH="$(sha256_or_empty "$LOCK_FILE")"
 NEW_LOCK_HASH="$PREV_LOCK_HASH"

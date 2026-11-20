@@ -1,0 +1,901 @@
+{
+  "metadata": {
+    "title": "2026학년도 2학기 개설과목 및 강의시간표",
+    "semester": "2026-2",
+    "generatedAt": "2026-10-06T17:35:54.123471",
+    "totalCourses": 24,
+    "totalSections": 37,
+    "totalProfessors": 26,
+    "scope": "인공지능융합대학 목업 데이터셋"
+  },
+  "professors": [
+    {
+      "id": "297f9991-07d6-5975-b033-7d80b2ac89b0",
+      "name": "김미화",
+      "department": "정보융합학부",
+      "identifier": "P_0605"
+    },
+    {
+      "id": "bc99fd87-2652-5d07-ae7c-4f9b4162e309",
+      "name": "김진환",
+      "department": "인공지능융합대학",
+      "identifier": "P_0579"
+    },
+    {
+      "id": "1054dd36-b9e0-5c53-9fd3-f5902731a978",
+      "name": "김한솔",
+      "department": "국제통상학부",
+      "identifier": "P_0460"
+    },
+    {
+      "id": "fb03b3db-8412-5420-9e98-49a73eb8c575",
+      "name": "김현경",
+      "department": "정보융합학부",
+      "identifier": "P_0608"
+    },
+    {
+      "id": "0f08bdb3-5c36-58c0-bb03-2c9831e45457",
+      "name": "문승현",
+      "department": "소프트웨어학부",
+      "identifier": "P_0320"
+    },
+    {
+      "id": "3e317245-4aed-590f-a4aa-59d688bfe321",
+      "name": "박수한",
+      "department": "로봇학부",
+      "identifier": "P_0219"
+    },
+    {
+      "id": "f65a2940-52c4-5bb3-a78c-68b9353ae0fc",
+      "name": "박일우",
+      "department": "로봇학부",
+      "identifier": "P_0613"
+    },
+    {
+      "id": "eafa9ee6-a7da-57e1-b57b-a10e36b3a398",
+      "name": "박재성",
+      "department": "정보융합학부",
+      "identifier": "P_0607"
+    },
+    {
+      "id": "1c6013b0-8857-566c-b940-7d0f3c4afc0e",
+      "name": "백주훈",
+      "department": "로봇학부",
+      "identifier": "P_0193"
+    },
+    {
+      "id": "a0bad991-a344-5a5d-969e-8783604bbf37",
+      "name": "심동규",
+      "department": "인공지능융합대학",
+      "identifier": "P_0583"
+    },
+    {
+      "id": "63f12e23-c5ee-564e-ab76-bb9845795cdb",
+      "name": "안우현",
+      "department": "소프트웨어학부",
+      "identifier": "P_0595"
+    },
+    {
+      "id": "5f6754d8-fbbc-53c4-a326-4af5613fa96c",
+      "name": "이영준",
+      "department": "소프트웨어학부",
+      "identifier": "P_0600"
+    },
+    {
+      "id": "b8578046-0e34-5839-bfb5-554062aef006",
+      "name": "이예솝",
+      "department": "로봇학부",
+      "identifier": "P_0192"
+    },
+    {
+      "id": "c401be76-425a-5d94-8ee2-1fe4c8919a85",
+      "name": "이우신",
+      "department": "컴퓨터정보공학부",
+      "identifier": "P_0586"
+    },
+    {
+      "id": "f33c98cf-9bbe-5981-800f-15410e67fa38",
+      "name": "이종희",
+      "department": "공통",
+      "identifier": "P_0191"
+    },
+    {
+      "id": "d5a61f0a-16e9-5a47-a32b-521d0fb363dd",
+      "name": "이혁준",
+      "department": "컴퓨터정보공학부",
+      "identifier": "P_0587"
+    },
+    {
+      "id": "93949023-deda-5819-a3ff-bee691cdccea",
+      "name": "장진곤",
+      "department": "인공지능융합대학",
+      "identifier": "P_0578"
+    },
+    {
+      "id": "4f820b9a-0ddd-5a07-9f0d-3c2be2273366",
+      "name": "전원호",
+      "department": "소프트웨어학부",
+      "identifier": "P_0596"
+    },
+    {
+      "id": "501a1d5e-8d94-516a-a688-7cdeaaa9720c",
+      "name": "정승권",
+      "department": "소프트웨어학부",
+      "identifier": "P_0597"
+    },
+    {
+      "id": "a48a1d35-ea7b-5323-9344-391b4c32a72c",
+      "name": "조민수",
+      "department": "인공지능융합대학",
+      "identifier": "P_0582"
+    },
+    {
+      "id": "05e2ec2e-7b95-565b-86da-185ca56c57b5",
+      "name": "최민규",
+      "department": "인공지능융합대학",
+      "identifier": "P_0584"
+    },
+    {
+      "id": "dba9c440-f8ee-50b4-a92e-7fd6145b6e13",
+      "name": "최상호",
+      "department": "컴퓨터정보공학부",
+      "identifier": "P_0588"
+    },
+    {
+      "id": "6487a556-07c4-57ba-9ff1-148872753b48",
+      "name": "최용훈",
+      "department": "로봇학부",
+      "identifier": "P_0616"
+    },
+    {
+      "id": "51e79304-afae-5c65-8c5e-d384b1ba5fe4",
+      "name": "최웅철",
+      "department": "인공지능융합대학",
+      "identifier": "P_0580"
+    },
+    {
+      "id": "0264cff6-4055-5c03-a09e-df26d0242c6e",
+      "name": "최주엽",
+      "department": "지능형로봇학과",
+      "identifier": "P_0617"
+    },
+    {
+      "id": "bff6b8ce-d608-543a-aa60-7d45c77fce91",
+      "name": "한상휘",
+      "department": "지능형로봇학과",
+      "identifier": "P_0618"
+    }
+  ],
+  "courses": [
+    {
+      "id": "4c25141b-909d-5d8a-9783-79180a9886a4",
+      "name": "공학설계입문",
+      "code": "I000-1-2957",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I000-1-2957-01",
+          "professorName": "장진곤",
+          "professorId": "93949023-deda-5819-a3ff-bee691cdccea",
+          "schedule": "화 6교시(참B101), 목 5교시(참B101)",
+          "capacity": 25,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I000-1-2957-02",
+          "professorName": "김진환",
+          "professorId": "bc99fd87-2652-5d07-ae7c-4f9b4162e309",
+          "schedule": "금 1,2교시(새빛301)",
+          "capacity": 19,
+          "remark": ""
+        },
+        {
+          "section": "03분반",
+          "sectionCode": "03",
+          "fullCode": "I000-1-2957-03",
+          "professorName": "최웅철",
+          "professorId": "51e79304-afae-5c65-8c5e-d384b1ba5fe4",
+          "schedule": "월 6교시(새빛301), 수 5교시(새빛301)",
+          "capacity": 20,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "775ef51c-3238-5a90-8828-4dab6e2d279e",
+      "name": "로봇산업입문",
+      "code": "I000-2-5700",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 2,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I000-2-5700-01",
+          "professorName": "이종희",
+          "professorId": "f33c98cf-9bbe-5981-800f-15410e67fa38",
+          "schedule": "수 7,8,9교시(기304)",
+          "capacity": 29,
+          "remark": "매치업(로봇분야)"
+        }
+      ]
+    },
+    {
+      "id": "217e9f5d-9a36-59d5-bdf4-4540cfa53b25",
+      "name": "로봇학입문",
+      "code": "I000-1-6241",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I000-1-6241-01",
+          "professorName": "박수한",
+          "professorId": "3e317245-4aed-590f-a4aa-59d688bfe321",
+          "schedule": "월 5교시(새빛202), 수 6교시(새빛202)",
+          "capacity": 24,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "efdf5752-a813-5160-8e0b-be34ea4ccc96",
+      "name": "수치해석",
+      "code": "I000-3-0875",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I000-3-0875-01",
+          "professorName": "심동규",
+          "professorId": "a0bad991-a344-5a5d-969e-8783604bbf37",
+          "schedule": "화 4교시(참B101), 목 3교시(참B101)",
+          "capacity": 15,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I000-3-0875-02",
+          "professorName": "최민규",
+          "professorId": "05e2ec2e-7b95-565b-86da-185ca56c57b5",
+          "schedule": "화 4교시",
+          "capacity": 100,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "d449115f-1a88-5111-9613-8ec94f41fedb",
+      "name": "AI로봇실험2",
+      "code": "I050-2-5695",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "로봇학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전필",
+      "credit": 3,
+      "hours": 4,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I050-2-5695-01",
+          "professorName": "박일우",
+          "professorId": "f65a2940-52c4-5bb3-a78c-68b9353ae0fc",
+          "schedule": "목 5,6,7교시(누324)",
+          "capacity": 30,
+          "remark": ""
+        },
+        {
+          "section": "03분반",
+          "sectionCode": "03",
+          "fullCode": "I050-2-5695-03",
+          "professorName": "박수한",
+          "professorId": "3e317245-4aed-590f-a4aa-59d688bfe321",
+          "schedule": "화 0,1,2교시(누324)",
+          "capacity": 10,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "06f54e4d-64de-5ded-a32b-53080be999ea",
+      "name": "AI로봇실험4",
+      "code": "I050-3-6337",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "로봇학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전필",
+      "credit": 3,
+      "hours": 4,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I050-3-6337-01",
+          "professorName": "이예솝",
+          "professorId": "b8578046-0e34-5839-bfb5-554062aef006",
+          "schedule": "월 0,1,2교시(누324)",
+          "capacity": 10,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "ebbda9fb-7ffd-5642-ad77-7278035701d0",
+      "name": "강화학습",
+      "code": "I050-4-3677",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "로봇학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I050-4-3677-01",
+          "professorName": "박수한",
+          "professorId": "3e317245-4aed-590f-a4aa-59d688bfe321",
+          "schedule": "월 6교시(새빛202), 수 5교시(새빛202)",
+          "capacity": 18,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "6c5f2c3f-7645-57aa-b74d-4589c2c39fda",
+      "name": "경력개발과취업전략",
+      "code": "I050-3-5694",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "로봇학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 2,
+      "hours": 2,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I050-3-5694-01",
+          "professorName": "백주훈",
+          "professorId": "1c6013b0-8857-566c-b940-7d0f3c4afc0e",
+          "schedule": "화 6,7교시(새빛202)",
+          "capacity": 21,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "3c103e00-51c8-517c-8ca8-679193f262f0",
+      "name": "객체지향프로그래밍",
+      "code": "I030-2-7777",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I030-2-7777-01",
+          "professorName": "이영준",
+          "professorId": "5f6754d8-fbbc-53c4-a326-4af5613fa96c",
+          "schedule": "화 5교시(새빛204), 목 6교시(새빛204)",
+          "capacity": 70,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I030-2-7777-02",
+          "professorName": "이영준",
+          "professorId": "5f6754d8-fbbc-53c4-a326-4af5613fa96c",
+          "schedule": "화 6교시(새빛204), 목 5교시(새빛204)",
+          "capacity": 35,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "914133e0-0397-5a84-a7e1-f4aa0836c686",
+      "name": "경력개발과취업전략",
+      "code": "I030-3-5694",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 2,
+      "hours": 2,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I030-3-5694-01",
+          "professorName": "문승현",
+          "professorId": "0f08bdb3-5c36-58c0-bb03-2c9831e45457",
+          "schedule": "화 6,7교시(참B106)",
+          "capacity": 80,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "f092b1ac-77d3-59f1-9021-10a93bdc7870",
+      "name": "고급C프로그래밍및설계",
+      "code": "I030-1-5714",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I030-1-5714-01",
+          "professorName": "안우현",
+          "professorId": "63f12e23-c5ee-564e-ab76-bb9845795cdb",
+          "schedule": "월 5교시(새빛302), 수 6교시(새빛302)",
+          "capacity": 40,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I030-1-5714-02",
+          "professorName": "전원호",
+          "professorId": "4f820b9a-0ddd-5a07-9f0d-3c2be2273366",
+          "schedule": "수 1,2교시(새빛301)",
+          "capacity": 28,
+          "remark": ""
+        },
+        {
+          "section": "03분반",
+          "sectionCode": "03",
+          "fullCode": "I030-1-5714-03",
+          "professorName": "정승권",
+          "professorId": "501a1d5e-8d94-516a-a688-7cdeaaa9720c",
+          "schedule": "월 1,2교시(새빛301)",
+          "capacity": 25,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "3914a66e-a3d5-54b7-bf83-02fbc5e90658",
+      "name": "빅데이터처리및응용",
+      "code": "I030-3-8999",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "소프트웨어학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I030-3-8999-01",
+          "professorName": "문승현",
+          "professorId": "0f08bdb3-5c36-58c0-bb03-2c9831e45457",
+          "schedule": "목 4교시(참B101)",
+          "capacity": 90,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "fcec230a-caa0-5854-bbc0-edfa204d9cc8",
+      "name": "HCI와UX평가",
+      "code": "I040-3-7740",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "정보융합학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I040-3-7740-01",
+          "professorName": "김현경",
+          "professorId": "fb03b3db-8412-5420-9e98-49a73eb8c575",
+          "schedule": "월 2교시(새빛205), 수 1교시(새빛205)",
+          "capacity": 22,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "cd69d138-dd20-5598-aef7-a916422eb32e",
+      "name": "Physical AI 실습",
+      "code": "I040-3-6416",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "정보융합학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 4,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I040-3-6416-01",
+          "professorName": "박재성",
+          "professorId": "eafa9ee6-a7da-57e1-b57b-a10e36b3a398",
+          "schedule": "월 5,6,7교시(새빛103)",
+          "capacity": 32,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I040-3-6416-02",
+          "professorName": "박재성",
+          "professorId": "eafa9ee6-a7da-57e1-b57b-a10e36b3a398",
+          "schedule": "수 5,6,7교시(새빛103)",
+          "capacity": 27,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "dfe4e526-ba2f-5a0a-bf81-70abc67d8ff9",
+      "name": "경력개발과취업전략",
+      "code": "I040-4-5694",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "정보융합학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 2,
+      "hours": 2,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I040-4-5694-01",
+          "professorName": "조민수",
+          "professorId": "a48a1d35-ea7b-5323-9344-391b4c32a72c",
+          "schedule": "월 6,7교시(새빛205)",
+          "capacity": 34,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "3deee725-19a4-58c2-ae14-f8ce2f70264a",
+      "name": "그래픽디자인",
+      "code": "I040-1-3687",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "정보융합학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I040-1-3687-01",
+          "professorName": "김미화",
+          "professorId": "297f9991-07d6-5975-b033-7d80b2ac89b0",
+          "schedule": "금 3,4교시(새빛104)",
+          "capacity": 20,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "625840bc-af75-56ad-9ee8-ba8545cd62a5",
+      "name": "AI프로그래밍",
+      "code": "I060-3-4024",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "지능형로봇학과",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I060-3-4024-01",
+          "professorName": "최용훈",
+          "professorId": "6487a556-07c4-57ba-9ff1-148872753b48",
+          "schedule": "월 4교시(새빛104), 수 3교시(새빛104)",
+          "capacity": 34,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "de5bdd07-a9c2-562f-a12b-68b86b5eb2b1",
+      "name": "고급로봇설계",
+      "code": "I060-4-4749",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "지능형로봇학과",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I060-4-4749-01",
+          "professorName": "김한솔",
+          "professorId": "1054dd36-b9e0-5c53-9fd3-f5902731a978",
+          "schedule": "목 5,6교시(새빛104)",
+          "capacity": 15,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "112ea544-b834-5cde-b64a-3b1ae61b03ff",
+      "name": "기술과경영",
+      "code": "I060-3-6110",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "지능형로봇학과",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I060-3-6110-01",
+          "professorName": "한상휘",
+          "professorId": "bff6b8ce-d608-543a-aa60-7d45c77fce91",
+          "schedule": "금 3,4교시(새빛205)",
+          "capacity": 39,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "60d93d5f-09bc-5450-9ea1-e106141cb3e6",
+      "name": "기초로봇수학",
+      "code": "I060-1-4288",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "지능형로봇학과",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I060-1-4288-01",
+          "professorName": "최주엽",
+          "professorId": "0264cff6-4055-5c03-a09e-df26d0242c6e",
+          "schedule": "월 1교시(비211), 수 2교시(비211)",
+          "capacity": 7,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "36502b7a-3d66-544b-a42e-fa3cb05dfcea",
+      "name": "경력개발과취업전략",
+      "code": "I020-3-5694",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "컴퓨터정보공학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 2,
+      "hours": 2,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I020-3-5694-01",
+          "professorName": "이혁준",
+          "professorId": "d5a61f0a-16e9-5a47-a32b-521d0fb363dd",
+          "schedule": "화 6,7교시(새빛102)",
+          "capacity": 27,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "cc700dcd-17d8-5232-95f8-339dee0d0eff",
+      "name": "고급C프로그래밍",
+      "code": "I020-1-2339",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "컴퓨터정보공학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 3,
+      "hours": 4,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I020-1-2339-01",
+          "professorName": "이우신",
+          "professorId": "c401be76-425a-5d94-8ee2-1fe4c8919a85",
+          "schedule": "월 0,1,2교시(새빛303)",
+          "capacity": 16,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I020-1-2339-02",
+          "professorName": "이우신",
+          "professorId": "c401be76-425a-5d94-8ee2-1fe4c8919a85",
+          "schedule": "월 3,4,5교시(새빛303)",
+          "capacity": 26,
+          "remark": ""
+        },
+        {
+          "section": "03분반",
+          "sectionCode": "03",
+          "fullCode": "I020-1-2339-03",
+          "professorName": "이우신",
+          "professorId": "c401be76-425a-5d94-8ee2-1fe4c8919a85",
+          "schedule": "수 3,4,5교시(새빛303)",
+          "capacity": 40,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "dcb5f0ad-7fce-598e-87ff-384cd164d6f4",
+      "name": "데이터구조설계",
+      "code": "I020-2-3703",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "컴퓨터정보공학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전필",
+      "credit": 3,
+      "hours": 3,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I020-2-3703-01",
+          "professorName": "이혁준",
+          "professorId": "d5a61f0a-16e9-5a47-a32b-521d0fb363dd",
+          "schedule": "화 5교시(새빛102), 목 6교시(새빛102)",
+          "capacity": 37,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I020-2-3703-02",
+          "professorName": "최상호",
+          "professorId": "dba9c440-f8ee-50b4-a92e-7fd6145b6e13",
+          "schedule": "화 2교시(새빛203)",
+          "capacity": 70,
+          "remark": ""
+        }
+      ]
+    },
+    {
+      "id": "0f438d3f-7475-5301-a464-5e5defd33e90",
+      "name": "데이터구조실습",
+      "code": "I020-2-3712",
+      "semester": "2026-2",
+      "college": "인공지능융합대학",
+      "department": "컴퓨터정보공학부",
+      "major": "공통",
+      "generalEduType": "",
+      "completionType": "전선",
+      "credit": 1,
+      "hours": 2,
+      "sections": [
+        {
+          "section": "01분반",
+          "sectionCode": "01",
+          "fullCode": "I020-2-3712-01",
+          "professorName": "이혁준",
+          "professorId": "d5a61f0a-16e9-5a47-a32b-521d0fb363dd",
+          "schedule": "금 5,6교시(새빛304)",
+          "capacity": 30,
+          "remark": ""
+        },
+        {
+          "section": "02분반",
+          "sectionCode": "02",
+          "fullCode": "I020-2-3712-02",
+          "professorName": "이혁준",
+          "professorId": "d5a61f0a-16e9-5a47-a32b-521d0fb363dd",
+          "schedule": "목 7,8교시(새빛304)",
+          "capacity": 21,
+          "remark": ""
+        },
+        {
+          "section": "03분반",
+          "sectionCode": "03",
+          "fullCode": "I020-2-3712-03",
+          "professorName": "최상호",
+          "professorId": "dba9c440-f8ee-50b4-a92e-7fd6145b6e13",
+          "schedule": "수 3,4교시(새빛304)",
+          "capacity": 30,
+          "remark": ""
+        }
+      ]
+    }
+  ]
+}
