@@ -527,7 +527,7 @@ object DatabaseFactory {
                             "${prof.department} ${prof.name} 교수"
                         else
                             "${prof.name} 교수"
-                        it[isDemo] = true
+                        it[isDemo] = false
                     }
                 }
             }

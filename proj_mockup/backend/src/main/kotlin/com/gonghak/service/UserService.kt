@@ -1252,7 +1252,7 @@ class UserService {
     }
 
     suspend fun getAllDemoUsers(): List<UserDto> = dbQuery {
-        UsersTable.select { UsersTable.isDemo eq true }
+        UsersTable.select { (UsersTable.isDemo eq true) and (UsersTable.isWithdrawn eq false) }
             .orderBy(UsersTable.role to SortOrder.ASC, UsersTable.name to SortOrder.ASC)
             .map { rowToUserDto(it, includeCourses = false) }
     }

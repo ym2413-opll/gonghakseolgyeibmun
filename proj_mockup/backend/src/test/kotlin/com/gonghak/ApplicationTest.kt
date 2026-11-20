@@ -43,7 +43,7 @@ class ApplicationTest {
         val res = client.get("/api/auth/users")
         assertEquals(HttpStatusCode.OK, res.status)
         val usersBody = res.body<ApiResponse<List<UserDto>>>()
-        assertTrue((usersBody.data?.size ?: 0) >= 8, "Mockup should expose at least 8 demo accounts")
+        assertEquals(8, usersBody.data?.size, "Mockup should expose only the 8 seeded demo accounts (not timetable catalog professors)")
 
         // X-User-Id header works in mockup demo mode
         val demoMeRes = client.get("/api/auth/me") {
