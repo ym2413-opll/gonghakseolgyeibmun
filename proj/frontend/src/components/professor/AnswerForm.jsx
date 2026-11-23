@@ -1,6 +1,7 @@
 // src/components/professor/AnswerForm.jsx
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
 import { insertSnippetAtCursor } from '../common/AttachmentUploader';
@@ -10,6 +11,7 @@ import { Send, CheckCircle2, Lock, ShieldAlert, Users, Sigma } from 'lucide-reac
 
 export default function AnswerForm({ question, onAnswerAdded }) {
   const { currentUser, isProfessor, refreshCurrentUser } = useAuth();
+  const { checkBlueWhiteUnlock } = useTheme();
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -152,7 +154,10 @@ export default function AnswerForm({ question, onAnswerAdded }) {
             className="ans-textarea"
             placeholder="답변 내용을 입력하세요."
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => {
+              setContent(e.target.value);
+              checkBlueWhiteUnlock(e.target.value);
+            }}
           />
 
           <div className="ans-submit-row">

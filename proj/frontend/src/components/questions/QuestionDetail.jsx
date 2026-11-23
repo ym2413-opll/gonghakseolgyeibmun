@@ -2,6 +2,7 @@
 // 서양식 포럼(Western-Style Forum) 스레드 포스트 스트림 (#1 OP -> #2, #3 Replies) 상세 컴포넌트
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
@@ -122,6 +123,7 @@ const QuestionDetail = ({
   onBack
 }) => {
   const { currentUser, isProfessor, isAdmin, allCourses, refreshCurrentUser } = useAuth();
+  const { checkBlueWhiteUnlock } = useTheme();
   const [answerText, setAnswerText] = useState('');
   const [answerAttachments, setAnswerAttachments] = useState([]);
   const [isProcessingAnswerFiles, setIsProcessingAnswerFiles] = useState(false);
@@ -704,7 +706,10 @@ const QuestionDetail = ({
                     type="text"
                     className="form-input"
                     value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
+                    onChange={(e) => {
+                      setEditTitle(e.target.value);
+                      checkBlueWhiteUnlock(e.target.value);
+                    }}
                     required
                   />
                 </div>
@@ -757,7 +762,10 @@ const QuestionDetail = ({
                       className="form-textarea"
                       rows={6}
                       value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
+                      onChange={(e) => {
+                        setEditContent(e.target.value);
+                        checkBlueWhiteUnlock(e.target.value);
+                      }}
                       required
                     />
                   )}
@@ -1116,6 +1124,7 @@ const QuestionDetail = ({
                 value={followUpText}
                 onChange={(e) => {
                   setFollowUpText(e.target.value);
+                  checkBlueWhiteUnlock(e.target.value);
                   if (hasFollowUpAiRefined) setHasFollowUpAiRefined(false);
                 }}
                 required
@@ -1266,7 +1275,10 @@ const QuestionDetail = ({
                   rows={4}
                   placeholder="답변을 입력하세요."
                   value={answerText}
-                  onChange={(e) => setAnswerText(e.target.value)}
+                  onChange={(e) => {
+                    setAnswerText(e.target.value);
+                    checkBlueWhiteUnlock(e.target.value);
+                  }}
                   required
                 />
               )}

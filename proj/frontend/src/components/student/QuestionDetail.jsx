@@ -1,6 +1,7 @@
 // src/components/student/QuestionDetail.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import { isSafeAttachmentUrl } from '../../utils/fileSecurity';
@@ -44,6 +45,7 @@ function safeFormatDate(val) {
 
 export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
   const { currentUser, isProfessor } = useAuth();
+  const { checkBlueWhiteUnlock } = useTheme();
   const [showOriginal, setShowOriginal] = useState(false);
   const [activePreviewImage, setActivePreviewImage] = useState(null);
 
@@ -260,6 +262,7 @@ export default function QuestionDetail({ question, onBack, onUpdateQuestion }) {
                   value={editContent}
                   onChange={(e) => {
                     setEditContent(e.target.value);
+                    checkBlueWhiteUnlock(e.target.value);
                     if (editHasAiRefined) setEditHasAiRefined(false);
                   }}
                 />

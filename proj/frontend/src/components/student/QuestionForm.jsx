@@ -1,6 +1,7 @@
 // src/components/student/QuestionForm.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
@@ -24,6 +25,7 @@ import {
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
   const { currentUser, isStudent, allCourses, refreshCurrentUser, refreshCatalog } = useAuth();
+  const { checkBlueWhiteUnlock } = useTheme();
   const { profSettings } = useNotifications();
   const contentTextareaRef = useRef(null);
 
@@ -433,7 +435,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 placeholder="질문 내용을 입력하세요."
                 value={content}
                 onChange={(e) => {
-                  setContent(e.target.value);
+                  const nextVal = e.target.value;
+                  setContent(nextVal);
+                  checkBlueWhiteUnlock(nextVal);
                   if (hasAiRefined) setHasAiRefined(false);
                 }}
               />

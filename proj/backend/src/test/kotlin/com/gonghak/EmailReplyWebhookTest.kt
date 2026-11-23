@@ -8,10 +8,14 @@ import com.gonghak.models.QuestionStatus
 import com.gonghak.models.UserRole
 import com.gonghak.service.BackgroundWorkerManager
 import com.gonghak.service.EMAIL_REPLY_ABOVE_MARKER
+import com.gonghak.service.EmailInlineAttachment
 import com.gonghak.service.EmailReplyImapConfig
 import com.gonghak.service.EmailReplyImapPoller
 import com.gonghak.service.EmailReplyService
 import com.gonghak.service.EmailService
+import com.gonghak.service.EmailThreadHtmlRenderer
+import com.gonghak.service.EmailThreadPost
+import com.gonghak.service.EmailThreadSnapshot
 import com.gonghak.service.PasswordSecurity
 import jakarta.mail.Session
 import jakarta.mail.internet.InternetAddress
@@ -566,5 +570,198 @@ class EmailReplyWebhookTest {
             )
         }
         assertNotNull(ex.message)
+    }
+
+    @Test
+    fun testRichHtmlThreadEmailRenderingAndMultipartMime() {
+        val snapshot = EmailThreadSnapshot(
+            courseName = "공학설계입문",
+            category = QuestionCategory.LECTURE,
+            professorName = "김교수",
+            title = "가우시안 적분 및 회로 질문",
+            isThreadOpen = true,
+            isCoProfessorAlert = false,
+            hasReplyRoute = true,
+            posts = listOf(
+                EmailThreadPost(
+                    sequenceNumber = 1,
+                    authorDisplay = "익명 수강생",
+                    roleLabel = "질문 작성자",
+                    roleKind = "op",
+                    isAnonymous = true,
+                    createdAt = java.time.Instant.now(),
+                    content = """
+                        ## 적분 질문
+                        **테스트(1)**입니다. 인라인 수식 ${'$'}\cos x = \sum_{n=0}^{\infty} \frac{(-1)^n}{(2n)!} x^{2n}${'$'} 확인 부탁드립니다.
+
+                        ${'$'}${'$'}
+                        \int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+                        ${'$'}${'$'}
+
+                        | 항목 | 값 |
+                        | --- | ---: |
+                        | 전압 | 5V |
+
+                        - [x] 회로 점검 완료
+                        - [사진 1] 참고
+
+                        > 인용구 <script>alert(1)</script>
+                    """.trimIndent(),
+                    attachments = listOf(
+                        EmailInlineAttachment(
+                            id = "att-1",
+                            originalName = "circuit.png",
+                            contentType = "image/png",
+                            fileSize = 2048,
+                            cid = "att-1@cistus"
+                        )
+                    )
+                ),
+                EmailThreadPost(
+                    sequenceNumber = 2,
+                    authorDisplay = "김교수",
+                    roleLabel = "담당교수",
+                    roleKind = "prof",
+                    isAnonymous = false,
+                    createdAt = java.time.Instant.now(),
+                    content = "잘 정리했습니다. `V = IR` 및 [참고 링크](https://kw.ac.kr)를 확인하세요."
+                )
+            )
+        )
+
+        val html = EmailThreadHtmlRenderer.renderThreadEmailHtml(snapshot)
+        assertTrue(html.contains(EMAIL_REPLY_ABOVE_MARKER))
+        assertTrue(html.contains("공학설계입문"))
+        assertTrue(html.contains("#1 · 질문"))
+        assertTrue(html.contains("#2 · 교수 답변"))
+        assertTrue(html.contains("<strong>테스트(1)</strong>입니다."))
+        assertTrue(html.contains("&int;") && html.contains("&infin;") && html.contains("&radic;") && html.contains("&pi;"))
+        assertTrue(html.contains("<table") && html.contains("전압") && html.contains("5V"))
+        assertTrue(html.contains("&#9745;"))
+        assertTrue(html.contains("cid:att-1@cistus"))
+        assertTrue(html.contains("https://kw.ac.kr"))
+        assertFalse(html.contains("<script>"))
+        assertTrue(html.contains("&lt;script&gt;"))
+
+        val session = jakarta.mail.Session.getInstance(java.util.Properties())
+        val pngBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
+        val mime = com.gonghak.worker.SmtpTransport.buildMimeMessage(
+            session = session,
+            payload = com.gonghak.worker.SmtpJobPayload(
+                host = "smtp.example.com",
+                port = 587,
+                from = "noreply@kw.ac.kr",
+                to = "prof@kw.ac.kr",
+                subject = "[새 질문 알림] 가우시안 적분",
+                body = "Plain text fallback",
+                htmlBody = html,
+                inlineImages = listOf(
+                    com.gonghak.worker.SmtpInlineImage(
+                        cid = "att-1@cistus",
+                        fileName = "circuit.png",
+                        contentType = "image/png",
+                        base64Data = java.util.Base64.getEncoder().encodeToString(pngBytes)
+                    )
+                )
+            )
+        )
+        assertTrue(mime.contentType.lowercase().contains("multipart/alternative"))
+        val alt = mime.content as jakarta.mail.Multipart
+        assertEquals(2, alt.count)
+        assertTrue(alt.getBodyPart(0).isMimeType("text/plain"))
+        assertTrue(alt.getBodyPart(1).isMimeType("multipart/related"))
+        val related = alt.getBodyPart(1).content as jakarta.mail.Multipart
+        assertEquals(2, related.count)
+        assertTrue(related.getBodyPart(0).isMimeType("text/html"))
+        assertEquals("<att-1@cistus>", related.getBodyPart(1).getHeader("Content-ID")?.firstOrNull())
+    }
+
+    @Test
+    fun testRichHtmlEmailSecurityHardening() {
+        // 1. Placeholder injection / HTML-bomb & NumberFormatException neutralization
+        val bombInput = "\$x\$ " + "\uE1000\uE101".repeat(500) + " \uE100999999999999999999\uE101"
+        val bombHtml = EmailThreadHtmlRenderer.renderMarkdownToEmailHtml(bombInput)
+        assertTrue(bombHtml.length < 10_000, "Placeholder injection must not amplify HTML size")
+        assertFalse(bombHtml.contains("\uE100"))
+
+        // 2. Deeply nested blockquotes and LaTeX braces must not trigger StackOverflowError
+        val deepQuote = "> ".repeat(200) + "deep quote"
+        val deepQuoteHtml = EmailThreadHtmlRenderer.renderMarkdownToEmailHtml(deepQuote)
+        assertTrue(deepQuoteHtml.contains("deep quote"))
+
+        val deepLatex = "{".repeat(1500) + "x" + "}".repeat(1500)
+        val deepLatexHtml = EmailThreadHtmlRenderer.renderLatexToEmailHtml(deepLatex, displayMode = true)
+        assertTrue(deepLatexHtml.isNotBlank())
+
+        // 3. External markdown images rendered as links (no tracking-pixel <img>)
+        val pixelHtml = EmailThreadHtmlRenderer.renderMarkdownToEmailHtml("![tracker](https://evil.example/pixel.png)")
+        assertFalse(pixelHtml.contains("<img"), "External markdown images must not auto-load as <img>")
+        assertTrue(pixelHtml.contains("<a href=\"https://evil.example/pixel.png\""))
+
+        // 4. Hidden post's images cannot be embedded via [#1 사진 1] from another post
+        val snapshot = EmailThreadSnapshot(
+            courseName = "공학설계입문",
+            category = QuestionCategory.LECTURE,
+            professorName = "이교수",
+            title = "숨김 테스트",
+            isThreadOpen = true,
+            isCoProfessorAlert = false,
+            hasReplyRoute = false,
+            posts = listOf(
+                EmailThreadPost(
+                    sequenceNumber = 1,
+                    authorDisplay = "익명 수강생",
+                    roleLabel = "질문 작성자",
+                    roleKind = "op",
+                    isAnonymous = true,
+                    isHidden = true,
+                    createdAt = java.time.Instant.now(),
+                    content = "숨김 본문",
+                    attachments = listOf(
+                        EmailInlineAttachment("att-hidden", "secret.png", "image/png", 100L, "att-hidden@cistus")
+                    )
+                ),
+                EmailThreadPost(
+                    sequenceNumber = 2,
+                    authorDisplay = "학생",
+                    roleLabel = "추가 질문",
+                    roleKind = "student",
+                    isAnonymous = false,
+                    isHidden = false,
+                    createdAt = java.time.Instant.now(),
+                    content = "숨김 이미지 참조 시도: [#1 사진 1]"
+                )
+            )
+        )
+        val hiddenThreadHtml = EmailThreadHtmlRenderer.renderThreadEmailHtml(snapshot)
+        assertFalse(hiddenThreadHtml.contains("cid:att-hidden@cistus"), "Hidden post image must not be embedded cross-post")
+
+        // 5. MIME Content-Type allowlist & header injection rejection in SmtpTransport.buildMimeMessage
+        val session = jakarta.mail.Session.getInstance(java.util.Properties())
+        val payloadBytes = java.util.Base64.getEncoder().encodeToString("hello".toByteArray())
+        val mime = com.gonghak.worker.SmtpTransport.buildMimeMessage(
+            session = session,
+            payload = com.gonghak.worker.SmtpJobPayload(
+                host = "smtp.example.com",
+                port = 587,
+                from = "noreply@kw.ac.kr",
+                to = "prof@kw.ac.kr",
+                subject = "제목\r\nBcc: attacker@evil.example",
+                body = "Plain",
+                htmlBody = "<p>Hi</p>",
+                inlineImages = listOf(
+                    com.gonghak.worker.SmtpInlineImage("svg@cistus", "x.svg", "image/svg+xml", payloadBytes),
+                    com.gonghak.worker.SmtpInlineImage("hdr@cistus", "x.png", "image/png\r\nX-Injected: 1", payloadBytes),
+                    com.gonghak.worker.SmtpInlineImage("bad cid!", "x.png", "image/png", payloadBytes),
+                    com.gonghak.worker.SmtpInlineImage("good@cistus", "ok.png", "image/png", payloadBytes)
+                )
+            )
+        )
+        assertFalse(mime.subject.contains("\r") || mime.subject.contains("\n"))
+        val alt = mime.content as jakarta.mail.Multipart
+        val related = alt.getBodyPart(1).content as jakarta.mail.Multipart
+        // Only HTML part + 1 valid PNG part ("good@cistus"); all 3 malicious parts rejected
+        assertEquals(2, related.count)
+        assertEquals("<good@cistus>", related.getBodyPart(1).getHeader("Content-ID")?.firstOrNull())
     }
 }

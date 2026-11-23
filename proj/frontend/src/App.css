@@ -6039,6 +6039,49 @@ html[data-theme="dark"] .form-textarea:focus {
   color: #74b08b;
   border-color: #355743;
 }
+.theme-preview.blue-white-preview {
+  background: linear-gradient(135deg, #ffffff 48%, #dbeafe 48%);
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.hidden-theme-unlock-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+  color: #0f172a;
+  border: 1.5px solid #3b82f6;
+  box-shadow: 0 12px 28px rgba(29, 78, 216, 0.22);
+  font-size: 0.88rem;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.hidden-theme-unlock-toast .unlock-toast-apply {
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  background: #1d4ed8;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hidden-theme-unlock-toast .unlock-toast-apply:hover {
+  background: #1e40af;
+}
+
+.hidden-theme-unlock-toast .unlock-toast-close {
+  color: #64748b;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+}
 
 .theme-option-info {
   flex: 1;

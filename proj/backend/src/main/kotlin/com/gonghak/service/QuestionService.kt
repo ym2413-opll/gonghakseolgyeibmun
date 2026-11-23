@@ -1677,8 +1677,12 @@ class QuestionService(
     internal fun generateSummaryTitle(content: String): String {
         val clean = content.trim()
         if (clean.isBlank()) return "학업 질문"
-        val hasMath = Regex("""\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]*?\\\]|\\\([^\r\n]+?\\\)""").containsMatchIn(clean)
-        val plainMultiline = stripMarkdownAndMathForPreview(clean, mathReplacement = "", preserveNewlines = true)
+        val bounded = clean.take(4000)
+        val hasMath = (bounded.contains("$$") && Regex("""\$\$[\s\S]*?\$\$""").containsMatchIn(bounded)) ||
+            (bounded.contains('$') && Regex("""\$[^$\r\n]+?\$""").containsMatchIn(bounded)) ||
+            (bounded.contains("\\[") && bounded.contains("\\]") && Regex("""\\\[[\s\S]*?\\\]""").containsMatchIn(bounded)) ||
+            (bounded.contains("\\(") && bounded.contains("\\)") && Regex("""\\\([^\r\n]+?\\\)""").containsMatchIn(bounded))
+        val plainMultiline = stripMarkdownAndMathForPreview(bounded, mathReplacement = "", preserveNewlines = true)
         val firstLine = plainMultiline.lines().firstOrNull { it.isNotBlank() }.orEmpty()
         val stripped = firstLine
             .replace(Regex("""[\[\]]"""), "")
