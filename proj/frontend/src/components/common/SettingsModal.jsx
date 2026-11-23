@@ -182,8 +182,8 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                     <Sparkles size={18} />
                   </div>
                   <div className="theme-option-info">
-                    <span className="theme-option-label">파랑/하양</span>
-                    <span className="theme-option-sub">숨겨진 테마</span>
+                    <span className="theme-option-label">♬ BlueWhite</span>
+                    <span className="theme-option-sub">by HAYAKO</span>
                   </div>
                   {theme === 'blue-white' && <Check size={16} className="text-primary" />}
                 </button>

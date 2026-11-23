@@ -295,7 +295,7 @@ export const ThemeProvider = ({ children }) => {
       {showBlueWhiteToast && (
         <div className="hidden-theme-unlock-toast" role="status" aria-live="polite">
           <span>
-            숨겨진 테마 <strong>파랑/하양</strong> 배색이 해금되었습니다!
+            BlueWhite, by HAYAKO.
           </span>
           <button
             type="button"
@@ -305,7 +305,7 @@ export const ThemeProvider = ({ children }) => {
               setShowBlueWhiteToast(false);
             }}
           >
-            바로 적용
+            적용
           </button>
           <button
             type="button"
