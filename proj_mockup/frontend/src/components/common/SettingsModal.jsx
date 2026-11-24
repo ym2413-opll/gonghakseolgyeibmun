@@ -6,7 +6,7 @@ import { useNotifications } from '../../context/NotificationContext';
 import CoursePicker from './CoursePicker';
 import AdminNicknameForm from '../admin/AdminNicknameForm';
 import HelpBubble from './HelpBubble';
-import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell, ShieldAlert } from 'lucide-react';
+import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell, ShieldAlert, Sparkles } from 'lucide-react';
 
 const FONT_SIZE_OPTIONS = [
   { id: 'sm', label: '작게', sample: '가나다' },
@@ -24,6 +24,7 @@ const HELP_LEVEL_OPTIONS = [
 const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const {
     theme,
+    isBlueWhiteUnlocked,
     fontSize,
     helpLevel,
     updateTheme,
@@ -170,6 +171,23 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 </div>
                 {theme === 'green-dark' && <Check size={16} className="text-primary" />}
               </button>
+
+              {isBlueWhiteUnlocked && (
+                <button
+                  type="button"
+                  className={`theme-option-card ${theme === 'blue-white' ? 'active' : ''}`}
+                  onClick={() => updateTheme('blue-white')}
+                >
+                  <div className="theme-preview blue-white-preview">
+                    <Sparkles size={18} />
+                  </div>
+                  <div className="theme-option-info">
+                    <span className="theme-option-label">♬ BlueWhite</span>
+                    <span className="theme-option-sub">by HAYAKO</span>
+                  </div>
+                  {theme === 'blue-white' && <Check size={16} className="text-primary" />}
+                </button>
+              )}
             </div>
           </div>
 

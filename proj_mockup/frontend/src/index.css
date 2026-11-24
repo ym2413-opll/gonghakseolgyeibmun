@@ -221,6 +221,43 @@ html[data-theme="green-dark"] {
   --shadow-xl: 0 20px 28px -5px rgba(0, 0, 0, 0.6);
 }
 
+/* 숨겨진 테마: 파랑/하양 배색 (BlueWhite Easter Egg Theme) */
+html[data-theme="blue-white"] {
+  --bg-app: #eff6ff;
+  --bg-card: #ffffff;
+  --bg-card-subtle: #f0f7ff;
+  --bg-input: #ffffff;
+  --bg-hover: #dbeafe;
+  --border-color: #bfdbfe;
+  --border-focus: #1d4ed8;
+
+  --text-primary: #0f172a;
+  --text-secondary: #1e3a8a;
+  --text-muted: #475569;
+  --text-inverse: #ffffff;
+
+  --primary-color: #1d4ed8;
+  --primary-hover: #1e40af;
+  --primary-light: #dbeafe;
+  --primary-border: #93c5fd;
+
+  --success-color: #15803d;
+  --success-bg: #dcfce7;
+  --warning-color: #b45309;
+  --warning-bg: #fef3c7;
+  --directive-hl-bg: rgba(37, 99, 235, 0.08);
+  --directive-hl-border: rgba(37, 99, 235, 0.30);
+  --danger-color: #dc2626;
+  --danger-bg: #fee2e2;
+  --ai-purple: #1d4ed8;
+  --ai-purple-light: #dbeafe;
+
+  --shadow-sm: 0 1px 2px 0 rgba(29, 78, 216, 0.06);
+  --shadow-md: 0 4px 8px -1px rgba(29, 78, 216, 0.09);
+  --shadow-lg: 0 10px 18px -3px rgba(29, 78, 216, 0.13);
+  --shadow-xl: 0 20px 26px -5px rgba(29, 78, 216, 0.18);
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;

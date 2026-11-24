@@ -1,9 +1,16 @@
 package com.gonghak.service
 
 import com.gonghak.config.DatabaseFactory.dbQuery
+import com.gonghak.config.EnvConfig
 import com.gonghak.dto.EmailLogDto
+import com.gonghak.models.AnswersTable
+import com.gonghak.models.AttachmentsTable
 import com.gonghak.models.EmailLogsTable
 import com.gonghak.models.QuestionCategory
+import com.gonghak.models.QuestionsTable
+import com.gonghak.models.UserRole
+import com.gonghak.models.UsersTable
+import com.gonghak.worker.SmtpInlineImage
 import com.gonghak.worker.SmtpJobPayload
 import com.gonghak.worker.SmtpTransport
 import com.gonghak.worker.SubprocessRunner
@@ -16,8 +23,15 @@ import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.time.Instant
+import java.util.Base64
 import java.util.UUID
+
+private const val MAX_EMAIL_INLINE_IMAGES = 8
+private const val MAX_EMAIL_SINGLE_IMAGE_BYTES = 2 * 1024 * 1024L
+private const val MAX_EMAIL_TOTAL_IMAGE_BYTES = 4 * 1024 * 1024L
 
 data class PendingEmailJob(
     val logId: UUID,
@@ -25,7 +39,9 @@ data class PendingEmailJob(
     val subject: String,
     val body: String,
     val replyTo: String? = null,
-    val messageId: String? = null
+    val messageId: String? = null,
+    val htmlBody: String? = null,
+    val inlineImages: List<SmtpInlineImage> = emptyList()
 )
 
 class EmailService(
@@ -93,8 +109,10 @@ class EmailService(
             }
         }
 
+        var htmlBody: String? = null
+        val inlineImages = mutableListOf<SmtpInlineImage>()
         val logId = UUID.randomUUID()
-        val insertOutbox: () -> Unit = {
+        val insertOutboxAndBuildHtml: () -> Unit = {
             EmailLogsTable.insert {
                 it[id] = logId
                 it[EmailLogsTable.recipientEmail] = cleanEmail
@@ -105,12 +123,30 @@ class EmailService(
                 it[EmailLogsTable.status] = "QUEUED"
                 it[EmailLogsTable.createdAt] = Instant.now()
             }
+
+            runCatching {
+                val (renderedHtml, collectedImages) = buildThreadHtmlInTx(
+                    questionId = questionId,
+                    fallbackCourseName = courseName,
+                    fallbackCategory = category,
+                    fallbackProfessorName = professorName,
+                    fallbackTitle = questionTitle,
+                    fallbackContent = questionContent,
+                    fallbackAuthorDisplay = authorDisplay,
+                    isCoProfessor = isCoProfessor,
+                    hasReplyRoute = replyRoute != null
+                )
+                htmlBody = renderedHtml
+                inlineImages.addAll(collectedImages)
+            }.onFailure { ex ->
+                logger.warn("[EmailService] Failed to build rich HTML thread for question $questionId: ${ex.message}")
+            }
         }
 
         if (TransactionManager.currentOrNull() != null) {
-            insertOutbox()
+            insertOutboxAndBuildHtml()
         } else {
-            transaction { insertOutbox() }
+            transaction { insertOutboxAndBuildHtml() }
         }
 
         return PendingEmailJob(
@@ -119,8 +155,225 @@ class EmailService(
             subject = subject,
             body = body,
             replyTo = replyRoute?.replyToAddress,
-            messageId = replyRoute?.messageId
+            messageId = replyRoute?.messageId,
+            htmlBody = htmlBody,
+            inlineImages = inlineImages
         )
+    }
+
+    private fun buildThreadHtmlInTx(
+        questionId: UUID,
+        fallbackCourseName: String,
+        fallbackCategory: QuestionCategory,
+        fallbackProfessorName: String,
+        fallbackTitle: String,
+        fallbackContent: String,
+        fallbackAuthorDisplay: String,
+        isCoProfessor: Boolean,
+        hasReplyRoute: Boolean
+    ): Pair<String, List<SmtpInlineImage>> {
+        val uploadDirPath = System.getProperty("gonghak.uploadDir")
+            ?: EnvConfig.get("UPLOAD_DIR")
+            ?: "uploads/attachments"
+        val uploadRoot = runCatching { Paths.get(uploadDirPath).toRealPath() }.getOrNull()
+
+        val inlineImages = mutableListOf<SmtpInlineImage>()
+        var totalImgBytes = 0L
+
+        fun toInlineAttachment(row: org.jetbrains.exposed.sql.ResultRow): EmailInlineAttachment {
+            val attId = row[AttachmentsTable.id].value.toString()
+            val originalName = row[AttachmentsTable.originalName]
+            val savedName = row[AttachmentsTable.savedName]
+            val normalizedMime = row[AttachmentsTable.mimeType].substringBefore(';').trim().lowercase()
+            val fileSize = row[AttachmentsTable.fileSize]
+            val isSafeRasterImg = normalizedMime in EmailThreadHtmlRenderer.ALLOWED_INLINE_IMAGE_MIME_TYPES
+            var cid: String? = null
+            if (isSafeRasterImg && uploadRoot != null &&
+                inlineImages.size < MAX_EMAIL_INLINE_IMAGES &&
+                fileSize in 1..MAX_EMAIL_SINGLE_IMAGE_BYTES
+            ) {
+                val rawCandidate = uploadRoot.resolve(savedName).normalize()
+                if (rawCandidate.startsWith(uploadRoot) && !Files.isSymbolicLink(rawCandidate)) {
+                    val realFile = runCatching { rawCandidate.toRealPath() }.getOrNull()
+                    if (realFile != null && realFile.startsWith(uploadRoot) && Files.isRegularFile(realFile)) {
+                        val diskLen = runCatching { Files.size(realFile) }.getOrDefault(-1L)
+                        if (diskLen in 1..MAX_EMAIL_SINGLE_IMAGE_BYTES &&
+                            totalImgBytes + diskLen <= MAX_EMAIL_TOTAL_IMAGE_BYTES
+                        ) {
+                            val bytes = runCatching { Files.readAllBytes(realFile) }.getOrNull()
+                            if (bytes != null && bytes.isNotEmpty() &&
+                                bytes.size <= MAX_EMAIL_SINGLE_IMAGE_BYTES &&
+                                totalImgBytes + bytes.size <= MAX_EMAIL_TOTAL_IMAGE_BYTES
+                            ) {
+                                val candidateCid = "att-${attId.replace("-", "")}@cistus"
+                                inlineImages.add(
+                                    SmtpInlineImage(
+                                        cid = candidateCid,
+                                        fileName = originalName,
+                                        contentType = normalizedMime,
+                                        base64Data = Base64.getEncoder().encodeToString(bytes)
+                                    )
+                                )
+                                totalImgBytes += bytes.size
+                                cid = candidateCid
+                            }
+                        }
+                    }
+                }
+            }
+            return EmailInlineAttachment(
+                id = attId,
+                originalName = originalName,
+                contentType = normalizedMime,
+                fileSize = fileSize,
+                cid = cid
+            )
+        }
+
+        val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
+        val allAttachments = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
+            .orderBy(AttachmentsTable.createdAt to SortOrder.ASC)
+            .toList()
+        val qAttachmentRows = allAttachments.filter { it[AttachmentsTable.answerId] == null }
+        val ansAttachmentRowsMap = allAttachments
+            .filter { it[AttachmentsTable.answerId] != null }
+            .groupBy { it[AttachmentsTable.answerId]!! }
+
+        val posts = mutableListOf<EmailThreadPost>()
+
+        if (qRow != null) {
+            val qStudentId = qRow[QuestionsTable.studentId]
+            val qProfId = qRow[QuestionsTable.assignedProfessorId]
+            val isAnon = qRow[QuestionsTable.isAnonymous]
+            val isQuestionHidden = qRow[QuestionsTable.isHidden]
+            val isQuestionDeleted = qRow[QuestionsTable.isDeletedByAuthor]
+            val isOpMasked = isQuestionHidden || isQuestionDeleted
+            val studentRow = UsersTable.select { UsersTable.id eq qStudentId }.singleOrNull()
+            val profRow = UsersTable.select { UsersTable.id eq qProfId }.singleOrNull()
+            val isAdminOp = studentRow?.get(UsersTable.isAdmin) == true ||
+                studentRow?.get(UsersTable.role) == UserRole.ADMIN.name
+            val effectiveIsAdminOp = isAdminOp && !isAnon
+            val opDisplay = when {
+                isAnon -> "익명 수강생"
+                isAdminOp -> studentRow?.get(UsersTable.nickname)?.takeIf { it.isNotBlank() }
+                    ?: studentRow?.get(UsersTable.name)?.takeIf { it.isNotBlank() }
+                    ?: fallbackAuthorDisplay
+                !studentRow?.get(UsersTable.displayTag).isNullOrBlank() -> studentRow!![UsersTable.displayTag]
+                !studentRow?.get(UsersTable.name).isNullOrBlank() -> studentRow!![UsersTable.name]
+                else -> fallbackAuthorDisplay
+            }
+            val opContent = when {
+                isQuestionDeleted -> "작성자에 의해 삭제된 질문입니다."
+                isQuestionHidden -> "관리자에 의해 숨겨진 글입니다."
+                else -> qRow[QuestionsTable.refinedContent].ifBlank { qRow[QuestionsTable.rawContent] }
+            }
+            val qAttachments = if (isOpMasked) emptyList() else qAttachmentRows.map(::toInlineAttachment)
+            posts.add(
+                EmailThreadPost(
+                    sequenceNumber = 1,
+                    authorDisplay = opDisplay,
+                    roleLabel = if (effectiveIsAdminOp) "관리자" else "질문 작성자",
+                    roleKind = if (effectiveIsAdminOp) "admin" else "op",
+                    isAnonymous = isAnon,
+                    isEdited = false,
+                    isHidden = isOpMasked,
+                    createdAt = qRow[QuestionsTable.createdAt],
+                    content = opContent,
+                    attachments = qAttachments
+                )
+            )
+
+            val answerRows = AnswersTable.select { AnswersTable.questionId eq questionId }
+                .orderBy(AnswersTable.sequenceNumber to SortOrder.ASC, AnswersTable.createdAt to SortOrder.ASC)
+                .toList()
+            for (aRow in answerRows) {
+                val aId = aRow[AnswersTable.id].value
+                val aAuthorId = aRow[AnswersTable.professorId]
+                val aUser = UsersTable.select { UsersTable.id eq aAuthorId }.singleOrNull()
+                val aRoleStr = aUser?.get(UsersTable.role) ?: UserRole.PROFESSOR.name
+                val aIsAdmin = aUser?.get(UsersTable.isAdmin) == true || aRoleStr == UserRole.ADMIN.name
+                val aIsStudent = aRoleStr == UserRole.STUDENT.name && !aIsAdmin
+                val aIsOriginalStudent = aAuthorId == qStudentId
+                val aIsAnon = isAnon && aIsOriginalStudent
+                val aIsMasked = aRow[AnswersTable.isHidden] || (isOpMasked && aIsOriginalStudent)
+                val aDisplay = when {
+                    aIsAnon -> "익명 수강생"
+                    aIsAdmin -> aUser?.get(UsersTable.nickname)?.takeIf { it.isNotBlank() }
+                        ?: aUser?.get(UsersTable.name)?.takeIf { it.isNotBlank() }
+                        ?: "관리자"
+                    aIsStudent -> aUser?.get(UsersTable.displayTag)?.takeIf { it.isNotBlank() }
+                        ?: aUser?.get(UsersTable.name)?.takeIf { it.isNotBlank() }
+                        ?: "수강생"
+                    else -> aUser?.get(UsersTable.name)?.takeIf { it.isNotBlank() } ?: "교수"
+                }
+                val (roleLabel, roleKind) = when {
+                    aIsAdmin && !aIsAnon -> "관리자" to "admin"
+                    aIsOriginalStudent && (aIsStudent || aIsAnon) -> "질문 작성자 (추가 질문)" to "student"
+                    aIsStudent -> "수강생 답변" to "student"
+                    aRow[AnswersTable.isAssignedProfessor] -> "담당교수" to "prof"
+                    else -> "공동교수" to "co-prof"
+                }
+                val aAttachments = if (aIsMasked) {
+                    emptyList()
+                } else {
+                    ansAttachmentRowsMap[aId].orEmpty().map(::toInlineAttachment)
+                }
+                posts.add(
+                    EmailThreadPost(
+                        sequenceNumber = aRow[AnswersTable.sequenceNumber],
+                        authorDisplay = aDisplay,
+                        roleLabel = roleLabel,
+                        roleKind = roleKind,
+                        isAnonymous = aIsAnon,
+                        isHidden = aIsMasked,
+                        createdAt = aRow[AnswersTable.createdAt],
+                        content = if (aIsMasked) "관리자에 의해 숨겨진 글입니다." else aRow[AnswersTable.content],
+                        attachments = aAttachments
+                    )
+                )
+            }
+
+            val resolvedProfName = profRow?.get(UsersTable.name)?.takeIf { it.isNotBlank() } ?: fallbackProfessorName
+            val resolvedTitle = when {
+                isQuestionDeleted -> "작성자에 의해 삭제된 질문입니다."
+                isQuestionHidden -> "관리자에 의해 숨겨진 글입니다."
+                else -> qRow[QuestionsTable.title].ifBlank { fallbackTitle }
+            }
+            val snapshot = EmailThreadSnapshot(
+                courseName = fallbackCourseName,
+                category = fallbackCategory,
+                professorName = resolvedProfName,
+                title = resolvedTitle,
+                isThreadOpen = qRow[QuestionsTable.isThreadOpen],
+                isCoProfessorAlert = isCoProfessor,
+                hasReplyRoute = hasReplyRoute,
+                posts = posts
+            )
+            return EmailThreadHtmlRenderer.renderThreadEmailHtml(snapshot) to inlineImages
+        }
+
+        val fallbackSnapshot = EmailThreadSnapshot(
+            courseName = fallbackCourseName,
+            category = fallbackCategory,
+            professorName = fallbackProfessorName,
+            title = fallbackTitle,
+            isThreadOpen = false,
+            isCoProfessorAlert = isCoProfessor,
+            hasReplyRoute = hasReplyRoute,
+            posts = listOf(
+                EmailThreadPost(
+                    sequenceNumber = 1,
+                    authorDisplay = fallbackAuthorDisplay,
+                    roleLabel = "질문 작성자",
+                    roleKind = "op",
+                    isAnonymous = fallbackAuthorDisplay.contains("익명"),
+                    createdAt = Instant.now(),
+                    content = fallbackContent,
+                    attachments = emptyList()
+                )
+            )
+        )
+        return EmailThreadHtmlRenderer.renderThreadEmailHtml(fallbackSnapshot) to inlineImages
     }
 
     /**
@@ -178,7 +431,9 @@ class EmailService(
                     subject = job.subject,
                     body = job.body,
                     replyTo = job.replyTo,
-                    messageId = job.messageId
+                    messageId = job.messageId,
+                    htmlBody = job.htmlBody,
+                    inlineImages = job.inlineImages
                 )
                 try {
                     if (useSubprocess) {

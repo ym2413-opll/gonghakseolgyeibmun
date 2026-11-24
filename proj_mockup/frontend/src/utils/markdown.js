@@ -473,57 +473,119 @@ export function remarkHighlightDirectiveSentinels() {
   };
 }
 
-const LATEX_MATH_DETECT_REGEX =
-  /\$\$[\s\S]*?\$\$|\$[^$\r\n]+?\$|\\\[[\s\S]*?\\\]|\\\([^\r\n]+?\\\)|\\(?:int|sum|prod|frac|sqrt|lim|infty|alpha|beta|gamma|theta|pi|sigma|sin|cos|tan|log|ln|begin)\b/;
+const LATEX_COMMAND_DETECT_REGEX =
+  /\\(?:int|sum|prod|frac|sqrt|lim|infty|alpha|beta|gamma|theta|pi|sigma|sin|cos|tan|log|ln|begin)\b/;
+
+function escapeRegExpLiteral(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 선형 시간(O(n))으로 구분자 쌍(open..close)을 치환하여 ReDoS 방지
+ */
+function replaceDelimitedLinear(input, open, close, replacement, singleLine = false) {
+  if (!input.includes(open) || !input.includes(close)) return input;
+  let out = '';
+  let i = 0;
+  while (i < input.length) {
+    const start = input.indexOf(open, i);
+    if (start === -1) {
+      out += input.slice(i);
+      break;
+    }
+    const contentStart = start + open.length;
+    const end = input.indexOf(close, contentStart);
+    if (end === -1) {
+      out += input.slice(i);
+      break;
+    }
+    const inner = input.slice(contentStart, end);
+    if (singleLine && (inner.includes('\n') || inner.includes('\r'))) {
+      out += input.slice(i, contentStart);
+      i = contentStart;
+      continue;
+    }
+    out += input.slice(i, start) + replacement;
+    i = end + close.length;
+  }
+  return out;
+}
 
 /**
  * 수식 구문($$...$$, $...$, \[...\], \(...\))을 평문 표시용 치환 문자열로 정리
  */
 export function replaceMathForPlainText(text, replacement = '[수식]', { preserveNewlines = false } = {}) {
   if (!text || typeof text !== 'string') return '';
+  const bounded = text.slice(0, 20000);
   const pad = replacement ? ` ${replacement} ` : ' ';
 
   // 코드 블록과 인라인 코드는 보호하고 나머지 영역의 수식만 치환
-  const parts = text.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  const parts = bounded.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
   const replaced = parts
     .map((part, idx) => {
       if (!part) return '';
       if (idx % 2 === 1) return part;
 
-      return part
-        .replace(/\$\$[\s\S]*?\$\$/g, pad)
-        .replace(/\\\[[\s\S]*?\\\]/g, pad)
-        .replace(/\\\([^\r\n]+?\\\)/g, pad)
-        .replace(/\$([^$\r\n]+?)\$/g, (full, inner) => {
+      let res = part;
+      res = replaceDelimitedLinear(res, '$$', '$$', pad, false);
+      res = replaceDelimitedLinear(res, '\\[', '\\]', pad, false);
+      res = replaceDelimitedLinear(res, '\\(', '\\)', pad, true);
+      if (res.includes('$')) {
+        res = res.replace(/\$([^$\r\n]+?)\$/g, (full, inner) => {
           const trimmed = String(inner || '').trim();
           if (!trimmed) return full;
           // "$100에서 $200" 같은 통화 표기는 수식으로 오인하지 않음
           if (/^\d+(?:[.,]\d+)?\s*[가-힣]/.test(trimmed)) return full;
           return pad;
-        })
+        });
         // 잘린(미닫힘) 블록 수식 꼬리 정리
-        .replace(/\$\$[\s\S]*$/g, pad);
+        const trailingIdx = res.indexOf('$$');
+        if (trailingIdx !== -1) {
+          res = res.slice(0, trailingIdx) + pad;
+        }
+      }
+      return res;
     })
     .join('');
+
+  const collapseRegex = replacement
+    ? new RegExp(`(?:${escapeRegExpLiteral(replacement)}\\s*){2,}`, 'g')
+    : null;
 
   if (preserveNewlines) {
     return replaced
       .split(/\r?\n/)
       .map((line) =>
-        replacement
-          ? line.replace(/(?:\[수식\]\s*){2,}/g, `${replacement} `).replace(/[ \t]+/g, ' ').trim()
+        collapseRegex
+          ? line.replace(collapseRegex, `${replacement} `).replace(/[ \t]+/g, ' ').trim()
           : line.replace(/[ \t]+/g, ' ').trim()
       )
       .join('\n');
   }
 
-  return replacement
-    ? replaced.replace(/(?:\[수식\]\s*){2,}/g, `${replacement} `)
+  return collapseRegex
+    ? replaced.replace(collapseRegex, `${replacement} `)
     : replaced;
 }
 
 export function containsMathSyntax(text) {
-  return typeof text === 'string' && LATEX_MATH_DETECT_REGEX.test(text);
+  if (typeof text !== 'string' || !text) return false;
+  const bounded = text.slice(0, 4000);
+  if (bounded.includes('$$')) {
+    const first = bounded.indexOf('$$');
+    if (bounded.indexOf('$$', first + 2) !== -1) return true;
+  }
+  if (bounded.includes('\\[') && bounded.includes('\\]')) {
+    const first = bounded.indexOf('\\[');
+    if (bounded.indexOf('\\]', first + 2) !== -1) return true;
+  }
+  if (bounded.includes('\\(') && bounded.includes('\\)')) {
+    const first = bounded.indexOf('\\(');
+    const end = bounded.indexOf('\\)', first + 2);
+    if (end !== -1 && !bounded.slice(first + 2, end).includes('\n')) return true;
+  }
+  if (bounded.includes('$') && /\$[^$\r\n]+?\$/.test(bounded)) return true;
+  return LATEX_COMMAND_DETECT_REGEX.test(bounded);
 }
 
 /**
@@ -535,16 +597,21 @@ export function stripMarkdownForPreview(markdownText, { mathReplacement = '[수�
 
   const withoutMath = replaceMathForPlainText(bounded, mathReplacement, { preserveNewlines });
 
-  const stripped = withoutMath
-    .replace(/```[\s\S]*?```/g, (block) =>
-      block
-        .replace(/^```[^\n]*\n?/, '')
-        .replace(/```$/, '')
-        .trim()
-    )
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => (alt ? `[이미지: ${alt}]` : '[이미지]'))
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
+  let stripped = withoutMath.replace(/```[\s\S]*?```/g, (block) =>
+    block
+      .replace(/^```[^\n]*\n?/, '')
+      .replace(/```$/, '')
+      .trim()
+  );
+
+  if (stripped.includes('](')) {
+    stripped = stripped
+      .replace(/!\[([^\]\n]{0,500})\]\([^)\n]{0,2000}\)/g, (_, alt) => (alt ? `[이미지: ${alt}]` : '[이미지]'))
+      .replace(/\[([^\]\n]{1,500})\]\([^)\n]{0,2000}\)/g, '$1');
+  }
+
+  stripped = stripped
+    .replace(/`([^`\n]+)`/g, '$1')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/^>\s?/gm, '')
     .replace(/^[-*_]{3,}\s*$/gm, ' ')

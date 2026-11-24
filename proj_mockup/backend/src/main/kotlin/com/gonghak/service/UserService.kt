@@ -1274,7 +1274,7 @@ class UserService {
 
     private fun normalizeThemeMode(raw: String?): String {
         val lower = raw?.trim()?.lowercase() ?: return "light"
-        return if (lower in setOf("light", "dark", "green", "green-dark", "system")) lower else "light"
+        return if (lower in setOf("light", "dark", "green", "green-dark", "blue-white", "system")) lower else "light"
     }
 
     private fun normalizeFontSize(raw: String?): String {
@@ -1287,8 +1287,8 @@ class UserService {
         return if (row != null) {
             UserSettingDto(
                 userId = row[UserSettingsTable.userId].toString(),
-                themeMode = row[UserSettingsTable.themeMode],
-                fontSize = row[UserSettingsTable.fontSize],
+                themeMode = normalizeThemeMode(row[UserSettingsTable.themeMode]),
+                fontSize = normalizeFontSize(row[UserSettingsTable.fontSize]),
                 helpLevel = normalizeHelpLevel(row[UserSettingsTable.helpLevel]),
                 exhibitionMode = row[UserSettingsTable.exhibitionMode]
             )

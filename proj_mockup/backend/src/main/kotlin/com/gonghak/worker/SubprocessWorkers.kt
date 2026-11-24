@@ -1,10 +1,15 @@
 package com.gonghak.worker
 
 import com.gonghak.config.EnvConfig
+import jakarta.activation.DataHandler
 import jakarta.mail.Message
+import jakarta.mail.Part
 import jakarta.mail.Session
 import jakarta.mail.internet.InternetAddress
+import jakarta.mail.internet.MimeBodyPart
 import jakarta.mail.internet.MimeMessage
+import jakarta.mail.internet.MimeMultipart
+import jakarta.mail.util.ByteArrayDataSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -15,12 +20,21 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.Base64
 import java.util.Date
 import java.util.Properties
 import java.util.concurrent.TimeUnit
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
+
+@Serializable
+data class SmtpInlineImage(
+    val cid: String,
+    val fileName: String,
+    val contentType: String,
+    val base64Data: String
+)
 
 @Serializable
 data class SmtpJobPayload(
@@ -33,7 +47,9 @@ data class SmtpJobPayload(
     val subject: String,
     val body: String,
     val replyTo: String? = null,
-    val messageId: String? = null
+    val messageId: String? = null,
+    val htmlBody: String? = null,
+    val inlineImages: List<SmtpInlineImage> = emptyList()
 )
 
 @Serializable
@@ -88,12 +104,33 @@ object SmtpTransport {
         }
 
         val session = Session.getInstance(props)
+        val mimeMsg = buildMimeMessage(session, payload, cleanFrom, cleanTo)
+
+        val transport = session.getTransport("smtp")
+        try {
+            if (hasAuth) {
+                transport.connect(payload.host, payload.port, payload.user, payload.pass)
+            } else {
+                transport.connect(payload.host, payload.port, null, null)
+            }
+            transport.sendMessage(mimeMsg, mimeMsg.allRecipients)
+        } finally {
+            runCatching { transport.close() }
+        }
+    }
+
+    internal fun buildMimeMessage(
+        session: Session,
+        payload: SmtpJobPayload,
+        cleanFrom: String = sanitizeHeaderAddress(payload.from),
+        cleanTo: String = sanitizeHeaderAddress(payload.to)
+    ): MimeMessage {
         val cleanMessageId = payload.messageId?.replace(Regex("[\\r\\n]"), "")?.trim()?.let { rawId ->
             if (rawId.isBlank()) null
             else if (rawId.startsWith("<") && rawId.endsWith(">")) rawId else "<$rawId>"
         }
 
-        val mimeMsg = object : MimeMessage(session) {
+        return object : MimeMessage(session) {
             override fun updateMessageID() {
                 if (cleanMessageId != null) {
                     setHeader("Message-ID", cleanMessageId)
@@ -108,22 +145,65 @@ object SmtpTransport {
             if (!cleanReplyTo.isNullOrBlank() && cleanReplyTo.contains("@")) {
                 replyTo = arrayOf(InternetAddress(cleanReplyTo))
             }
-            setSubject(payload.subject, Charsets.UTF_8.name())
-            setText(payload.body, Charsets.UTF_8.name())
+            val safeSubject = payload.subject.replace(Regex("[\\r\\n\\u0000]"), " ")
+            setSubject(safeSubject, Charsets.UTF_8.name())
+
+            val allowedInlineMimes = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
+            val validCidRegex = Regex("^[A-Za-z0-9._@-]{1,128}$")
+
+            if (payload.htmlBody.isNullOrBlank()) {
+                setText(payload.body, Charsets.UTF_8.name())
+            } else {
+                val alternative = MimeMultipart("alternative")
+
+                val textPart = MimeBodyPart().apply {
+                    setText(payload.body, Charsets.UTF_8.name())
+                }
+                alternative.addBodyPart(textPart)
+
+                if (payload.inlineImages.isEmpty()) {
+                    val htmlPart = MimeBodyPart().apply {
+                        setContent(payload.htmlBody, "text/html; charset=UTF-8")
+                    }
+                    alternative.addBodyPart(htmlPart)
+                } else {
+                    val related = MimeMultipart("related")
+                    val htmlPart = MimeBodyPart().apply {
+                        setContent(payload.htmlBody, "text/html; charset=UTF-8")
+                    }
+                    related.addBodyPart(htmlPart)
+
+                    for (img in payload.inlineImages) {
+                        val normalizedMime = img.contentType.substringBefore(';').trim().lowercase()
+                        if (normalizedMime !in allowedInlineMimes) continue
+                        val safeCid = img.cid.trim()
+                        if (!validCidRegex.matches(safeCid)) continue
+                        val decoded = runCatching { Base64.getDecoder().decode(img.base64Data) }.getOrNull() ?: continue
+                        if (decoded.isEmpty()) continue
+                        val safeFileName = img.fileName
+                            .replace(Regex("[\\u0000-\\u001f\\u007f;\"/\\\\]"), "_")
+                            .take(120)
+                            .ifBlank { "attachment" }
+                        val imgPart = MimeBodyPart().apply {
+                            dataHandler = DataHandler(ByteArrayDataSource(decoded, normalizedMime))
+                            setHeader("Content-ID", "<$safeCid>")
+                            disposition = Part.INLINE
+                            fileName = safeFileName
+                        }
+                        related.addBodyPart(imgPart)
+                    }
+
+                    val relatedWrapper = MimeBodyPart().apply {
+                        setContent(related)
+                    }
+                    alternative.addBodyPart(relatedWrapper)
+                }
+
+                setContent(alternative)
+            }
+
             sentDate = Date()
             saveChanges()
-        }
-
-        val transport = session.getTransport("smtp")
-        try {
-            if (hasAuth) {
-                transport.connect(payload.host, payload.port, payload.user, payload.pass)
-            } else {
-                transport.connect(payload.host, payload.port, null, null)
-            }
-            transport.sendMessage(mimeMsg, mimeMsg.allRecipients)
-        } finally {
-            runCatching { transport.close() }
         }
     }
 }
@@ -338,12 +418,12 @@ object SubprocessRunner {
         return readerThread to baos
     }
 
-    fun runSmtpSubprocess(payload: SmtpJobPayload, timeoutSeconds: Long = 10L): SmtpJobResult {
+    fun runSmtpSubprocess(payload: SmtpJobPayload, timeoutSeconds: Long = 30L): SmtpJobResult {
         val javaExec = resolveJavaExecutable()
         val classpath = System.getProperty("java.class.path")
         val process = ProcessBuilder(
             javaExec,
-            "-Xmx64m",
+            "-Xmx256m",
             "-Djava.net.preferIPv4Stack=true",
             "-cp",
             classpath,
