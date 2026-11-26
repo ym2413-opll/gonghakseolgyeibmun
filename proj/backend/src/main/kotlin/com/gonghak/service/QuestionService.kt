@@ -902,7 +902,8 @@ class QuestionService(
         )
     }
 
-    suspend fun setQuestionHidden(questionId: UUID, isHidden: Boolean, adminUserId: UUID): QuestionDetailDto = dbQuery {
+    suspend fun setQuestionHidden(questionId: UUID, isHidden: Boolean, adminUserId: UUID): QuestionDetailDto =
+        DatabaseFactory.adminTransaction("setQuestionHidden") {
         val exists = QuestionsTable.select { QuestionsTable.id eq questionId }.count() > 0
         if (!exists) throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
@@ -1038,7 +1039,8 @@ class QuestionService(
         return deletedQuestionId
     }
 
-    suspend fun setAnswerHidden(answerId: UUID, isHidden: Boolean): AnswerDto = dbQuery {
+    suspend fun setAnswerHidden(answerId: UUID, isHidden: Boolean): AnswerDto =
+        DatabaseFactory.adminTransaction("setAnswerHidden") {
         setAnswerHiddenInternal(answerId, isHidden)
     }
 
@@ -1078,7 +1080,7 @@ class QuestionService(
     }
 
     suspend fun deleteQuestion(questionId: UUID): Boolean {
-        val savedAttachmentNames = dbQuery {
+        val savedAttachmentNames = DatabaseFactory.adminTransaction("deleteQuestion") {
             val exists = QuestionsTable.select { QuestionsTable.id eq questionId }.count() > 0
             if (!exists) throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
@@ -1165,7 +1167,7 @@ class QuestionService(
     }
 
     suspend fun deleteAnswer(answerId: UUID): UUID {
-        val (questionId, savedNames) = dbQuery {
+        val (questionId, savedNames) = DatabaseFactory.adminTransaction("deleteAnswer") {
             deleteAnswerInternal(answerId)
         }
         attachmentService?.deleteStoredFiles(savedNames)

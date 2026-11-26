@@ -508,7 +508,8 @@ class UserService {
             .map { rowToUserDto(it, includeCourses = false) }
     }
 
-    suspend fun updateAdminNickname(adminUserId: UUID, rawNickname: String?): UserDto = dbQuery {
+    suspend fun updateAdminNickname(adminUserId: UUID, rawNickname: String?): UserDto =
+        DatabaseFactory.adminTransaction("updateAdminNickname") {
         val row = UsersTable.select { UsersTable.id eq adminUserId }.singleOrNull()
             ?: throw IllegalArgumentException("사용자를 찾을 수 없습니다.")
         if (row[UsersTable.isWithdrawn]) {
@@ -532,7 +533,8 @@ class UserService {
         rowToUserDto(updated, includeCourses = true)
     }
 
-    suspend fun sanctionUser(targetUserId: UUID, request: UserSanctionRequest): UserDto = dbQuery {
+    suspend fun sanctionUser(targetUserId: UUID, request: UserSanctionRequest): UserDto =
+        DatabaseFactory.adminTransaction("sanctionUser") {
         val row = UsersTable.select { UsersTable.id eq targetUserId }.singleOrNull()
             ?: throw IllegalArgumentException("대상 사용자를 찾을 수 없습니다.")
 
@@ -597,9 +599,7 @@ class UserService {
     }
 
     private fun loadAliasesMap(): Map<UUID, List<String>> =
-        DepartmentAliasesTable.selectAll()
-            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
-            .groupBy({ it[DepartmentAliasesTable.departmentId] }, { it[DepartmentAliasesTable.aliasName] })
+        DatabaseFactory.loadAllDepartmentAliasesLinkedMap()
 
     suspend fun getDepartments(): List<DepartmentDto> = dbQuery {
         val aliasesByDept = loadAliasesMap()
@@ -636,9 +636,7 @@ class UserService {
     }
 
     private fun loadCollegeAliasesMap(): Map<UUID, List<String>> =
-        CollegeAliasesTable.selectAll()
-            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
-            .groupBy({ it[CollegeAliasesTable.collegeId] }, { it[CollegeAliasesTable.aliasName] })
+        DatabaseFactory.loadAllCollegeAliasesLinkedMap()
 
     private fun validateAliasInputs(
         rawAliases: List<String>,
@@ -680,7 +678,8 @@ class UserService {
             .map { rowToCollegeDto(it, aliasesByCollege) }
     }
 
-    suspend fun createCollege(request: CreateCollegeRequest): CollegeDto = dbQuery {
+    suspend fun createCollege(request: CreateCollegeRequest): CollegeDto =
+        DatabaseFactory.adminTransaction("createCollege") {
         val cleanName = PasswordSecurity.sanitizeInput(request.name).take(100)
         if (cleanName.isBlank()) {
             throw IllegalArgumentException("단과대학명을 입력해 주세요.")
@@ -706,21 +705,18 @@ class UserService {
             it[createdAt] = now
         }
         cleanAliases.forEach { alias ->
-            CollegeAliasesTable.insert {
-                it[id] = UUID.randomUUID()
-                it[collegeId] = newId
-                it[aliasName] = alias
-            }
+            DatabaseFactory.appendCollegeAliasNodeInternal(newId, alias)
         }
         CollegeDto(
             id = newId.toString(),
             name = cleanName,
-            aliases = cleanAliases,
+            aliases = DatabaseFactory.traverseCollegeAliasesInternal(newId),
             createdAt = now.toString()
         )
     }
 
-    suspend fun updateCollege(collegeId: UUID, request: UpdateCollegeRequest): CollegeDto = dbQuery {
+    suspend fun updateCollege(collegeId: UUID, request: UpdateCollegeRequest): CollegeDto =
+        DatabaseFactory.adminTransaction("updateCollege") {
         val row = CollegesTable.select { CollegesTable.id eq collegeId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 단과대학입니다.")
         val oldName = row[CollegesTable.name]
@@ -734,11 +730,8 @@ class UserService {
             if (collision != null && collision.first != collegeId) {
                 throw IllegalArgumentException("이미 다른 단과대학(${collision.second})에서 사용 중인 명칭입니다: $nextName")
             }
-            // If new canonical name was previously our own alias, delete that alias entry first
-            CollegeAliasesTable.deleteWhere {
-                (CollegeAliasesTable.collegeId eq collegeId) and
-                    (CollegeAliasesTable.aliasName.lowerCase() eq nextName.lowercase())
-            }
+            // If new canonical name was previously our own alias, splice-remove that alias node first
+            DatabaseFactory.removeCollegeAliasNodeInternal(collegeId, nextName)
         }
 
         CollegesTable.update({ CollegesTable.id eq collegeId }) {
@@ -762,24 +755,16 @@ class UserService {
 
         if (request.aliases != null) {
             val cleanAliases = validateAliasInputs(request.aliases, nextName, "단과대학", collegeId, ::collegeOwnerLookup)
-            CollegeAliasesTable.deleteWhere { CollegeAliasesTable.collegeId eq collegeId }
-            cleanAliases.forEach { alias ->
-                CollegeAliasesTable.insert {
-                    it[id] = UUID.randomUUID()
-                    it[CollegeAliasesTable.collegeId] = collegeId
-                    it[aliasName] = alias
-                }
-            }
+            DatabaseFactory.replaceCollegeAliasesInternal(collegeId, cleanAliases)
         }
 
         val updatedRow = CollegesTable.select { CollegesTable.id eq collegeId }.single()
-        val aliases = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
-            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[CollegeAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseCollegeAliasesInternal(collegeId)
         rowToCollegeDto(updatedRow, mapOf(collegeId to aliases))
     }
 
-    suspend fun addCollegeAlias(collegeId: UUID, rawAlias: String): CollegeDto = dbQuery {
+    suspend fun addCollegeAlias(collegeId: UUID, rawAlias: String): CollegeDto =
+        DatabaseFactory.adminTransaction("addCollegeAlias") {
         val colRow = CollegesTable.select { CollegesTable.id eq collegeId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 단과대학입니다.")
         val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
@@ -798,18 +783,13 @@ class UserService {
                 else "이미 '${ownerName}'에서 사용 중인 단과대학명/별칭입니다: $cleanAlias"
             )
         }
-        CollegeAliasesTable.insert {
-            it[id] = UUID.randomUUID()
-            it[CollegeAliasesTable.collegeId] = collegeId
-            it[aliasName] = cleanAlias
-        }
-        val aliases = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
-            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[CollegeAliasesTable.aliasName] }
+        DatabaseFactory.appendCollegeAliasNodeInternal(collegeId, cleanAlias)
+        val aliases = DatabaseFactory.traverseCollegeAliasesInternal(collegeId)
         rowToCollegeDto(colRow, mapOf(collegeId to aliases))
     }
 
-    suspend fun renameCollegeAlias(collegeId: UUID, oldAlias: String, newAlias: String): CollegeDto = dbQuery {
+    suspend fun renameCollegeAlias(collegeId: UUID, oldAlias: String, newAlias: String): CollegeDto =
+        DatabaseFactory.adminTransaction("renameCollegeAlias") {
         val colRow = CollegesTable.select { CollegesTable.id eq collegeId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 단과대학입니다.")
         val cleanOld = PasswordSecurity.sanitizeInput(oldAlias).take(100)
@@ -834,33 +814,27 @@ class UserService {
         CollegeAliasesTable.update({ CollegeAliasesTable.id eq existingAliasRow[CollegeAliasesTable.id] }) {
             it[aliasName] = cleanNew
         }
-        val aliases = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
-            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[CollegeAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseCollegeAliasesInternal(collegeId)
         rowToCollegeDto(colRow, mapOf(collegeId to aliases))
     }
 
-    suspend fun removeCollegeAlias(collegeId: UUID, rawAlias: String): CollegeDto = dbQuery {
+    suspend fun removeCollegeAlias(collegeId: UUID, rawAlias: String): CollegeDto =
+        DatabaseFactory.adminTransaction("removeCollegeAlias") {
         val colRow = CollegesTable.select { CollegesTable.id eq collegeId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 단과대학입니다.")
         val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
         if (cleanAlias.isBlank()) {
             throw IllegalArgumentException("삭제할 별칭을 지정해 주세요.")
         }
-        val deletedCount = CollegeAliasesTable.deleteWhere {
-            (CollegeAliasesTable.collegeId eq collegeId) and
-                (CollegeAliasesTable.aliasName.lowerCase() eq cleanAlias.lowercase())
-        }
-        if (deletedCount == 0) {
+        if (!DatabaseFactory.removeCollegeAliasNodeInternal(collegeId, cleanAlias)) {
             throw IllegalArgumentException("해당 단과대학에 등록된 별칭을 찾을 수 없습니다: $cleanAlias")
         }
-        val aliases = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
-            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[CollegeAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseCollegeAliasesInternal(collegeId)
         rowToCollegeDto(colRow, mapOf(collegeId to aliases))
     }
 
-    suspend fun createDepartment(request: CreateDepartmentRequest): DepartmentDto = dbQuery {
+    suspend fun createDepartment(request: CreateDepartmentRequest): DepartmentDto =
+        DatabaseFactory.adminTransaction("createDepartment") {
         val cleanName = PasswordSecurity.sanitizeInput(request.name).take(100)
         val rawCollege = PasswordSecurity.sanitizeInput(request.college).take(100).ifBlank { "광운대학교" }
         val cleanCollege = DatabaseFactory.ensureCollegeExistsInternal(rawCollege)
@@ -892,23 +866,20 @@ class UserService {
         }
 
         cleanAliases.forEach { alias ->
-            DepartmentAliasesTable.insert {
-                it[id] = UUID.randomUUID()
-                it[departmentId] = newId
-                it[aliasName] = alias
-            }
+            DatabaseFactory.appendDepartmentAliasNodeInternal(newId, alias)
         }
 
         DepartmentDto(
             id = newId.toString(),
             name = cleanName,
             college = cleanCollege,
-            aliases = cleanAliases,
+            aliases = DatabaseFactory.traverseDepartmentAliasesInternal(newId),
             createdAt = now.toString()
         )
     }
 
-    suspend fun updateDepartment(departmentId: UUID, request: UpdateDepartmentRequest): DepartmentDto = dbQuery {
+    suspend fun updateDepartment(departmentId: UUID, request: UpdateDepartmentRequest): DepartmentDto =
+        DatabaseFactory.adminTransaction("updateDepartment") {
         val deptRow = DepartmentsTable.select { DepartmentsTable.id eq departmentId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 학과입니다.")
         val oldName = deptRow[DepartmentsTable.name]
@@ -928,10 +899,7 @@ class UserService {
             if (collision != null && collision.first != departmentId) {
                 throw IllegalArgumentException("이미 다른 학과(${collision.second})에서 사용 중인 명칭입니다: $nextName")
             }
-            DepartmentAliasesTable.deleteWhere {
-                (DepartmentAliasesTable.departmentId eq departmentId) and
-                    (DepartmentAliasesTable.aliasName.lowerCase() eq nextName.lowercase())
-            }
+            DatabaseFactory.removeDepartmentAliasNodeInternal(departmentId, nextName)
         }
 
         DepartmentsTable.update({ DepartmentsTable.id eq departmentId }) {
@@ -972,24 +940,16 @@ class UserService {
 
         if (request.aliases != null) {
             val cleanAliases = validateAliasInputs(request.aliases, nextName, "학과", departmentId, ::departmentOwnerLookup)
-            DepartmentAliasesTable.deleteWhere { DepartmentAliasesTable.departmentId eq departmentId }
-            cleanAliases.forEach { alias ->
-                DepartmentAliasesTable.insert {
-                    it[id] = UUID.randomUUID()
-                    it[DepartmentAliasesTable.departmentId] = departmentId
-                    it[aliasName] = alias
-                }
-            }
+            DatabaseFactory.replaceDepartmentAliasesInternal(departmentId, cleanAliases)
         }
 
         val updatedRow = DepartmentsTable.select { DepartmentsTable.id eq departmentId }.single()
-        val aliases = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
-            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[DepartmentAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseDepartmentAliasesInternal(departmentId)
         rowToDepartmentDto(updatedRow, mapOf(departmentId to aliases))
     }
 
-    suspend fun renameDepartmentAlias(departmentId: UUID, oldAlias: String, newAlias: String): DepartmentDto = dbQuery {
+    suspend fun renameDepartmentAlias(departmentId: UUID, oldAlias: String, newAlias: String): DepartmentDto =
+        DatabaseFactory.adminTransaction("renameDepartmentAlias") {
         val deptRow = DepartmentsTable.select { DepartmentsTable.id eq departmentId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 학과입니다.")
         val cleanOld = PasswordSecurity.sanitizeInput(oldAlias).take(100)
@@ -1014,13 +974,12 @@ class UserService {
         DepartmentAliasesTable.update({ DepartmentAliasesTable.id eq existingAliasRow[DepartmentAliasesTable.id] }) {
             it[aliasName] = cleanNew
         }
-        val aliases = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
-            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[DepartmentAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseDepartmentAliasesInternal(departmentId)
         rowToDepartmentDto(deptRow, mapOf(departmentId to aliases))
     }
 
-    suspend fun addDepartmentAlias(departmentId: UUID, rawAlias: String): DepartmentDto = dbQuery {
+    suspend fun addDepartmentAlias(departmentId: UUID, rawAlias: String): DepartmentDto =
+        DatabaseFactory.adminTransaction("addDepartmentAlias") {
         val deptRow = DepartmentsTable.select { DepartmentsTable.id eq departmentId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 학과입니다.")
         val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
@@ -1041,35 +1000,24 @@ class UserService {
             }
         }
 
-        DepartmentAliasesTable.insert {
-            it[id] = UUID.randomUUID()
-            it[DepartmentAliasesTable.departmentId] = departmentId
-            it[aliasName] = cleanAlias
-        }
+        DatabaseFactory.appendDepartmentAliasNodeInternal(departmentId, cleanAlias)
 
-        val aliases = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
-            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[DepartmentAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseDepartmentAliasesInternal(departmentId)
         rowToDepartmentDto(deptRow, mapOf(departmentId to aliases))
     }
 
-    suspend fun removeDepartmentAlias(departmentId: UUID, rawAlias: String): DepartmentDto = dbQuery {
+    suspend fun removeDepartmentAlias(departmentId: UUID, rawAlias: String): DepartmentDto =
+        DatabaseFactory.adminTransaction("removeDepartmentAlias") {
         val deptRow = DepartmentsTable.select { DepartmentsTable.id eq departmentId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 학과입니다.")
         val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
         if (cleanAlias.isBlank()) {
             throw IllegalArgumentException("삭제할 별칭을 지정해 주세요.")
         }
-        val deletedCount = DepartmentAliasesTable.deleteWhere {
-            (DepartmentAliasesTable.departmentId eq departmentId) and
-                (DepartmentAliasesTable.aliasName.lowerCase() eq cleanAlias.lowercase())
-        }
-        if (deletedCount == 0) {
+        if (!DatabaseFactory.removeDepartmentAliasNodeInternal(departmentId, cleanAlias)) {
             throw IllegalArgumentException("해당 학과에 등록된 별칭을 찾을 수 없습니다: $cleanAlias")
         }
-        val aliases = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
-            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
-            .map { it[DepartmentAliasesTable.aliasName] }
+        val aliases = DatabaseFactory.traverseDepartmentAliasesInternal(departmentId)
         rowToDepartmentDto(deptRow, mapOf(departmentId to aliases))
     }
 
@@ -1332,7 +1280,8 @@ class UserService {
         return visited
     }
 
-    suspend fun linkCourse(courseId: UUID, prevCourseIdRaw: String?): CourseDto = dbQueryWithRetry {
+    suspend fun linkCourse(courseId: UUID, prevCourseIdRaw: String?): CourseDto =
+        DatabaseFactory.adminTransaction("linkCourse") {
         val exists = CoursesTable.select { CoursesTable.id eq courseId }.count() > 0
         if (!exists) throw IllegalArgumentException("존재하지 않는 과목입니다.")
         val cleanPrev = prevCourseIdRaw?.trim().orEmpty()
@@ -1346,7 +1295,8 @@ class UserService {
         getCourseByIdInternal(courseId)!!
     }
 
-    suspend fun rolloverSemester(request: SemesterRolloverRequest): SemesterRolloverResultDto = dbQueryWithRetry {
+    suspend fun rolloverSemester(request: SemesterRolloverRequest): SemesterRolloverResultDto =
+        DatabaseFactory.adminTransaction("rolloverSemester") {
         val rawTarget = PasswordSecurity.sanitizeInput(request.targetSemester).trim()
         val parsedTarget = SemesterUtils.parseOrNull(rawTarget)
             ?: throw IllegalArgumentException("올바른 학기 형식을 입력해 주세요. (예: 2027-1, 2026-여름, 2026-2, 2026-겨울)")
@@ -1464,7 +1414,7 @@ class UserService {
         overrideSemester: String? = null,
         autoLinkPrevSemester: Boolean = true,
         setAsCurrentSemester: Boolean = false
-    ): ExcelCourseImportResultDto = dbQueryWithRetry {
+    ): ExcelCourseImportResultDto = DatabaseFactory.adminTransaction("importCoursesFromExcel") {
         val parsed = ExcelCourseImporter.parseXlsx(fileBytes)
         val fallbackSem = getCurrentSemesterInternal()
         val targetSemester = if (!overrideSemester.isNullOrBlank()) {
@@ -1649,7 +1599,8 @@ class UserService {
         )
     }
 
-    suspend fun createCourse(request: CreateCourseRequest): CourseDto = dbQuery {
+    suspend fun createCourse(request: CreateCourseRequest): CourseDto =
+        DatabaseFactory.adminTransaction("createCourse") {
         val cleanName = PasswordSecurity.sanitizeInput(request.name).take(100)
         if (cleanName.isBlank()) {
             throw IllegalArgumentException("과목명을 입력해 주세요.")
@@ -1679,7 +1630,7 @@ class UserService {
             it[college] = finalCollege
             it[department] = finalDept
             it[major] = PasswordSecurity.sanitizeInput(request.major).take(100)
-            it[completionType] = PasswordSecurity.sanitizeInput(request.completionType).take(50).ifBlank { "전선" }
+            it[completionType] = PasswordSecurity.sanitizeInput(request.completionType).take(50).ifBlank { "전공선택" }
             it[credit] = request.credit.coerceIn(1, 6)
         }
 
@@ -1707,9 +1658,11 @@ class UserService {
         getCourseByIdInternal(newCourseId)!!
     }
 
-    suspend fun updateCourse(courseId: UUID, request: UpdateCourseRequest): CourseDto = dbQuery {
+    suspend fun updateCourse(courseId: UUID, request: UpdateCourseRequest): CourseDto =
+        DatabaseFactory.adminTransaction("updateCourse") {
         val existing = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+        val oldName = existing[CoursesTable.name]
 
         val nextName = request.name?.let { PasswordSecurity.sanitizeInput(it).take(100) } ?: existing[CoursesTable.name]
         if (nextName.isBlank()) {
@@ -1751,7 +1704,7 @@ class UserService {
 
         val nextMajor = request.major?.let { PasswordSecurity.sanitizeInput(it).take(100) } ?: existing[CoursesTable.major]
         val nextCompletionType = request.completionType?.let {
-            PasswordSecurity.sanitizeInput(it).take(50).ifBlank { "전선" }
+            PasswordSecurity.sanitizeInput(it).take(50).ifBlank { "전공선택" }
         } ?: existing[CoursesTable.completionType]
         val nextCredit = request.credit?.coerceIn(1, 6) ?: existing[CoursesTable.credit]
 
@@ -1766,6 +1719,20 @@ class UserService {
             it[credit] = nextCredit
         }
 
+        if (!nextName.equals(oldName, ignoreCase = true)) {
+            DatabaseFactory.removeCourseAliasNodeInternal(courseId, nextName)
+            if (request.keepOldNameAsAlias) {
+                DatabaseFactory.ensureCourseAliasInternal(courseId, oldName)
+            }
+        }
+        if (request.aliases != null) {
+            val cleanAliases = request.aliases
+                .map { PasswordSecurity.sanitizeInput(it).take(100) }
+                .filter { it.isNotBlank() && !it.equals(nextName, ignoreCase = true) }
+                .distinctBy { it.lowercase() }
+            DatabaseFactory.replaceCourseAliasesInternal(courseId, cleanAliases)
+        }
+
         if (request.unlinkPrevCourse) {
             unlinkPrevCourseInternal(courseId)
         } else if (!request.prevCourseId.isNullOrBlank()) {
@@ -1777,7 +1744,78 @@ class UserService {
         getCourseByIdInternal(courseId)!!
     }
 
-    suspend fun deleteCourse(courseId: UUID): Pair<Int, List<String>> = dbQuery {
+    suspend fun addCourseAlias(courseId: UUID, rawAlias: String): CourseDto =
+        DatabaseFactory.adminTransaction("addCourseAlias") {
+            val courseRow = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
+                ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+            val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
+            if (cleanAlias.isBlank()) {
+                throw IllegalArgumentException("등록할 과목 별칭을 입력해 주세요.")
+            }
+            if (cleanAlias.equals(courseRow[CoursesTable.name], ignoreCase = true)) {
+                throw IllegalArgumentException("현재 과목명과 동일한 이름은 별칭으로 등록할 수 없습니다.")
+            }
+            val exists = CourseAliasesTable.select {
+                (CourseAliasesTable.courseId eq courseId) and
+                    (CourseAliasesTable.aliasName.lowerCase() eq cleanAlias.lowercase())
+            }.count() > 0L
+            if (exists) {
+                throw IllegalArgumentException("이미 등록된 과목 별칭입니다: $cleanAlias")
+            }
+            val currentCount = CourseAliasesTable.select { CourseAliasesTable.courseId eq courseId }.count()
+            if (currentCount >= 50L) {
+                throw IllegalArgumentException("과목 별칭은 최대 50개까지 등록할 수 있습니다.")
+            }
+            DatabaseFactory.appendCourseAliasNodeInternal(courseId, cleanAlias)
+            getCourseByIdInternal(courseId)!!
+        }
+
+    suspend fun renameCourseAlias(courseId: UUID, oldAlias: String, newAlias: String): CourseDto =
+        DatabaseFactory.adminTransaction("renameCourseAlias") {
+            val courseRow = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
+                ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+            val cleanOld = PasswordSecurity.sanitizeInput(oldAlias).take(100)
+            val cleanNew = PasswordSecurity.sanitizeInput(newAlias).take(100)
+            if (cleanOld.isBlank() || cleanNew.isBlank()) {
+                throw IllegalArgumentException("기존 별칭과 새 별칭을 모두 입력해 주세요.")
+            }
+            if (cleanNew.equals(courseRow[CoursesTable.name], ignoreCase = true)) {
+                throw IllegalArgumentException("현재 과목명과 동일한 이름은 별칭으로 변경할 수 없습니다.")
+            }
+            val existingRow = CourseAliasesTable.select {
+                (CourseAliasesTable.courseId eq courseId) and
+                    (CourseAliasesTable.aliasName.lowerCase() eq cleanOld.lowercase())
+            }.firstOrNull() ?: throw IllegalArgumentException("변경할 기존 별칭을 찾을 수 없습니다: $cleanOld")
+
+            val dup = CourseAliasesTable.select {
+                (CourseAliasesTable.courseId eq courseId) and
+                    (CourseAliasesTable.aliasName.lowerCase() eq cleanNew.lowercase())
+            }.firstOrNull()
+            if (dup != null && dup[CourseAliasesTable.id] != existingRow[CourseAliasesTable.id]) {
+                throw IllegalArgumentException("이미 등록된 과목 별칭입니다: $cleanNew")
+            }
+            CourseAliasesTable.update({ CourseAliasesTable.id eq existingRow[CourseAliasesTable.id] }) {
+                it[aliasName] = cleanNew
+            }
+            getCourseByIdInternal(courseId)!!
+        }
+
+    suspend fun removeCourseAlias(courseId: UUID, rawAlias: String): CourseDto =
+        DatabaseFactory.adminTransaction("removeCourseAlias") {
+            CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
+                ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+            val cleanAlias = PasswordSecurity.sanitizeInput(rawAlias).take(100)
+            if (cleanAlias.isBlank()) {
+                throw IllegalArgumentException("삭제할 별칭을 지정해 주세요.")
+            }
+            if (!DatabaseFactory.removeCourseAliasNodeInternal(courseId, cleanAlias)) {
+                throw IllegalArgumentException("해당 과목에 등록된 별칭을 찾을 수 없습니다: $cleanAlias")
+            }
+            getCourseByIdInternal(courseId)!!
+        }
+
+    suspend fun deleteCourse(courseId: UUID): Pair<Int, List<String>> =
+        DatabaseFactory.adminTransaction("deleteCourse") {
         val existing = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
 
@@ -1822,6 +1860,7 @@ class UserService {
         ProfessorCategorySettingsTable.deleteWhere { ProfessorCategorySettingsTable.courseId eq courseId }
         EnrollmentsTable.deleteWhere { EnrollmentsTable.courseId eq courseId }
         CourseProfessorsTable.deleteWhere { CourseProfessorsTable.courseId eq courseId }
+        CourseAliasesTable.deleteWhere { CourseAliasesTable.courseId eq courseId }
         CoursesTable.deleteWhere { CoursesTable.id eq courseId }
 
         questionIds.size to attachmentNames
@@ -2444,6 +2483,14 @@ class UserService {
                     emptyList()
                 }
 
+                val matchedAliasCourseIds = if (q.isNotEmpty()) {
+                    CourseAliasesTable.select { CourseAliasesTable.aliasName.lowerCase() like "%$q%" }
+                        .map { it[CourseAliasesTable.courseId] }
+                        .distinct()
+                } else {
+                    emptyList()
+                }
+
                 val aliasMatchedDeptNames = DepartmentAliasesTable.innerJoin(
                     DepartmentsTable,
                     { DepartmentAliasesTable.departmentId },
@@ -2501,8 +2548,13 @@ class UserService {
                 } else {
                     null
                 }
+                val courseAliasCondition: Op<Boolean>? = if (matchedAliasCourseIds.isNotEmpty()) {
+                    CoursesTable.id inList matchedAliasCourseIds
+                } else {
+                    null
+                }
 
-                listOfNotNull(textCondition, profCondition)
+                listOfNotNull(textCondition, profCondition, courseAliasCondition)
                     .reduceOrNull { acc, op -> acc or op }
                     ?.let { conditions.add(it) }
             }
@@ -2552,6 +2604,7 @@ class UserService {
         } else {
             emptyMap()
         }
+        val aliasesByCourseId = DatabaseFactory.loadCourseAliasesLinkedMap(pageCourseIds)
 
         val defaultCategories = listOf(QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT, QuestionCategory.LECTURE)
         val courseDtos = rows.map { row ->
@@ -2584,7 +2637,8 @@ class UserService {
                 prevCourseSemester = prevMeta?.second,
                 nextCourseId = nextId?.toString(),
                 nextCourseName = nextMeta?.first,
-                nextCourseSemester = nextMeta?.second
+                nextCourseSemester = nextMeta?.second,
+                aliases = aliasesByCourseId[cId].orEmpty()
             )
         }
 
@@ -2628,7 +2682,8 @@ class UserService {
             prevCourseSemester = linkedMeta.prevSemester,
             nextCourseId = linkedMeta.nextId,
             nextCourseName = linkedMeta.nextName,
-            nextCourseSemester = linkedMeta.nextSemester
+            nextCourseSemester = linkedMeta.nextSemester,
+            aliases = DatabaseFactory.traverseCourseAliasesInternal(courseId)
         )
     }
 

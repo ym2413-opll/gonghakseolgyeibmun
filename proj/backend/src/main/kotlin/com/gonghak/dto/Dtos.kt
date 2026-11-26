@@ -232,7 +232,8 @@ data class CourseDto(
     val prevCourseSemester: String? = null,
     val nextCourseId: String? = null,
     val nextCourseName: String? = null,
-    val nextCourseSemester: String? = null
+    val nextCourseSemester: String? = null,
+    val aliases: List<String> = emptyList()
 )
 
 @Serializable
@@ -321,7 +322,9 @@ data class UpdateCourseRequest(
     val completionType: String? = null,
     val credit: Int? = null,
     val prevCourseId: String? = null,
-    val unlinkPrevCourse: Boolean = false
+    val unlinkPrevCourse: Boolean = false,
+    val keepOldNameAsAlias: Boolean = false,
+    val aliases: List<String>? = null
 )
 
 @Serializable

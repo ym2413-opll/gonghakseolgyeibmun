@@ -145,6 +145,9 @@ export function filterCoursesList(
     const prof = String(c.profName || c.assignedProfessorName || '').toLowerCase();
     const prevName = String(c.prevCourseName || '').toLowerCase();
     const nextName = String(c.nextCourseName || '').toLowerCase();
+    const courseAliasMatch = Array.isArray(c.aliases)
+      ? c.aliases.some((alias) => String(alias || '').toLowerCase().includes(kw))
+      : false;
     const sectionMatch = Array.isArray(c.professors)
       ? c.professors.some(
           (p) =>
@@ -164,6 +167,7 @@ export function filterCoursesList(
       prof.includes(kw) ||
       prevName.includes(kw) ||
       nextName.includes(kw) ||
+      courseAliasMatch ||
       sectionMatch
     );
   });

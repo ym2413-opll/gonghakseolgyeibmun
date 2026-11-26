@@ -15,7 +15,6 @@ import {
 } from '../../utils/courseLineage';
 import {
   buildSemesterOptions,
-  compareSemesters,
   formatSemesterLabel,
   isNonCurrentSemesterThread,
   normalizeSemester,
@@ -689,8 +688,44 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       scopeType: inferredScope,
       college: inferredCollege,
       department: inferredDept,
-      prevCourseId: course.prevCourseId || ''
+      prevCourseId: course.prevCourseId || '',
+      keepOldNameAsAlias: true,
+      aliases: Array.isArray(course.aliases) ? course.aliases : [],
+      newAliasInput: ''
     });
+  };
+
+  const handleAddCourseAlias = async () => {
+    if (!editingCourse?.id) return;
+    const cleanAlias = String(editingCourse.newAliasInput || '').trim();
+    if (!cleanAlias) {
+      notifyError('추가할 과목 별칭을 입력해 주세요.');
+      return;
+    }
+    try {
+      const updated = await api.addCourseAlias(editingCourse.id, cleanAlias);
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: updated?.aliases || [...(prev.aliases || []), cleanAlias], newAliasInput: '' } : prev
+      );
+      await refreshCatalog();
+      notifySuccess(`과목 별칭 '${cleanAlias}'이(가) 추가되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 별칭 추가에 실패했습니다.');
+    }
+  };
+
+  const handleRemoveCourseAlias = async (aliasName) => {
+    if (!editingCourse?.id || !aliasName) return;
+    try {
+      const updated = await api.removeCourseAlias(editingCourse.id, aliasName);
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: updated?.aliases || (prev.aliases || []).filter((a) => a !== aliasName) } : prev
+      );
+      await refreshCatalog();
+      notifySuccess(`과목 별칭 '${aliasName}'이(가) 삭제되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 별칭 삭제에 실패했습니다.');
+    }
   };
 
   const handleSaveEditedCourse = async (e) => {
@@ -718,7 +753,8 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
         college: resolvedCollege,
         department: resolvedDepartment,
         prevCourseId: cleanPrev || null,
-        unlinkPrevCourse: !cleanPrev
+        unlinkPrevCourse: !cleanPrev,
+        keepOldNameAsAlias: Boolean(editingCourse.keepOldNameAsAlias)
       });
       setEditingCourse(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
@@ -1372,7 +1408,8 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                           c.profName,
                           profNames,
                           c.prevCourseName,
-                          c.nextCourseName
+                          c.nextCourseName,
+                          ...(Array.isArray(c.aliases) ? c.aliases : [])
                         ]
                           .filter(Boolean)
                           .some((field) => String(field).toLowerCase().includes(trimmedQ));
@@ -1588,6 +1625,69 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                               onChangeCollege={(val) => setEditingCourse((prev) => ({ ...prev, college: val }))}
                               onChangeDepartment={(val) => setEditingCourse((prev) => ({ ...prev, department: val }))}
                             />
+                          </div>
+                          <div className="course-lineage-chain-box">
+                            <div className="course-lineage-chain-title">
+                              <Link2 size={12} />
+                              <span>과목 별칭 (연결 리스트)</span>
+                            </div>
+                            <label className="admin-check-inline" style={{ marginBottom: 6 }}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingCourse.keepOldNameAsAlias)}
+                                onChange={(e) =>
+                                  setEditingCourse((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))
+                                }
+                              />
+                              <span>과목명 변경 시 기존 명칭을 별칭 연결 리스트에 자동 보존</span>
+                            </label>
+                            {(editingCourse.aliases || []).length > 0 && (
+                              <div className="course-lineage-chain-nodes" style={{ marginBottom: 6 }}>
+                                {editingCourse.aliases.map((al, idx) => (
+                                  <React.Fragment key={al}>
+                                    {idx > 0 && <span className="course-lineage-arrow">→</span>}
+                                    <span className="course-lineage-node" style={{ cursor: 'default' }}>
+                                      <span>{al}</span>
+                                      <button
+                                        type="button"
+                                        className="chip-remove-btn"
+                                        onClick={() => handleRemoveCourseAlias(al)}
+                                        aria-label={`별칭 ${al} 삭제`}
+                                        title={`별칭 ${al} 삭제`}
+                                      >
+                                        <X size={11} />
+                                      </button>
+                                    </span>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <input
+                                type="text"
+                                className="form-input"
+                                style={{ flex: 1 }}
+                                placeholder="추가할 구 과목명/별칭 입력..."
+                                value={editingCourse.newAliasInput || ''}
+                                onChange={(e) =>
+                                  setEditingCourse((prev) => ({ ...prev, newAliasInput: e.target.value }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddCourseAlias();
+                                  }
+                                }}
+                                maxLength={100}
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-xs"
+                                onClick={handleAddCourseAlias}
+                              >
+                                별칭 추가
+                              </button>
+                            </div>
                           </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <button type="submit" className="btn btn-primary btn-xs">저장</button>

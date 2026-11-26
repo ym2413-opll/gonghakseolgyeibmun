@@ -548,6 +548,7 @@ function mapCourseDto(c) {
     nextCourseId: c.nextCourseId || null,
     nextCourseName: c.nextCourseName || null,
     nextCourseSemester: c.nextCourseSemester || null,
+    aliases: Array.isArray(c.aliases) ? c.aliases : [],
     profId: resolvedProfId,
     profName: resolvedProfName,
     assignedProfessorId: resolvedProfId,
@@ -1681,6 +1682,43 @@ export const api = {
       'PUT',
       { prevCourseId: prevCourseId || null },
       '학기 간 강의 연동 설정에 실패했습니다.'
+    );
+    return data ? mapCourseDto(data) : data;
+  },
+
+  async addCourseAlias(courseId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('등록할 과목 별칭을 입력해 주세요.');
+    const data = await requestCatalogAdmin(
+      `/admin/courses/${encodeURIComponent(courseId)}/aliases`,
+      'POST',
+      { alias: cleanAlias },
+      '과목 별칭 추가에 실패했습니다.'
+    );
+    return data ? mapCourseDto(data) : data;
+  },
+
+  async renameCourseAlias(courseId, oldAlias, newAlias) {
+    const cleanOld = String(oldAlias || '').trim();
+    const cleanNew = String(newAlias || '').trim();
+    if (!cleanOld || !cleanNew) throw new Error('기존 별칭과 새 별칭을 모두 입력해 주세요.');
+    const data = await requestCatalogAdmin(
+      `/admin/courses/${encodeURIComponent(courseId)}/aliases`,
+      'PUT',
+      { oldAlias: cleanOld, newAlias: cleanNew },
+      '과목 별칭 변경에 실패했습니다.'
+    );
+    return data ? mapCourseDto(data) : data;
+  },
+
+  async removeCourseAlias(courseId, alias) {
+    const cleanAlias = String(alias || '').trim();
+    if (!cleanAlias) throw new Error('삭제할 과목 별칭을 지정해 주세요.');
+    const data = await requestCatalogAdmin(
+      `/admin/courses/${encodeURIComponent(courseId)}/aliases?alias=${encodeURIComponent(cleanAlias)}`,
+      'DELETE',
+      null,
+      '과목 별칭 삭제에 실패했습니다.'
     );
     return data ? mapCourseDto(data) : data;
   },

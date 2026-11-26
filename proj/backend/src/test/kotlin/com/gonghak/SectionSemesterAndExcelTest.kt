@@ -453,6 +453,51 @@ class SectionSemesterAndExcelTest {
         assertEquals("I030-3-8888", registeredProf.courses[0].code)
         assertEquals("2026-겨울", registeredProf.courses[0].semester)
         assertEquals("01분반", registeredProf.courses[0].assignedSection)
+
+        // 9. Doubly-linked list aliases for courses (append -> mid-chain splice remove -> search by alias)
+        val a1 = client.post("/api/admin/courses/${spring2027Course.id}/aliases") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(DepartmentAliasRequest(alias = "구_공학설계1"))
+        }
+        assertEquals(HttpStatusCode.Created, a1.status)
+        val a2 = client.post("/api/admin/courses/${spring2027Course.id}/aliases") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(DepartmentAliasRequest(alias = "구_공학설계2"))
+        }
+        assertEquals(HttpStatusCode.Created, a2.status)
+        val a3 = client.post("/api/admin/courses/${spring2027Course.id}/aliases") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(DepartmentAliasRequest(alias = "구_공학설계3"))
+        }
+        assertEquals(HttpStatusCode.Created, a3.status)
+        assertEquals(listOf("구_공학설계1", "구_공학설계2", "구_공학설계3"), a3.body<ApiResponse<CourseDto>>().data!!.aliases)
+
+        // Remove middle alias node -> doubly-linked list splices 1 <-> 3 cleanly
+        val rmMid = client.delete("/api/admin/courses/${spring2027Course.id}/aliases?alias=${java.net.URLEncoder.encode("구_공학설계2", "UTF-8")}") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+        }
+        assertEquals(HttpStatusCode.OK, rmMid.status)
+        assertEquals(listOf("구_공학설계1", "구_공학설계3"), rmMid.body<ApiResponse<CourseDto>>().data!!.aliases)
+
+        // 10. Admin transaction atomicity: failed updateCourse (invalid prevCourseId causing cycle) must roll back name change too
+        val failTxRes = client.put("/api/admin/courses/$demoCourseId") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(
+                UpdateCourseRequest(
+                    name = "트랜잭션롤백테스트명칭",
+                    prevCourseId = spring2027Course.id // triggers cycle -> IllegalArgumentException inside adminTransaction
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, failTxRes.status)
+        val afterFailName = transaction {
+            CoursesTable.select { CoursesTable.id eq UUID.fromString(demoCourseId) }.single()[CoursesTable.name]
+        }
+        assertTrue(afterFailName != "트랜잭션롤백테스트명칭", "Admin transaction must roll back course rename when subsequent link fails")
         } finally {
             // Restore shared demo state so subsequent test classes see default 2026-2, original emails & ALL_SECTIONS
             transaction {

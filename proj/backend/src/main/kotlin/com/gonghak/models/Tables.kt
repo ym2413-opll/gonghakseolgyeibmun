@@ -31,6 +31,8 @@ object CollegesTable : UUIDTable("colleges") {
 object CollegeAliasesTable : UUIDTable("college_aliases") {
     val collegeId = uuid("college_id").references(CollegesTable.id)
     val aliasName = varchar("alias_name", 100).uniqueIndex()
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -43,6 +45,8 @@ object DepartmentsTable : UUIDTable("departments") {
 object DepartmentAliasesTable : UUIDTable("department_aliases") {
     val departmentId = uuid("department_id").references(DepartmentsTable.id)
     val aliasName = varchar("alias_name", 100).uniqueIndex()
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -57,6 +61,14 @@ object CoursesTable : UUIDTable("courses") {
     val credit = integer("credit").default(3)
     val prevCourseId = uuid("prev_course_id").nullable()
     val nextCourseId = uuid("next_course_id").nullable()
+}
+
+object CourseAliasesTable : UUIDTable("course_aliases") {
+    val courseId = uuid("course_id").references(CoursesTable.id)
+    val aliasName = varchar("alias_name", 100)
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
 object CourseProfessorsTable : UUIDTable("course_professors") {

@@ -215,6 +215,33 @@ fun Route.adminRoutes(
             }
         }
 
+        post("/courses/{id}/aliases") {
+            call.requireAdmin() ?: return@post
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@post
+            val request = call.receive<DepartmentAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.Created, "과목 별칭이 추가되었습니다.") {
+                userService.addCourseAlias(courseUuid, request.alias)
+            }
+        }
+
+        put("/courses/{id}/aliases") {
+            call.requireAdmin() ?: return@put
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@put
+            val request = call.receive<RenameAliasRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "과목 별칭이 변경되었습니다.") {
+                userService.renameCourseAlias(courseUuid, request.oldAlias, request.newAlias)
+            }
+        }
+
+        delete("/courses/{id}/aliases") {
+            call.requireAdmin() ?: return@delete
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@delete
+            val aliasParam = call.request.queryParameters["alias"].orEmpty()
+            call.respondServiceCall(HttpStatusCode.OK, "과목 별칭이 삭제되었습니다.") {
+                userService.removeCourseAlias(courseUuid, aliasParam)
+            }
+        }
+
         put("/courses/{id}/link") {
             call.requireAdmin() ?: return@put
             val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@put

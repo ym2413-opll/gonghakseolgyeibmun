@@ -62,6 +62,7 @@ object DatabaseFactory {
             DepartmentsTable,
             DepartmentAliasesTable,
             CoursesTable,
+            CourseAliasesTable,
             CourseProfessorsTable,
             EnrollmentsTable,
             ProfessorCategorySettingsTable,
@@ -87,7 +88,7 @@ object DatabaseFactory {
         // 2. Backfill legacy nullable timestamps and token_version only when the column already exists
         val timestampTables = listOf(
             "users", "colleges", "college_aliases", "departments", "department_aliases",
-            "questions", "answers", "notifications", "attachments", "email_logs"
+            "course_aliases", "questions", "answers", "notifications", "attachments", "email_logs"
         )
         for (tableName in timestampTables) {
             runCatching {
@@ -263,6 +264,323 @@ object DatabaseFactory {
         throw lastError!!
     }
 
+    /**
+     * Explicit ACID transaction wrapper for all administrative write operations.
+     * Enforces REPEATABLE_READ isolation, retries transient concurrency/serialization failures,
+     * and guarantees full rollback on any exception.
+     */
+    suspend fun <T> adminTransaction(
+        operationName: String,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        maxAttempts: Int = 3,
+        block: suspend () -> T
+    ): T {
+        var lastError: Throwable? = null
+        for (attempt in 1..maxAttempts) {
+            try {
+                return newSuspendedTransaction(
+                    context = dispatcher,
+                    db = activeDatabase,
+                    transactionIsolation = java.sql.Connection.TRANSACTION_REPEATABLE_READ
+                ) {
+                    block()
+                }
+            } catch (ex: Throwable) {
+                if (attempt < maxAttempts && isTransientConcurrencyFailure(ex)) {
+                    logger.warn("Admin transaction '{}' transient failure (attempt {}/{}), retrying: {}", operationName, attempt, maxAttempts, ex.message)
+                    lastError = ex
+                    continue
+                }
+                if (ex !is IllegalArgumentException && ex !is IllegalStateException) {
+                    logger.error("Admin transaction '{}' rolled back due to error: {}", operationName, ex.message)
+                }
+                throw ex
+            }
+        }
+        throw lastError!!
+    }
+
+    // =========================================================================
+    // Doubly-Linked List Alias Helpers (Colleges, Departments, Courses)
+    // =========================================================================
+
+    private data class AliasNodeRecord(
+        val id: UUID,
+        val aliasName: String,
+        val prevId: UUID?,
+        val nextId: UUID?
+    )
+
+    private fun traverseAliasNodes(nodes: List<AliasNodeRecord>): List<String> {
+        if (nodes.isEmpty()) return emptyList()
+        val byId = nodes.associateBy { it.id }
+        val visited = LinkedHashSet<UUID>()
+        val ordered = mutableListOf<String>()
+
+        // Walk from all head nodes (prevId == null or prevId not in this entity's node set)
+        val heads = nodes.filter { it.prevId == null || it.prevId !in byId }
+        for (head in heads) {
+            var cur: AliasNodeRecord? = head
+            while (cur != null && visited.add(cur.id)) {
+                ordered.add(cur.aliasName)
+                cur = cur.nextId?.let { byId[it] }
+            }
+        }
+        // Append any remaining unvisited nodes (e.g. legacy/cyclic fallback)
+        for (node in nodes) {
+            if (visited.add(node.id)) {
+                ordered.add(node.aliasName)
+            }
+        }
+        return ordered
+    }
+
+    internal fun traverseCollegeAliasesInternal(collegeId: UUID): List<String> {
+        val nodes = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
+            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
+            .map {
+                AliasNodeRecord(
+                    id = it[CollegeAliasesTable.id].value,
+                    aliasName = it[CollegeAliasesTable.aliasName],
+                    prevId = it[CollegeAliasesTable.prevAliasId],
+                    nextId = it[CollegeAliasesTable.nextAliasId]
+                )
+            }
+        return traverseAliasNodes(nodes)
+    }
+
+    internal fun loadAllCollegeAliasesLinkedMap(): Map<UUID, List<String>> =
+        CollegeAliasesTable.selectAll()
+            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC, CollegeAliasesTable.aliasName to SortOrder.ASC)
+            .groupBy { it[CollegeAliasesTable.collegeId] }
+            .mapValues { (_, rows) ->
+                traverseAliasNodes(
+                    rows.map {
+                        AliasNodeRecord(
+                            id = it[CollegeAliasesTable.id].value,
+                            aliasName = it[CollegeAliasesTable.aliasName],
+                            prevId = it[CollegeAliasesTable.prevAliasId],
+                            nextId = it[CollegeAliasesTable.nextAliasId]
+                        )
+                    }
+                )
+            }
+
+    internal fun appendCollegeAliasNodeInternal(collegeId: UUID, aliasName: String): UUID {
+        val existingRows = CollegeAliasesTable.select { CollegeAliasesTable.collegeId eq collegeId }
+            .orderBy(CollegeAliasesTable.createdAt to SortOrder.ASC)
+            .toList()
+        val tailRow = existingRows.lastOrNull { it[CollegeAliasesTable.nextAliasId] == null }
+            ?: existingRows.lastOrNull()
+        val tailId = tailRow?.get(CollegeAliasesTable.id)?.value
+        val newId = UUID.randomUUID()
+        CollegeAliasesTable.insert {
+            it[id] = newId
+            it[CollegeAliasesTable.collegeId] = collegeId
+            it[CollegeAliasesTable.aliasName] = aliasName
+            it[prevAliasId] = tailId
+            it[nextAliasId] = null
+        }
+        if (tailId != null) {
+            CollegeAliasesTable.update({ CollegeAliasesTable.id eq tailId }) {
+                it[nextAliasId] = newId
+            }
+        }
+        return newId
+    }
+
+    internal fun removeCollegeAliasNodeInternal(collegeId: UUID, rawAlias: String): Boolean {
+        val row = CollegeAliasesTable.select {
+            (CollegeAliasesTable.collegeId eq collegeId) and
+                (CollegeAliasesTable.aliasName.lowerCase() eq rawAlias.lowercase())
+        }.firstOrNull() ?: return false
+        val nodeId = row[CollegeAliasesTable.id].value
+        val prevId = row[CollegeAliasesTable.prevAliasId]
+        val nextId = row[CollegeAliasesTable.nextAliasId]
+        if (prevId != null) {
+            CollegeAliasesTable.update({ CollegeAliasesTable.id eq prevId }) { it[nextAliasId] = nextId }
+        }
+        if (nextId != null) {
+            CollegeAliasesTable.update({ CollegeAliasesTable.id eq nextId }) { it[prevAliasId] = prevId }
+        }
+        CollegeAliasesTable.deleteWhere { CollegeAliasesTable.id eq nodeId }
+        return true
+    }
+
+    internal fun replaceCollegeAliasesInternal(collegeId: UUID, aliases: List<String>) {
+        CollegeAliasesTable.deleteWhere { CollegeAliasesTable.collegeId eq collegeId }
+        aliases.forEach { appendCollegeAliasNodeInternal(collegeId, it) }
+    }
+
+    internal fun traverseDepartmentAliasesInternal(departmentId: UUID): List<String> {
+        val nodes = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
+            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
+            .map {
+                AliasNodeRecord(
+                    id = it[DepartmentAliasesTable.id].value,
+                    aliasName = it[DepartmentAliasesTable.aliasName],
+                    prevId = it[DepartmentAliasesTable.prevAliasId],
+                    nextId = it[DepartmentAliasesTable.nextAliasId]
+                )
+            }
+        return traverseAliasNodes(nodes)
+    }
+
+    internal fun loadAllDepartmentAliasesLinkedMap(): Map<UUID, List<String>> =
+        DepartmentAliasesTable.selectAll()
+            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC, DepartmentAliasesTable.aliasName to SortOrder.ASC)
+            .groupBy { it[DepartmentAliasesTable.departmentId] }
+            .mapValues { (_, rows) ->
+                traverseAliasNodes(
+                    rows.map {
+                        AliasNodeRecord(
+                            id = it[DepartmentAliasesTable.id].value,
+                            aliasName = it[DepartmentAliasesTable.aliasName],
+                            prevId = it[DepartmentAliasesTable.prevAliasId],
+                            nextId = it[DepartmentAliasesTable.nextAliasId]
+                        )
+                    }
+                )
+            }
+
+    internal fun appendDepartmentAliasNodeInternal(departmentId: UUID, aliasName: String): UUID {
+        val existingRows = DepartmentAliasesTable.select { DepartmentAliasesTable.departmentId eq departmentId }
+            .orderBy(DepartmentAliasesTable.createdAt to SortOrder.ASC)
+            .toList()
+        val tailRow = existingRows.lastOrNull { it[DepartmentAliasesTable.nextAliasId] == null }
+            ?: existingRows.lastOrNull()
+        val tailId = tailRow?.get(DepartmentAliasesTable.id)?.value
+        val newId = UUID.randomUUID()
+        DepartmentAliasesTable.insert {
+            it[id] = newId
+            it[DepartmentAliasesTable.departmentId] = departmentId
+            it[DepartmentAliasesTable.aliasName] = aliasName
+            it[prevAliasId] = tailId
+            it[nextAliasId] = null
+        }
+        if (tailId != null) {
+            DepartmentAliasesTable.update({ DepartmentAliasesTable.id eq tailId }) {
+                it[nextAliasId] = newId
+            }
+        }
+        return newId
+    }
+
+    internal fun removeDepartmentAliasNodeInternal(departmentId: UUID, rawAlias: String): Boolean {
+        val row = DepartmentAliasesTable.select {
+            (DepartmentAliasesTable.departmentId eq departmentId) and
+                (DepartmentAliasesTable.aliasName.lowerCase() eq rawAlias.lowercase())
+        }.firstOrNull() ?: return false
+        val nodeId = row[DepartmentAliasesTable.id].value
+        val prevId = row[DepartmentAliasesTable.prevAliasId]
+        val nextId = row[DepartmentAliasesTable.nextAliasId]
+        if (prevId != null) {
+            DepartmentAliasesTable.update({ DepartmentAliasesTable.id eq prevId }) { it[nextAliasId] = nextId }
+        }
+        if (nextId != null) {
+            DepartmentAliasesTable.update({ DepartmentAliasesTable.id eq nextId }) { it[prevAliasId] = prevId }
+        }
+        DepartmentAliasesTable.deleteWhere { DepartmentAliasesTable.id eq nodeId }
+        return true
+    }
+
+    internal fun replaceDepartmentAliasesInternal(departmentId: UUID, aliases: List<String>) {
+        DepartmentAliasesTable.deleteWhere { DepartmentAliasesTable.departmentId eq departmentId }
+        aliases.forEach { appendDepartmentAliasNodeInternal(departmentId, it) }
+    }
+
+    internal fun traverseCourseAliasesInternal(courseId: UUID): List<String> {
+        val nodes = CourseAliasesTable.select { CourseAliasesTable.courseId eq courseId }
+            .orderBy(CourseAliasesTable.createdAt to SortOrder.ASC, CourseAliasesTable.aliasName to SortOrder.ASC)
+            .map {
+                AliasNodeRecord(
+                    id = it[CourseAliasesTable.id].value,
+                    aliasName = it[CourseAliasesTable.aliasName],
+                    prevId = it[CourseAliasesTable.prevAliasId],
+                    nextId = it[CourseAliasesTable.nextAliasId]
+                )
+            }
+        return traverseAliasNodes(nodes)
+    }
+
+    internal fun loadCourseAliasesLinkedMap(courseIds: List<UUID>): Map<UUID, List<String>> {
+        if (courseIds.isEmpty()) return emptyMap()
+        return CourseAliasesTable.select { CourseAliasesTable.courseId inList courseIds }
+            .orderBy(CourseAliasesTable.createdAt to SortOrder.ASC, CourseAliasesTable.aliasName to SortOrder.ASC)
+            .groupBy { it[CourseAliasesTable.courseId] }
+            .mapValues { (_, rows) ->
+                traverseAliasNodes(
+                    rows.map {
+                        AliasNodeRecord(
+                            id = it[CourseAliasesTable.id].value,
+                            aliasName = it[CourseAliasesTable.aliasName],
+                            prevId = it[CourseAliasesTable.prevAliasId],
+                            nextId = it[CourseAliasesTable.nextAliasId]
+                        )
+                    }
+                )
+            }
+    }
+
+    internal fun appendCourseAliasNodeInternal(courseId: UUID, aliasName: String): UUID {
+        val existingRows = CourseAliasesTable.select { CourseAliasesTable.courseId eq courseId }
+            .orderBy(CourseAliasesTable.createdAt to SortOrder.ASC)
+            .toList()
+        val tailRow = existingRows.lastOrNull { it[CourseAliasesTable.nextAliasId] == null }
+            ?: existingRows.lastOrNull()
+        val tailId = tailRow?.get(CourseAliasesTable.id)?.value
+        val newId = UUID.randomUUID()
+        CourseAliasesTable.insert {
+            it[id] = newId
+            it[CourseAliasesTable.courseId] = courseId
+            it[CourseAliasesTable.aliasName] = aliasName
+            it[prevAliasId] = tailId
+            it[nextAliasId] = null
+        }
+        if (tailId != null) {
+            CourseAliasesTable.update({ CourseAliasesTable.id eq tailId }) {
+                it[nextAliasId] = newId
+            }
+        }
+        return newId
+    }
+
+    internal fun ensureCourseAliasInternal(courseId: UUID, rawAlias: String) {
+        val cleanAlias = rawAlias.trim()
+        if (cleanAlias.isBlank() || cleanAlias.length > 100) return
+        val lower = cleanAlias.lowercase()
+        val exists = CourseAliasesTable.select {
+            (CourseAliasesTable.courseId eq courseId) and
+                (CourseAliasesTable.aliasName.lowerCase() eq lower)
+        }.count() > 0L
+        if (!exists) {
+            appendCourseAliasNodeInternal(courseId, cleanAlias)
+        }
+    }
+
+    internal fun removeCourseAliasNodeInternal(courseId: UUID, rawAlias: String): Boolean {
+        val row = CourseAliasesTable.select {
+            (CourseAliasesTable.courseId eq courseId) and
+                (CourseAliasesTable.aliasName.lowerCase() eq rawAlias.lowercase())
+        }.firstOrNull() ?: return false
+        val nodeId = row[CourseAliasesTable.id].value
+        val prevId = row[CourseAliasesTable.prevAliasId]
+        val nextId = row[CourseAliasesTable.nextAliasId]
+        if (prevId != null) {
+            CourseAliasesTable.update({ CourseAliasesTable.id eq prevId }) { it[nextAliasId] = nextId }
+        }
+        if (nextId != null) {
+            CourseAliasesTable.update({ CourseAliasesTable.id eq nextId }) { it[prevAliasId] = prevId }
+        }
+        CourseAliasesTable.deleteWhere { CourseAliasesTable.id eq nodeId }
+        return true
+    }
+
+    internal fun replaceCourseAliasesInternal(courseId: UUID, aliases: List<String>) {
+        CourseAliasesTable.deleteWhere { CourseAliasesTable.courseId eq courseId }
+        aliases.forEach { appendCourseAliasNodeInternal(courseId, it) }
+    }
+
     private fun isTransientConcurrencyFailure(ex: Throwable): Boolean {
         var cur: Throwable? = ex
         while (cur != null) {
@@ -342,11 +660,7 @@ object DatabaseFactory {
             CollegeAliasesTable.aliasName.lowerCase() eq lower
         }.count() > 0L
         if (!aliasExists) {
-            CollegeAliasesTable.insert {
-                it[id] = UUID.randomUUID()
-                it[CollegeAliasesTable.collegeId] = collegeId
-                it[aliasName] = cleanAlias
-            }
+            appendCollegeAliasNodeInternal(collegeId, cleanAlias)
         }
     }
 
@@ -455,11 +769,7 @@ object DatabaseFactory {
             DepartmentAliasesTable.aliasName.lowerCase() eq lower
         }.count() > 0L
         if (!aliasExists) {
-            DepartmentAliasesTable.insert {
-                it[id] = UUID.randomUUID()
-                it[DepartmentAliasesTable.departmentId] = departmentId
-                it[aliasName] = cleanAlias
-            }
+            appendDepartmentAliasNodeInternal(departmentId, cleanAlias)
         }
     }
 
