@@ -1372,6 +1372,7 @@ class UserService {
     ): List<UUID> {
         if (inputs.isEmpty()) return emptyList()
         val currentSem = getCurrentSemesterInternal()
+        val allowedSignupSems = SemesterUtils.allowedProfessorSignupSemesters(currentSem).toSet()
         val createdOrAttached = mutableListOf<UUID>()
 
         inputs.take(10).forEach { item ->
@@ -1380,15 +1381,30 @@ class UserService {
 
             val rawCode = PasswordSecurity.sanitizeInput(item.code).take(50).trim()
             val (splitBase, splitSec) = SemesterUtils.splitCourseCodeAndSection(rawCode)
-            val cleanCode = splitBase.ifBlank { "KW-${(1000..9999).random()}" }
+            if (splitBase.isBlank()) {
+                throw IllegalArgumentException("직접 추가하는 강의의 학수번호를 입력해 주세요.")
+            }
+            val cleanCode = splitBase
             val cleanSection = SemesterUtils.normalizeSectionLabel(
-                PasswordSecurity.sanitizeInput(item.section).takeIf { it.isNotBlank() } ?: splitSec ?: "01"
+                PasswordSecurity.sanitizeInput(item.section).takeIf { it.isNotBlank() } ?: splitSec,
+                defaultLabel = "미정"
             )
             val cleanSem = SemesterUtils.normalizeSemester(item.semester, currentSem)
+            if (cleanSem !in allowedSignupSems) {
+                throw IllegalArgumentException("개설 학기는 현재 학기와 바로 다음 학기(계절학기 포함)만 선택할 수 있습니다.")
+            }
             val rawDept = PasswordSecurity.sanitizeInput(item.department).trim().ifBlank { professorDept }
             val rawCollege = PasswordSecurity.sanitizeInput(item.college).trim()
             val (_, finalCollege, finalDept) = resolveCourseOrganizationInternal("DEPARTMENT", rawCollege, rawDept)
-            val cleanCompType = PasswordSecurity.sanitizeInput(item.completionType).take(50).ifBlank { "전선" }
+            val rawCompType = PasswordSecurity.sanitizeInput(item.completionType).take(50).trim()
+            val cleanCompType = when (rawCompType) {
+                "", "전선" -> "전공선택"
+                "전필" -> "전공필수"
+                "교선" -> "교양선택"
+                "교필" -> "교양필수"
+                "기필" -> "기초필수"
+                else -> rawCompType
+            }
             val cleanCredit = item.credit.coerceIn(1, 6)
             val cleanSchedule = PasswordSecurity.sanitizeInput(item.schedule).take(200)
 

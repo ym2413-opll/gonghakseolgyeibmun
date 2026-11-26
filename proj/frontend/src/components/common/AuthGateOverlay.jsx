@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
-import { buildSemesterOptions, formatSemesterLabel, normalizeSemester } from '../../utils/semester';
+import { formatSemesterLabel, getAllowedSignupSemesters, normalizeSemester } from '../../utils/semester';
 import CoursePicker, { buildCourseSelectionsPayload } from './CoursePicker';
 import {
   Lock,
@@ -24,7 +24,6 @@ const AuthGateOverlay = () => {
     departments,
     allCourses,
     currentSemester,
-    availableSemesters,
     authModalMode,
     setAuthModalMode,
     login,
@@ -58,18 +57,16 @@ const AuthGateOverlay = () => {
   const [customCourses, setCustomCourses] = useState([]);
   const [draftCourseName, setDraftCourseName] = useState('');
   const [draftCourseCode, setDraftCourseCode] = useState('');
-  const [draftCourseSection, setDraftCourseSection] = useState('01분반');
+  const [draftCourseSection, setDraftCourseSection] = useState('');
   const [draftCourseSemester, setDraftCourseSemester] = useState('');
-  const [draftCourseCompType, setDraftCourseCompType] = useState('전선');
-  const [draftCourseCredit, setDraftCourseCredit] = useState(3);
-  const [draftCourseSchedule, setDraftCourseSchedule] = useState('');
+  const [draftCourseCompType, setDraftCourseCompType] = useState('전공선택');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const semesterOptions = useMemo(
-    () => buildSemesterOptions(currentSemester || '2026-2', availableSemesters),
-    [currentSemester, availableSemesters]
+    () => getAllowedSignupSemesters(currentSemester || '2026-2'),
+    [currentSemester]
   );
 
   useEffect(() => {
@@ -109,27 +106,29 @@ const AuthGateOverlay = () => {
       setErrorMsg('직접 추가할 담당 강의의 과목명을 입력해 주세요.');
       return;
     }
-    const cleanSem = normalizeSemester(draftCourseSemester || currentSemester || '2026-2');
-    const cleanSec = (draftCourseSection.trim() || '01분반').slice(0, 20);
-    const clampedCredit = Math.min(6, Math.max(1, Number(draftCourseCredit) || 3));
+    const cleanCode = draftCourseCode.trim().slice(0, 40);
+    if (!cleanCode) {
+      setErrorMsg('직접 추가할 담당 강의의 학수번호를 입력해 주세요.');
+      return;
+    }
+    const rawSem = normalizeSemester(draftCourseSemester || currentSemester || '2026-2');
+    const cleanSem = semesterOptions.includes(rawSem) ? rawSem : semesterOptions[0];
+    const cleanSec = (draftCourseSection.trim() || '미정').slice(0, 20);
     setCustomCourses((prev) => [
       ...prev,
       {
         id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name: cleanName,
-        code: draftCourseCode.trim().slice(0, 40),
+        code: cleanCode,
         semester: cleanSem,
         section: cleanSec,
         department: effectiveDepartment,
-        completionType: draftCourseCompType || '전선',
-        credit: clampedCredit,
-        schedule: draftCourseSchedule.trim().slice(0, 120)
+        completionType: draftCourseCompType || '전공선택'
       }
     ]);
     setDraftCourseName('');
     setDraftCourseCode('');
-    setDraftCourseSection('01분반');
-    setDraftCourseSchedule('');
+    setDraftCourseSection('');
   };
 
   const handleRemoveCustomCourse = (tempId) => {
@@ -596,13 +595,14 @@ const AuthGateOverlay = () => {
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: 8 }}>
-                        <label className="form-label">학수번호 (선택)</label>
+                        <label className="form-label">학수번호 *</label>
                         <input
                           type="text"
                           className="form-input"
                           placeholder="예: 7000-1-2957"
                           value={draftCourseCode}
                           onChange={(e) => setDraftCourseCode(e.target.value)}
+                          maxLength={40}
                         />
                       </div>
                     </div>
@@ -612,7 +612,11 @@ const AuthGateOverlay = () => {
                         <label className="form-label">개설 학기</label>
                         <select
                           className="form-select"
-                          value={draftCourseSemester || currentSemester || '2026-2'}
+                          value={
+                            semesterOptions.includes(draftCourseSemester)
+                              ? draftCourseSemester
+                              : semesterOptions[0]
+                          }
                           onChange={(e) => setDraftCourseSemester(e.target.value)}
                         >
                           {semesterOptions.map((sem) => (
@@ -623,53 +627,53 @@ const AuthGateOverlay = () => {
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 8 }}>
-                        <label className="form-label">분반 · 이수구분</label>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            style={{ flex: 1 }}
-                            placeholder="01분반"
-                            value={draftCourseSection}
-                            onChange={(e) => setDraftCourseSection(e.target.value)}
-                          />
-                          <select
-                            className="form-select"
-                            style={{ width: 88 }}
-                            value={draftCourseCompType}
-                            onChange={(e) => setDraftCourseCompType(e.target.value)}
-                          >
-                            <option value="전선">전선</option>
-                            <option value="전필">전필</option>
-                            <option value="교선">교선</option>
-                            <option value="교필">교필</option>
-                            <option value="기필">기필</option>
-                          </select>
-                        </div>
+                        <label className="form-label">이수구분</label>
+                        <select
+                          className="form-select"
+                          value={draftCourseCompType}
+                          onChange={(e) => setDraftCourseCompType(e.target.value)}
+                        >
+                          <option value="전공선택">전공선택</option>
+                          <option value="전공필수">전공필수</option>
+                          <option value="교양선택">교양선택</option>
+                          <option value="교양필수">교양필수</option>
+                          <option value="기초필수">기초필수</option>
+                        </select>
                       </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                       <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                        <label className="form-label">시간표 (선택)</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="예: 화 1,2교시(비501)"
-                          value={draftCourseSchedule}
-                          onChange={(e) => setDraftCourseSchedule(e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group" style={{ width: 72, marginBottom: 0 }}>
-                        <label className="form-label">학점</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={6}
-                          className="form-input"
-                          value={draftCourseCredit}
-                          onChange={(e) => setDraftCourseCredit(e.target.value)}
-                        />
+                        <label className="form-label">분반 (선택)</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            type="text"
+                            list="prof-signup-section-options"
+                            className="form-input"
+                            style={{ flex: 1 }}
+                            placeholder="미입력 시 미정 (예: 전체, 01)"
+                            value={draftCourseSection}
+                            onChange={(e) => setDraftCourseSection(e.target.value)}
+                            maxLength={20}
+                          />
+                          <datalist id="prof-signup-section-options">
+                            <option value="전체" />
+                            <option value="미정" />
+                            <option value="01분반" />
+                            <option value="02분반" />
+                            <option value="03분반" />
+                          </datalist>
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${draftCourseSection.trim() === '전체' ? 'btn-primary' : 'btn-outline'}`}
+                            style={{ height: 38, whiteSpace: 'nowrap' }}
+                            onClick={() =>
+                              setDraftCourseSection((prev) => (prev.trim() === '전체' ? '' : '전체'))
+                            }
+                          >
+                            전체
+                          </button>
+                        </div>
                       </div>
                       <button
                         type="button"

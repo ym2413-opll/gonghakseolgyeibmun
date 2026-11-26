@@ -76,16 +76,39 @@ object SemesterUtils {
         return "${year}학년도 $termTitle 개설과목 및 강의시간표"
     }
 
-    fun normalizeSectionLabel(rawSection: String?): String {
+    fun normalizeSectionLabel(rawSection: String?, defaultLabel: String = "01분반"): String {
         val clean = rawSection?.trim().orEmpty()
-        if (clean.isEmpty()) return "01분반"
+        if (clean.isEmpty()) return defaultLabel
+        if (clean == "미정") return "미정"
+        if (clean == "전체" || clean == "전체분반") return "전체"
         val withoutSuffix = clean.removeSuffix("분반").trim()
-        if (withoutSuffix.isEmpty()) return "01분반"
+        if (withoutSuffix.isEmpty()) return defaultLabel
+        if (withoutSuffix == "미정") return "미정"
+        if (withoutSuffix == "전체") return "전체"
         val num = withoutSuffix.toIntOrNull()
         return if (num != null && num in 1..99) {
             String.format("%02d분반", num)
         } else {
             "${withoutSuffix.take(20)}분반"
+        }
+    }
+
+    /**
+     * Allowed semesters for professor signup custom course creation:
+     * current semester + immediately next semester (and if the immediate next is seasonal,
+     * also includes the regular semester right after it).
+     */
+    fun allowedProfessorSignupSemesters(currentSemester: String?): List<String> {
+        val norm = normalizeSemester(currentSemester)
+        val parts = norm.split('-', limit = 2)
+        val year = parts.getOrNull(0)?.toIntOrNull() ?: 2026
+        val term = parts.getOrNull(1).orEmpty()
+        return when (term) {
+            "1" -> listOf("$year-1", "$year-여름", "$year-2")
+            "여름" -> listOf("$year-여름", "$year-2")
+            "2" -> listOf("$year-2", "$year-겨울", "${year + 1}-1")
+            "겨울" -> listOf("$year-겨울", "${year + 1}-1")
+            else -> listOf(norm)
         }
     }
 

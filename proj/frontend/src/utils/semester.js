@@ -66,6 +66,22 @@ export function buildSemesterOptions(currentSemester = DEFAULT_SEMESTER, existin
   return Array.from(merged).sort(compareSemesters);
 }
 
+/**
+ * Returns allowed semesters for professor signup custom course creation:
+ * current semester + immediately next semester (and if the immediate next is seasonal,
+ * also includes the regular semester right after it).
+ */
+export function getAllowedSignupSemesters(currentSemester = DEFAULT_SEMESTER) {
+  const normCurrent = normalizeSemester(currentSemester);
+  const [yStr, term] = normCurrent.split('-');
+  const year = Number(yStr) || 2026;
+  if (term === '1') return [`${year}-1`, `${year}-여름`, `${year}-2`];
+  if (term === '여름') return [`${year}-여름`, `${year}-2`];
+  if (term === '2') return [`${year}-2`, `${year}-겨울`, `${year + 1}-1`];
+  if (term === '겨울') return [`${year}-겨울`, `${year + 1}-1`];
+  return [normCurrent];
+}
+
 export function isNonCurrentSemesterThread(question, fallbackCurrentSemester = '') {
   if (!question) return false;
   if (question.isPastSemester === true) return true;
