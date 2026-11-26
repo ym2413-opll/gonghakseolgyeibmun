@@ -690,46 +690,47 @@ const AuthGateOverlay = () => {
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                      <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                        <label className="form-label">분반 (선택)</label>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <input
-                            type="text"
-                            list="prof-signup-section-options"
-                            className="form-input"
-                            style={{ flex: 1 }}
-                            placeholder="미입력 시 미정 (예: 전체, 01)"
-                            value={draftCourseSection}
-                            onChange={(e) => setDraftCourseSection(e.target.value)}
-                            maxLength={20}
-                          />
-                          <datalist id="prof-signup-section-options">
-                            <option value="전체" />
-                            <option value="미정" />
-                            <option value="01분반" />
-                            <option value="02분반" />
-                            <option value="03분반" />
-                          </datalist>
-                          <button
-                            type="button"
-                            className={`btn btn-xs ${draftCourseSection.trim() === '전체' ? 'btn-primary' : 'btn-outline'}`}
-                            style={{ height: 38, whiteSpace: 'nowrap' }}
-                            onClick={() =>
-                              setDraftCourseSection((prev) => (prev.trim() === '전체' ? '' : '전체'))
-                            }
-                          >
-                            전체
-                          </button>
-                        </div>
+                    <div className="form-group" style={{ marginBottom: 10 }}>
+                      <label className="form-label">분반 (선택)</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          list="prof-signup-section-options"
+                          className="form-input"
+                          style={{ flex: 1 }}
+                          placeholder="미입력 시 미정 (예: 전체, 01)"
+                          value={draftCourseSection}
+                          onChange={(e) => setDraftCourseSection(e.target.value)}
+                          maxLength={20}
+                        />
+                        <datalist id="prof-signup-section-options">
+                          <option value="전체" />
+                          <option value="미정" />
+                          <option value="01분반" />
+                          <option value="02분반" />
+                          <option value="03분반" />
+                        </datalist>
+                        <button
+                          type="button"
+                          className={`btn btn-xs ${draftCourseSection.trim() === '전체' ? 'btn-primary' : 'btn-outline'}`}
+                          style={{ height: 38, whiteSpace: 'nowrap' }}
+                          onClick={() =>
+                            setDraftCourseSection((prev) => (prev.trim() === '전체' ? '' : '전체'))
+                          }
+                        >
+                          전체
+                        </button>
                       </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        style={{ height: 38, whiteSpace: 'nowrap' }}
+                        style={{ width: '100%', justifyContent: 'center' }}
                         onClick={handleAddCustomCourse}
                       >
-                        <Plus size={14} /> 추가
+                        <Plus size={14} /> 강의 추가
                       </button>
                     </div>
                   </div>
