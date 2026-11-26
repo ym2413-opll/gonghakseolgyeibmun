@@ -224,6 +224,11 @@ const CoursePicker = ({
                     onChange={() => handleToggle(course)}
                   />
                   <span className="course-pill-text">
+                    {course.isCustomDraft && (
+                      <span className="admin-linked-chain-badge" style={{ marginLeft: 0, marginRight: 5 }}>
+                        NEW
+                      </span>
+                    )}
                     {showSemTag && (
                       <span className="semester-pill" style={{ marginRight: 5 }}>
                         {formatSemesterLabel(course.semester)}
@@ -232,6 +237,9 @@ const CoursePicker = ({
                     {course.name}
                     {course.code ? ` (${course.code})` : ''}
                     {scopeLabel ? ` · ${scopeLabel}` : ''}
+                    {course.isCustomDraft && course.professors?.[0]?.section
+                      ? ` · ${course.professors[0].section}`
+                      : ''}
                     {' · 담당: '}
                     <ProfessorNameList course={course} mode="all" />
                   </span>

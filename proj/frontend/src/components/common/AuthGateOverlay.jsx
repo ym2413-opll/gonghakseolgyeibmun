@@ -90,6 +90,54 @@ const AuthGateOverlay = () => {
 
   const effectiveDepartment = department || departments[0]?.name || '';
 
+  const customCourseItemsForPicker = useMemo(() => {
+    if (role !== 'PROFESSOR' || customCourses.length === 0) return [];
+    const displayProfName = name.trim() || '본인';
+    return customCourses.map((cc) => ({
+      id: cc.id,
+      name: cc.name,
+      code: cc.code,
+      semester: cc.semester,
+      department: cc.department || effectiveDepartment,
+      college: '',
+      completionType: cc.completionType,
+      isCustomDraft: true,
+      profName: displayProfName,
+      assignedProfessorName: displayProfName,
+      professors: [
+        {
+          id: 'self-draft',
+          name: displayProfName,
+          department: cc.department || effectiveDepartment,
+          section: cc.section || '미정',
+          isRegistered: true
+        }
+      ]
+    }));
+  }, [role, customCourses, name, effectiveDepartment]);
+
+  const pickerCourses = useMemo(
+    () => (role === 'PROFESSOR' ? [...customCourseItemsForPicker, ...(allCourses || [])] : allCourses || []),
+    [role, customCourseItemsForPicker, allCourses]
+  );
+
+  const pickerSelectedIds = useMemo(
+    () =>
+      role === 'PROFESSOR'
+        ? [...customCourses.map((cc) => cc.id), ...selectedCourseIds]
+        : selectedCourseIds,
+    [role, customCourses, selectedCourseIds]
+  );
+
+  const handlePickerSelectionChange = (nextIds) => {
+    const nextSet = new Set(nextIds);
+    const customIdSet = new Set(customCourses.map((cc) => cc.id));
+    setSelectedCourseIds(nextIds.filter((id) => !customIdSet.has(id)));
+    if (role === 'PROFESSOR') {
+      setCustomCourses((prev) => prev.filter((cc) => nextSet.has(cc.id)));
+    }
+  };
+
   const switchAuthMode = (nextMode) => {
     setErrorMsg('');
     setAuthModalMode(nextMode);
@@ -550,9 +598,9 @@ const AuthGateOverlay = () => {
             </div>
 
             <CoursePicker
-              courses={allCourses}
-              selectedIds={selectedCourseIds}
-              onChange={setSelectedCourseIds}
+              courses={pickerCourses}
+              selectedIds={pickerSelectedIds}
+              onChange={handlePickerSelectionChange}
               sectionMode={role === 'PROFESSOR' ? 'multi' : 'single'}
               sectionSelections={sectionSelections}
               onSectionSelectionsChange={setSectionSelections}
