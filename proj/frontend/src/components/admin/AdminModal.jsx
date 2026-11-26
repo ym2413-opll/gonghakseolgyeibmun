@@ -372,7 +372,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
         payload: op.payload || {}
       }
     ]);
-    notifySuccess(`초안에 추가됨: ${op.label} (상단에서 일괄 커밋하거나 되돌릴 수 있습니다.)`);
+    notifySuccess(`적용 대기 목록에 추가됨: ${op.label} (상단에서 일괄 적용 또는 철회할 수 있습니다.)`);
   };
 
   const handleRemovePendingOp = (opId) => {
@@ -382,7 +382,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleRollbackBatch = () => {
     if (pendingOps.length === 0) return;
     setPendingOps([]);
-    notifySuccess('초안에 대기 중이던 변경 사항을 모두 되돌렸습니다.');
+    notifySuccess('대기 중인 변경 사항을 모두 철회했습니다.');
   };
 
   const loadAdminData = useCallback(async () => {
@@ -415,9 +415,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       setPendingOps([]);
       await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`${count}건의 변경 사항이 하나의 트랜잭션으로 일괄 커밋되었습니다.`);
+      notifySuccess(`${count}건의 변경 사항이 일괄 적용되었습니다.`);
     } catch (err) {
-      notifyError(err.message || '일괄 커밋에 실패해 모든 변경 사항이 롤백되었습니다.');
+      notifyError(err.message || '일괄 적용에 실패해 모든 변경 사항이 철회되었습니다.');
     } finally {
       setIsCommittingBatch(false);
     }
@@ -495,12 +495,20 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
+    const payload = {
+      name: addedDeptName,
+      college: deptCollege.trim() || '광운대학교',
+      aliases: initialAliases
+    };
+    if (draftMode) {
+      stageOperation({ type: 'CREATE_DEPARTMENT', label: `학과 추가: ${addedDeptName}`, payload });
+      setDeptName('');
+      setDeptCollege('');
+      setDeptAliasesInput('');
+      return;
+    }
     try {
-      await api.createDepartment({
-        name: addedDeptName,
-        college: deptCollege.trim() || '광운대학교',
-        aliases: initialAliases
-      });
+      await api.createDepartment(payload);
       setDeptName('');
       setDeptCollege('');
       setDeptAliasesInput('');
@@ -516,6 +524,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     const targetId = effectiveAliasTargetDeptId;
     const cleanAlias = aliasNewName.trim();
     if (!targetId || !cleanAlias) return;
+    if (draftMode) {
+      const targetName = departments.find((d) => String(d.id) === String(targetId))?.name || '학과';
+      stageOperation({
+        type: 'ADD_DEPARTMENT_ALIAS',
+        targetId,
+        label: `학과 별칭 추가: ${targetName} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setAliasNewName('');
+      return;
+    }
     try {
       const updated = await api.addDepartmentAlias(targetId, cleanAlias);
       setAliasNewName('');
@@ -527,6 +546,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleRemoveAlias = async (deptId, aliasName) => {
+    if (draftMode) {
+      const targetName = departments.find((d) => String(d.id) === String(deptId))?.name || '학과';
+      stageOperation({
+        type: 'REMOVE_DEPARTMENT_ALIAS',
+        targetId: deptId,
+        label: `학과 별칭 삭제: ${targetName} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      return;
+    }
     try {
       await api.removeDepartmentAlias(deptId, aliasName);
       await refreshCatalog();
@@ -539,12 +568,23 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleSaveEditedDept = async (e) => {
     e.preventDefault();
     if (!editingDept || !editingDept.name.trim()) return;
-    try {
-      const updated = await api.updateDepartment(editingDept.id, {
-        name: editingDept.name.trim(),
-        college: editingDept.college.trim() || undefined,
-        keepOldNameAsAlias: editingDept.keepOldNameAsAlias
+    const payload = {
+      name: editingDept.name.trim(),
+      college: editingDept.college.trim() || undefined,
+      keepOldNameAsAlias: editingDept.keepOldNameAsAlias
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_DEPARTMENT',
+        targetId: editingDept.id,
+        label: `학과 수정: ${payload.name}`,
+        payload
       });
+      setEditingDept(null);
+      return;
+    }
+    try {
+      const updated = await api.updateDepartment(editingDept.id, payload);
       setEditingDept(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -562,11 +602,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
+    const payload = { name: addedName, aliases: initialAliases };
+    if (draftMode) {
+      stageOperation({ type: 'CREATE_COLLEGE', label: `단과대학 추가: ${addedName}`, payload });
+      setNewCollegeName('');
+      setNewCollegeAliasesInput('');
+      return;
+    }
     try {
-      await api.createCollege({
-        name: addedName,
-        aliases: initialAliases
-      });
+      await api.createCollege(payload);
       setNewCollegeName('');
       setNewCollegeAliasesInput('');
       await refreshCatalog();
@@ -581,6 +625,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     const targetId = effectiveAliasTargetCollegeId;
     const cleanAlias = collegeAliasNewName.trim();
     if (!targetId || !cleanAlias) return;
+    if (draftMode) {
+      const targetName = colleges.find((c) => String(c.id) === String(targetId))?.name || '단과대학';
+      stageOperation({
+        type: 'ADD_COLLEGE_ALIAS',
+        targetId,
+        label: `단과대학 별칭 추가: ${targetName} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setCollegeAliasNewName('');
+      return;
+    }
     try {
       const updated = await api.addCollegeAlias(targetId, cleanAlias);
       setCollegeAliasNewName('');
@@ -592,6 +647,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleRemoveCollegeAlias = async (collegeId, aliasName) => {
+    if (draftMode) {
+      const targetName = colleges.find((c) => String(c.id) === String(collegeId))?.name || '단과대학';
+      stageOperation({
+        type: 'REMOVE_COLLEGE_ALIAS',
+        targetId: collegeId,
+        label: `단과대학 별칭 삭제: ${targetName} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      return;
+    }
     try {
       await api.removeCollegeAlias(collegeId, aliasName);
       await refreshCatalog();
@@ -604,11 +669,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleSaveEditedCollege = async (e) => {
     e.preventDefault();
     if (!editingCollege || !editingCollege.name.trim()) return;
-    try {
-      const updated = await api.updateCollege(editingCollege.id, {
-        name: editingCollege.name.trim(),
-        keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
+    const payload = {
+      name: editingCollege.name.trim(),
+      keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_COLLEGE',
+        targetId: editingCollege.id,
+        label: `단과대학 수정: ${payload.name}`,
+        payload
       });
+      setEditingCollege(null);
+      return;
+    }
+    try {
+      const updated = await api.updateCollege(editingCollege.id, payload);
       setEditingCollege(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -620,11 +696,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleSubmitRenameAlias = async () => {
     if (!editingAlias || !editingAlias.value.trim()) return;
+    const nextAlias = editingAlias.value.trim();
+    if (draftMode) {
+      stageOperation({
+        type: editingAlias.entityKey === 'dept' ? 'RENAME_DEPARTMENT_ALIAS' : 'RENAME_COLLEGE_ALIAS',
+        targetId: editingAlias.itemId,
+        label: `별칭 변경: ${editingAlias.oldAlias} → ${nextAlias}`,
+        payload: { oldAlias: editingAlias.oldAlias, newAlias: nextAlias }
+      });
+      setEditingAlias(null);
+      return;
+    }
     try {
       if (editingAlias.entityKey === 'dept') {
-        await api.renameDepartmentAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+        await api.renameDepartmentAlias(editingAlias.itemId, editingAlias.oldAlias, nextAlias);
       } else {
-        await api.renameCollegeAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+        await api.renameCollegeAlias(editingAlias.itemId, editingAlias.oldAlias, nextAlias);
       }
       setEditingAlias(null);
       await refreshCatalog();
@@ -653,6 +740,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleRolloverSemester = async (e) => {
     e.preventDefault();
     const cleanTarget = normalizeSemester(effectiveRolloverSem, currentSemester);
+    if (draftMode) {
+      stageOperation({
+        type: 'ROLLOVER_SEMESTER',
+        label: `활성 학기 전환: ${formatSemesterLabel(cleanTarget)}`,
+        payload: {
+          targetSemester: cleanTarget,
+          autoLinkSameNameCourses: Boolean(rolloverAutoLink)
+        }
+      });
+      return;
+    }
     setIsRollingOver(true);
     try {
       const res = await api.rolloverSemester({
@@ -802,6 +900,18 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       notifyError('추가할 과목 별칭을 입력해 주세요.');
       return;
     }
+    if (draftMode) {
+      stageOperation({
+        type: 'ADD_COURSE_ALIAS',
+        targetId: editingCourse.id,
+        label: `과목 별칭 추가: ${editingCourse.name} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: [...(prev.aliases || []), cleanAlias], newAliasInput: '' } : prev
+      );
+      return;
+    }
     try {
       const updated = await api.addCourseAlias(editingCourse.id, cleanAlias);
       setEditingCourse((prev) =>
@@ -816,6 +926,18 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleRemoveCourseAlias = async (aliasName) => {
     if (!editingCourse?.id || !aliasName) return;
+    if (draftMode) {
+      stageOperation({
+        type: 'REMOVE_COURSE_ALIAS',
+        targetId: editingCourse.id,
+        label: `과목 별칭 삭제: ${editingCourse.name} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: (prev.aliases || []).filter((a) => a !== aliasName) } : prev
+      );
+      return;
+    }
     try {
       const updated = await api.removeCourseAlias(editingCourse.id, aliasName);
       setEditingCourse((prev) =>
@@ -1040,7 +1162,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
           </button>
         </div>
 
-        {/* 관리자 트랜잭션 초안 모드 (일괄 커밋 / 롤백) 바 */}
+        {/* 관리자 일괄 적용 / 철회 바 */}
         <div className="admin-tx-bar">
           <div className="admin-tx-bar-top">
             <label className="admin-check-inline" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -1049,9 +1171,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                 checked={draftMode}
                 onChange={(e) => setDraftMode(e.target.checked)}
               />
-              <span>초안 모드 (변경 사항을 모아 일괄 커밋/롤백)</span>
+              <span>변경 사항 모아 적용/철회</span>
             </label>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               {pendingOps.length > 0 && (
                 <>
                   <button
@@ -1060,7 +1182,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     onClick={handleRollbackBatch}
                     disabled={isCommittingBatch}
                   >
-                    전체 되돌리기 ({pendingOps.length})
+                    전체 철회 ({pendingOps.length})
                   </button>
                   <button
                     type="button"
@@ -1069,7 +1191,7 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     disabled={isCommittingBatch}
                   >
                     <Check size={12} />
-                    {isCommittingBatch ? '커밋 중...' : `일괄 커밋 (${pendingOps.length}건)`}
+                    {isCommittingBatch ? '적용 중...' : `일괄 적용 (${pendingOps.length}건)`}
                   </button>
                 </>
               )}
@@ -1084,8 +1206,8 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     type="button"
                     className="chip-remove-btn"
                     onClick={() => handleRemovePendingOp(op.id)}
-                    aria-label="변경 취소"
-                    title="이 변경 사항만 취소"
+                    aria-label="철회"
+                    title="이 변경 사항 철회"
                   >
                     <X size={11} />
                   </button>
@@ -2385,12 +2507,12 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
             <div>
               <h3 className="admin-panel-title" style={{ marginBottom: 8 }}>
                 <Trash2 size={18} />
-                휴지통 (30일 보존 · 복구 가능)
+                휴지통 (90일 보존 · 복구 가능)
               </h3>
               <HelpBubble
                 tier="ALL"
                 mode="inline"
-                text="삭제된 교과목·질문·답변은 30일간 휴지통에 보존돼요. 보존 기간 내에는 원본 그대로 복구할 수 있고, 만료되면 첨부파일과 함께 영구 삭제돼요."
+                text="삭제된 교과목·질문·답변은 전기통신사업법 및 통신비밀보호법 시행령 기준에 따라 3개월(90일)간 무손실 압축(GZIP) 상태로 보존돼요. 보존 기간 내에는 원본 그대로 복구할 수 있어요."
                 className="mb-help-bubble"
               />
               {trashItems.length === 0 ? (

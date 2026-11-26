@@ -344,7 +344,7 @@ fun Route.adminRoutes(
                     HttpStatusCode.OK,
                     ApiResponse(
                         success = true,
-                        message = "과목이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
+                        message = "과목이 휴지통으로 이동되었습니다. (90일간 복구 가능)",
                         data = kotlinx.serialization.json.JsonObject(
                             mapOf(
                                 "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -423,7 +423,7 @@ fun Route.adminRoutes(
                 HttpStatusCode.OK,
                 ApiResponse(
                     success = true,
-                    message = "질문이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
+                    message = "질문이 휴지통으로 이동되었습니다. (90일간 복구 가능)",
                     data = kotlinx.serialization.json.JsonObject(
                         mapOf(
                             "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -446,7 +446,7 @@ fun Route.adminRoutes(
                 HttpStatusCode.OK,
                 ApiResponse(
                     success = true,
-                    message = "답변이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
+                    message = "답변이 휴지통으로 이동되었습니다. (90일간 복구 가능)",
                     data = kotlinx.serialization.json.JsonObject(
                         mapOf(
                             "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -498,7 +498,7 @@ fun Route.adminRoutes(
                     ApiResponse<String>(success = false, message = "한 번에 일괄 커밋할 수 있는 작업은 최대 100개입니다.")
                 )
             }
-            call.respondServiceCall(HttpStatusCode.OK, "${request.operations.size}건의 변경 사항이 일괄 커밋되었습니다.") {
+            call.respondServiceCall(HttpStatusCode.OK, "${request.operations.size}건의 변경 사항이 일괄 적용되었습니다.") {
                 DatabaseFactory.adminTransaction("batchCommit") {
                     val summary = mutableListOf<String>()
                     request.operations.forEachIndexed { idx, op ->

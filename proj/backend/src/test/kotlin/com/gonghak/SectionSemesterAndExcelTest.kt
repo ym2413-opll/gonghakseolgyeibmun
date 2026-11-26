@@ -567,8 +567,13 @@ class SectionSemesterAndExcelTest {
         assertEquals(HttpStatusCode.OK, trashListRes.status)
         val trashList = trashListRes.body<ApiResponse<List<AdminTrashItemDto>>>().data!!
         val deletedBridgeItem = trashList.firstOrNull { it.entityType == "COURSE" && it.entityId == bridgeCourse.id }
-        assertTrue(deletedBridgeItem != null, "Deleted course must be preserved in 30-day trash bin")
-        assertTrue(deletedBridgeItem!!.remainingDays >= 29L, "Trash retention must be ~30 days")
+        assertTrue(deletedBridgeItem != null, "Deleted course must be preserved in 90-day trash bin")
+        assertTrue(deletedBridgeItem!!.remainingDays >= 89L, "Trash retention must be 90 days (3 months)")
+        val storedSnapshot = transaction {
+            AdminTrashBinTable.select { AdminTrashBinTable.id eq UUID.fromString(deletedBridgeItem.id) }
+                .single()[AdminTrashBinTable.snapshotJson]
+        }
+        assertTrue(storedSnapshot.startsWith("GZIP:"), "Trash snapshot must be losslessly GZIP-compressed")
 
         val restoreRes = client.post("/api/admin/trash/${deletedBridgeItem.id}/restore") {
             header(HttpHeaders.Authorization, bearerToken(adminId))

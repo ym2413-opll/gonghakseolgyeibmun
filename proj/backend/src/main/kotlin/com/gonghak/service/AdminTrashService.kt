@@ -9,20 +9,49 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.Base64
 import java.util.UUID
+import java.util.zip.Deflater
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 object AdminTrashService {
-    const val RETENTION_DAYS: Long = 30L
+    // 전기통신사업법(제83조) 및 통신비밀보호법 시행령(제41조 제2항 제2호) 기준: 인터넷 기록·데이터 3개월(90일) 보존
+    const val RETENTION_DAYS: Long = 90L
     const val TYPE_COURSE = "COURSE"
     const val TYPE_QUESTION = "QUESTION"
     const val TYPE_ANSWER = "ANSWER"
+    private const val GZIP_PREFIX = "GZIP:"
 
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    internal fun compressSnapshot(rawJson: String): String {
+        val rawBytes = rawJson.toByteArray(Charsets.UTF_8)
+        val baos = ByteArrayOutputStream()
+        object : GZIPOutputStream(baos) {
+            init {
+                def.setLevel(Deflater.BEST_COMPRESSION)
+            }
+        }.use { gzip ->
+            gzip.write(rawBytes)
+        }
+        return GZIP_PREFIX + Base64.getEncoder().encodeToString(baos.toByteArray())
+    }
+
+    internal fun decompressSnapshot(stored: String): String {
+        if (!stored.startsWith(GZIP_PREFIX)) return stored
+        val compressed = Base64.getDecoder().decode(stored.removePrefix(GZIP_PREFIX))
+        return GZIPInputStream(ByteArrayInputStream(compressed)).use { gzip ->
+            gzip.readBytes().toString(Charsets.UTF_8)
+        }
     }
 
     @Serializable
@@ -225,7 +254,7 @@ object AdminTrashService {
             it[entityId] = courseId
             it[title] = "${snapshot.name} (${snapshot.code})".take(200)
             it[summary] = "[${snapshot.semester}] ${snapshot.department.ifBlank { snapshot.college }} · 분반 ${profs.size}개 · 질문 ${questions.size}건".take(300)
-            it[snapshotJson] = json.encodeToString(snapshot)
+            it[snapshotJson] = compressSnapshot(json.encodeToString(snapshot))
             it[AdminTrashBinTable.deletedBy] = deletedBy
             it[deletedAt] = now
             it[expiresAt] = now.plus(RETENTION_DAYS, ChronoUnit.DAYS)
@@ -248,7 +277,7 @@ object AdminTrashService {
             it[entityId] = questionId
             it[title] = snapshot.title.take(200)
             it[summary] = "$courseName · 답변 ${snapshot.answers.size}건 · ${snapshot.category}".take(300)
-            it[snapshotJson] = json.encodeToString(snapshot)
+            it[snapshotJson] = compressSnapshot(json.encodeToString(snapshot))
             it[AdminTrashBinTable.deletedBy] = deletedBy
             it[deletedAt] = now
             it[expiresAt] = now.plus(RETENTION_DAYS, ChronoUnit.DAYS)
@@ -271,7 +300,7 @@ object AdminTrashService {
             it[entityId] = answerId
             it[title] = "답변: ${snapshot.content.replace(Regex("\\s+"), " ").take(80)}".take(200)
             it[summary] = "원문 질문: $qTitle".take(300)
-            it[snapshotJson] = json.encodeToString(snapshot)
+            it[snapshotJson] = compressSnapshot(json.encodeToString(snapshot))
             it[AdminTrashBinTable.deletedBy] = deletedBy
             it[deletedAt] = now
             it[expiresAt] = now.plus(RETENTION_DAYS, ChronoUnit.DAYS)
@@ -280,7 +309,8 @@ object AdminTrashService {
         return trashId
     }
 
-    private fun extractSavedAttachments(entityType: String, rawJson: String): List<String> = runCatching {
+    private fun extractSavedAttachments(entityType: String, storedSnapshot: String): List<String> = runCatching {
+        val rawJson = decompressSnapshot(storedSnapshot)
         when (entityType) {
             TYPE_COURSE -> {
                 val snap = json.decodeFromString<TrashCourseSnapshot>(rawJson)
@@ -475,10 +505,10 @@ object AdminTrashService {
             }
             val now = Instant.now()
             if (!row[AdminTrashBinTable.expiresAt].isAfter(now)) {
-                throw IllegalArgumentException("보존 기간(30일)이 만료되어 복구할 수 없습니다.")
+                throw IllegalArgumentException("보존 기간(90일)이 만료되어 복구할 수 없습니다.")
             }
             val type = row[AdminTrashBinTable.entityType]
-            val rawJson = row[AdminTrashBinTable.snapshotJson]
+            val rawJson = decompressSnapshot(row[AdminTrashBinTable.snapshotJson])
             when (type) {
                 TYPE_COURSE -> restoreCourseInternal(json.decodeFromString(rawJson))
                 TYPE_QUESTION -> restoreQuestionInternal(json.decodeFromString(rawJson))

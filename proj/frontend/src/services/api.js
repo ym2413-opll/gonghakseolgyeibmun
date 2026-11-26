@@ -1737,7 +1737,7 @@ export const api = {
       '/admin/batch-commit',
       'POST',
       { operations },
-      '일괄 커밋에 실패해 모든 변경 사항이 롤백되었습니다.'
+      '일괄 적용에 실패해 모든 변경 사항이 철회되었습니다.'
     );
   },
 
