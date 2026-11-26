@@ -217,13 +217,13 @@ class QuestionService(
 
         var back = startRow[CoursesTable.prevCourseId]
         var guard = 0
-        while (back != null && guard++ < 40 && result.add(back)) {
+        while (back != null && guard++ < 200 && result.add(back)) {
             back = CoursesTable.select { CoursesTable.id eq back }.singleOrNull()?.get(CoursesTable.prevCourseId)
         }
 
         var forward = startRow[CoursesTable.nextCourseId]
         guard = 0
-        while (forward != null && guard++ < 40 && result.add(forward)) {
+        while (forward != null && guard++ < 200 && result.add(forward)) {
             forward = CoursesTable.select { CoursesTable.id eq forward }.singleOrNull()?.get(CoursesTable.nextCourseId)
         }
 
@@ -513,7 +513,10 @@ class QuestionService(
                     (QuestionsTable.assignedProfessorId eq currentUserId)
             }
         }
-        courseIdFilter?.let { query.andWhere { QuestionsTable.courseId eq it } }
+        courseIdFilter?.let {
+            val lineageIds = collectSameLineageCourseIdsInternal(it).toList()
+            query.andWhere { QuestionsTable.courseId inList lineageIds }
+        }
         categoryFilter?.let { query.andWhere { QuestionsTable.category eq it.name } }
 
         query.orderBy(QuestionsTable.createdAt to SortOrder.DESC)

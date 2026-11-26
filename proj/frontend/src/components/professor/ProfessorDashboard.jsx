@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
+import { collectLinkedCourseIds } from '../../utils/courseLineage';
 import QuestionCard from '../questions/QuestionCard';
 import HelpBubble from '../common/HelpBubble';
 import {
@@ -40,10 +41,14 @@ const ProfessorDashboard = ({
     return raw || [];
   }, [currentUser?.courses, allCourses]);
 
-  const profCourseIds = useMemo(
-    () => profCourses.map((c) => c.id).filter(Boolean),
-    [profCourses]
-  );
+  const profCourseIds = useMemo(() => {
+    const idSet = new Set();
+    profCourses.forEach((c) => {
+      if (!c?.id) return;
+      collectLinkedCourseIds(c.id, allCourses).forEach((lid) => idSet.add(lid));
+    });
+    return Array.from(idSet);
+  }, [profCourses, allCourses]);
 
   const profCourseNames = useMemo(
     () => profCourses.map((c) => c.name),

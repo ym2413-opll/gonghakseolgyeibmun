@@ -387,6 +387,39 @@ class SectionSemesterAndExcelTest {
         }
         assertEquals(HttpStatusCode.BadRequest, cycleRes.status)
 
+        // 5c. Continuous mid-chain splicing across arbitrary semesters (e.g., 2026-여름 inserted between demoCourseId and winterDesignCourse)
+        val bridgeCourse = client.post("/api/admin/courses") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(
+                CreateCourseRequest(
+                    name = "계절브릿지특강",
+                    code = "7000-2-7777",
+                    semester = "2026-여름",
+                    scopeType = "ALL",
+                    autoLinkPrevSemester = false
+                )
+            )
+        }.body<ApiResponse<CourseDto>>().data!!
+
+        val spliceRes = client.put("/api/admin/courses/${bridgeCourse.id}/link") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(LinkCourseRequest(prevCourseId = demoCourseId))
+        }
+        assertEquals(HttpStatusCode.OK, spliceRes.status)
+        val splicedBridge = spliceRes.body<ApiResponse<CourseDto>>().data!!
+        assertEquals(demoCourseId, splicedBridge.prevCourseId)
+        assertEquals(winterDesignCourse.id, splicedBridge.nextCourseId, "Mid-chain splice must preserve downstream winterDesignCourse")
+
+        // Continuous 4-hop traversal: GET /api/questions?courseId=spring2027Course.id finds createdQ from demoCourseId
+        val lineageQuestionsRes = client.get("/api/questions?courseId=${spring2027Course.id}") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+        }
+        assertEquals(HttpStatusCode.OK, lineageQuestionsRes.status)
+        val lineageQuestions = lineageQuestionsRes.body<ApiResponse<List<QuestionListItemDto>>>().data!!
+        assertTrue(lineageQuestions.any { it.id == createdQ.id }, "Course filter must traverse continuous linked list to find ancestor course question")
+
         // 8. Professor registration with NO existing `courseIds`, creating a custom course directly!
         val profRegRes = client.post("/api/auth/register") {
             contentType(ContentType.Application.Json)

@@ -1,5 +1,5 @@
 // src/components/student/QuestionForm.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -7,6 +7,13 @@ import { CATEGORY_DEFINITIONS, CATEGORY_LIST } from '../../services/mockData';
 import { api } from '../../services/api';
 import { generateSummaryTitle } from '../../utils/textSummary';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
+import { formatSemesterLabel } from '../../utils/semester';
+import {
+  extractCourseScopes,
+  extractCourseSemesters,
+  filterCoursesList,
+  sortCoursesList
+} from '../../utils/courseLineage';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import ProfessorNameList from '../common/ProfessorNameList';
@@ -24,7 +31,7 @@ import {
 } from 'lucide-react';
 
 export default function QuestionForm({ onQuestionCreated, onCancel }) {
-  const { currentUser, isStudent, allCourses, refreshCurrentUser, refreshCatalog } = useAuth();
+  const { currentUser, isStudent, allCourses, departments, colleges, currentSemester, refreshCurrentUser, refreshCatalog } = useAuth();
   const { checkBlueWhiteUnlock } = useTheme();
   const { profSettings } = useNotifications();
   const contentTextareaRef = useRef(null);
@@ -35,13 +42,43 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
   }, [refreshCurrentUser, refreshCatalog]);
 
   // 학생의 수강 과목 목록
-  const studentCourses = currentUser?.courses?.length
-    ? currentUser.courses
-    : (allCourses || []).slice(0, 12);
+  const studentCourses = useMemo(
+    () => (currentUser?.courses?.length ? currentUser.courses : allCourses || []),
+    [currentUser?.courses, allCourses]
+  );
   const [selectedCourseId, setSelectedCourseId] = useState(studentCourses[0]?.id || '');
   const [selectedSectionCpId, setSelectedSectionCpId] = useState(
     studentCourses[0]?.assignedCourseProfessorId || ''
   );
+  const [courseSearchQuery, setCourseSearchQuery] = useState('');
+  const [courseSemesterFilter, setCourseSemesterFilter] = useState('ALL');
+  const [courseDeptFilter, setCourseDeptFilter] = useState('ALL');
+  const [courseSortBy, setCourseSortBy] = useState('selected');
+
+  const courseSemesterOptions = useMemo(() => extractCourseSemesters(studentCourses), [studentCourses]);
+  const courseScopeOptions = useMemo(() => extractCourseScopes(studentCourses), [studentCourses]);
+  const filteredStudentCourses = useMemo(() => {
+    const filtered = filterCoursesList(studentCourses, {
+      query: courseSearchQuery,
+      semester: courseSemesterFilter,
+      department: courseDeptFilter,
+      departments,
+      colleges,
+      currentSemester,
+      keepSelectedIds: selectedCourseId ? [selectedCourseId] : null
+    });
+    return sortCoursesList(filtered, courseSortBy, selectedCourseId ? [selectedCourseId] : []);
+  }, [
+    studentCourses,
+    courseSearchQuery,
+    courseSemesterFilter,
+    courseDeptFilter,
+    departments,
+    colleges,
+    currentSemester,
+    selectedCourseId,
+    courseSortBy
+  ]);
   const [selectedCategory, setSelectedCategory] = useState('lecture');
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
@@ -262,23 +299,81 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
             <label className="form-label">
               과목 <span className="req">*</span>
             </label>
-            <div className="course-select-grid">
-              {studentCourses.map((c) => (
-                <button
-                  type="button"
-                  key={c.id}
-                  className={`course-chip ${selectedCourseId === c.id ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedCourseId(c.id);
-                    setSelectedSectionCpId(c.assignedCourseProfessorId || '');
-                  }}
+            <div className="course-search-input-wrap" style={{ marginBottom: 6 }}>
+              <Search size={14} className="search-icon" />
+              <input
+                type="text"
+                className="form-input course-search-input"
+                placeholder="과목명, 학수번호, 학과, 교수명 검색..."
+                value={courseSearchQuery}
+                onChange={(e) => setCourseSearchQuery(e.target.value)}
+                aria-label="질문 과목 검색"
+              />
+            </div>
+            <div className="course-picker-controls" style={{ marginBottom: 8 }}>
+              {courseSemesterOptions.length > 1 && (
+                <select
+                  className="form-select course-picker-ctrl-select"
+                  value={courseSemesterFilter}
+                  onChange={(e) => setCourseSemesterFilter(e.target.value)}
+                  aria-label="학기 필터"
                 >
-                  <span className="course-name">{c.name}</span>
-                  <span className="course-prof">
-                    <ProfessorNameList course={c} mode="primary" /> ({c.section})
-                  </span>
-                </button>
-              ))}
+                  <option value="ALL">전체 학기</option>
+                  {courseSemesterOptions.map((sem) => (
+                    <option key={sem} value={sem}>
+                      {formatSemesterLabel(sem)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {courseScopeOptions.length > 1 && (
+                <select
+                  className="form-select course-picker-ctrl-select"
+                  value={courseDeptFilter}
+                  onChange={(e) => setCourseDeptFilter(e.target.value)}
+                  aria-label="학과·단과대 필터"
+                >
+                  <option value="ALL">전체 학과</option>
+                  {courseScopeOptions.map((sc) => (
+                    <option key={sc} value={sc}>
+                      {sc}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select
+                className="form-select course-picker-ctrl-select"
+                value={courseSortBy}
+                onChange={(e) => setCourseSortBy(e.target.value)}
+                aria-label="과목 정렬"
+              >
+                <option value="selected">선택 우선</option>
+                <option value="name_asc">과목명순</option>
+                <option value="semester_desc">최신 학기순</option>
+                <option value="code_asc">학수번호순</option>
+              </select>
+            </div>
+            <div className="course-select-grid">
+              {filteredStudentCourses.length === 0 ? (
+                <div className="course-search-empty">조건에 맞는 과목이 없습니다.</div>
+              ) : (
+                filteredStudentCourses.slice(0, 30).map((c) => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    className={`course-chip ${selectedCourseId === c.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedCourseId(c.id);
+                      setSelectedSectionCpId(c.assignedCourseProfessorId || '');
+                    }}
+                  >
+                    <span className="course-name">{c.name}</span>
+                    <span className="course-prof">
+                      <ProfessorNameList course={c} mode="primary" /> ({c.section})
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
 
             {courseSections.length > 1 && (

@@ -1182,16 +1182,30 @@ class UserService {
         val prevRow = CoursesTable.select { CoursesTable.id eq prevCourseId }.singleOrNull()
             ?: throw IllegalArgumentException("연동할 이전 학기 강의를 찾을 수 없습니다.")
 
-        // Cycle check: ensure courseId is not already an ancestor of prevCourseId
+        // Cycle check: ensure courseId is not already an ancestor of prevCourseId (bounded by unique visited DB rows)
         var cursor: UUID? = prevRow[CoursesTable.prevCourseId]
-        val visited = mutableSetOf(prevCourseId)
-        while (cursor != null && visited.add(cursor)) {
+        val ancestorVisited = mutableSetOf(prevCourseId)
+        while (cursor != null && ancestorVisited.add(cursor)) {
             if (cursor == courseId) {
                 throw IllegalArgumentException("강의 연결 리스트에 순환 참조가 발생하므로 연동할 수 없습니다.")
             }
             cursor = CoursesTable.select { CoursesTable.id eq cursor }
                 .singleOrNull()
                 ?.get(CoursesTable.prevCourseId)
+        }
+
+        // Also walk forward from courseId to find its chain tail and verify prevCourseId is not already a descendant
+        var tailId: UUID = courseId
+        var forwardCursor: UUID? = curRow[CoursesTable.nextCourseId]
+        val descVisited = mutableSetOf(courseId)
+        while (forwardCursor != null && descVisited.add(forwardCursor)) {
+            if (forwardCursor == prevCourseId) {
+                throw IllegalArgumentException("강의 연결 리스트에 순환 참조가 발생하므로 연동할 수 없습니다.")
+            }
+            tailId = forwardCursor
+            forwardCursor = CoursesTable.select { CoursesTable.id eq forwardCursor }
+                .singleOrNull()
+                ?.get(CoursesTable.nextCourseId)
         }
 
         // Detach curRow's old prev if different
@@ -1201,11 +1215,22 @@ class UserService {
                 it[nextCourseId] = null
             }
         }
-        // Detach prevRow's old next if different
+
+        // If prevRow already had a next node (oldNextId != courseId), splice it after courseId's chain tail
+        // so existing chains remain continuously connected without orphaning downstream courses.
         val oldNextId = prevRow[CoursesTable.nextCourseId]
         if (oldNextId != null && oldNextId != courseId) {
-            CoursesTable.update({ (CoursesTable.id eq oldNextId) and (CoursesTable.prevCourseId eq prevCourseId) }) {
-                it[CoursesTable.prevCourseId] = null
+            if (oldNextId !in descVisited && oldNextId !in ancestorVisited) {
+                CoursesTable.update({ CoursesTable.id eq tailId }) {
+                    it[nextCourseId] = oldNextId
+                }
+                CoursesTable.update({ CoursesTable.id eq oldNextId }) {
+                    it[CoursesTable.prevCourseId] = tailId
+                }
+            } else {
+                CoursesTable.update({ (CoursesTable.id eq oldNextId) and (CoursesTable.prevCourseId eq prevCourseId) }) {
+                    it[CoursesTable.prevCourseId] = null
+                }
             }
         }
 
@@ -1295,13 +1320,13 @@ class UserService {
 
         var back = startRow[CoursesTable.prevCourseId]
         var guard = 0
-        while (back != null && guard++ < 40 && visited.add(back)) {
+        while (back != null && guard++ < 200 && visited.add(back)) {
             back = CoursesTable.select { CoursesTable.id eq back }.singleOrNull()?.get(CoursesTable.prevCourseId)
         }
 
         var forward = startRow[CoursesTable.nextCourseId]
         guard = 0
-        while (forward != null && guard++ < 40 && visited.add(forward)) {
+        while (forward != null && guard++ < 200 && visited.add(forward)) {
             forward = CoursesTable.select { CoursesTable.id eq forward }.singleOrNull()?.get(CoursesTable.nextCourseId)
         }
         return visited
@@ -2471,7 +2496,7 @@ class UserService {
         val total = if (finalCondition != null) CoursesTable.select(finalCondition).count() else CoursesTable.selectAll().count()
 
         val safePage = page.coerceIn(1, 10_000)
-        val safePageSize = pageSize.coerceIn(1, 2000)
+        val safePageSize = pageSize.coerceIn(1, 5000)
         val offset = ((safePage - 1).toLong() * safePageSize.toLong())
         val queryObj = if (finalCondition != null) CoursesTable.select(finalCondition) else CoursesTable.selectAll()
         val rows = queryObj
@@ -2479,8 +2504,72 @@ class UserService {
             .limit(safePageSize, offset)
             .toList()
 
+        val pageCourseIds = rows.map { it[CoursesTable.id].value }
+        val profsByCourseId: Map<UUID, List<ProfessorSimpleDto>> = if (pageCourseIds.isNotEmpty()) {
+            CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
+                .select { CourseProfessorsTable.courseId inList pageCourseIds }
+                .groupBy { it[CourseProfessorsTable.courseId] }
+                .mapValues { (_, pRows) ->
+                    pRows.sortedWith(
+                        compareByDescending<ResultRow> { isRegisteredProfessorRow(it) }
+                            .thenBy { it[CourseProfessorsTable.section] }
+                    ).map { pRow ->
+                        ProfessorSimpleDto(
+                            id = pRow[UsersTable.id].value.toString(),
+                            name = pRow[UsersTable.name],
+                            department = pRow[UsersTable.department],
+                            section = pRow[CourseProfessorsTable.section],
+                            schedule = pRow[CourseProfessorsTable.schedule],
+                            isRegistered = isRegisteredProfessorRow(pRow),
+                            courseProfessorId = pRow[CourseProfessorsTable.id].value.toString()
+                        )
+                    }
+                }
+        } else {
+            emptyMap()
+        }
+
+        val linkedNeighborIds = rows.flatMap { listOfNotNull(it[CoursesTable.prevCourseId], it[CoursesTable.nextCourseId]) }.distinct()
+        val neighborInfoMap: Map<UUID, Pair<String, String>> = if (linkedNeighborIds.isNotEmpty()) {
+            CoursesTable.select { CoursesTable.id inList linkedNeighborIds }
+                .associate { it[CoursesTable.id].value to (it[CoursesTable.name] to it[CoursesTable.semester]) }
+        } else {
+            emptyMap()
+        }
+
+        val defaultCategories = listOf(QuestionCategory.GRADE, QuestionCategory.ASSIGNMENT, QuestionCategory.LECTURE)
         val courseDtos = rows.map { row ->
-            getCourseByIdInternal(row[CoursesTable.id].value)!!
+            val cId = row[CoursesTable.id].value
+            val profList = profsByCourseId[cId].orEmpty()
+            val primaryProf = profList.firstOrNull()
+            val prevId = row[CoursesTable.prevCourseId]
+            val nextId = row[CoursesTable.nextCourseId]
+            val prevMeta = prevId?.let { neighborInfoMap[it] }
+            val nextMeta = nextId?.let { neighborInfoMap[it] }
+            CourseDto(
+                id = cId.toString(),
+                name = row[CoursesTable.name],
+                code = row[CoursesTable.code],
+                semester = row[CoursesTable.semester],
+                college = row[CoursesTable.college],
+                department = row[CoursesTable.department],
+                major = row[CoursesTable.major],
+                completionType = row[CoursesTable.completionType],
+                credit = row[CoursesTable.credit],
+                professors = profList,
+                availableCategories = defaultCategories,
+                assignedProfessorId = primaryProf?.id,
+                assignedProfessorName = primaryProf?.name,
+                assignedProfessorRegistered = primaryProf?.isRegistered ?: true,
+                assignedCourseProfessorId = primaryProf?.courseProfessorId,
+                assignedSection = primaryProf?.section,
+                prevCourseId = prevId?.toString(),
+                prevCourseName = prevMeta?.first,
+                prevCourseSemester = prevMeta?.second,
+                nextCourseId = nextId?.toString(),
+                nextCourseName = nextMeta?.first,
+                nextCourseSemester = nextMeta?.second
+            )
         }
 
         CourseListResponse(

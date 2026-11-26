@@ -4,8 +4,15 @@ import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfessorNameList from '../common/ProfessorNameList';
+import { CourseSelectPicker } from '../common/CoursePicker';
 import AdminNicknameForm from './AdminNicknameForm';
 import HelpBubble from '../common/HelpBubble';
+import {
+  buildCourseLineageChain,
+  collectSelfAndDescendantIds,
+  extractCourseScopes,
+  sortCoursesList
+} from '../../utils/courseLineage';
 import {
   buildSemesterOptions,
   compareSemesters,
@@ -299,6 +306,8 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department, prevCourseId }
   const [courseSearchQuery, setCourseSearchQuery] = useState('');
   const [courseSemesterFilter, setCourseSemesterFilter] = useState('ALL');
+  const [courseDeptFilter, setCourseDeptFilter] = useState('ALL');
+  const [courseSortBy, setCourseSortBy] = useState('semester_desc');
   const [courseListLimit, setCourseListLimit] = useState(24);
 
   // Semester rollover & Excel bulk import state
@@ -1270,22 +1279,18 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
                   <div className="form-group">
                     <label className="form-label">이전 학기 연동</label>
-                    <select
-                      className="form-select"
+                    <CourseSelectPicker
+                      courses={allCourses}
                       value={coursePrevId}
-                      onChange={(e) => setCoursePrevId(e.target.value)}
-                    >
-                      <option value="AUTO">자동 연동 (전학기 동일 과목명)</option>
-                      <option value="NONE">연동 없음</option>
-                      {allCourses
-                        .slice()
-                        .sort((a, b) => compareSemesters(b.semester, a.semester) || String(a.name).localeCompare(String(b.name)))
-                        .map((cand) => (
-                          <option key={cand.id} value={cand.id}>
-                            [{formatSemesterLabel(cand.semester)}] {cand.name} ({cand.code})
-                          </option>
-                        ))}
-                    </select>
+                      onChange={setCoursePrevId}
+                      departments={departments}
+                      colleges={colleges}
+                      specialOptions={[
+                        { value: 'AUTO', label: '자동 연동 (전학기 동일 과목명)' },
+                        { value: 'NONE', label: '연동 없음' }
+                      ]}
+                      placeholder="연동할 강의를 선택하세요"
+                    />
                   </div>
 
                   <div className="auth-form-grid-2">
@@ -1340,14 +1345,23 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                           .map((col) => col.name)
                       : []
                   );
+                  const courseScopeOptions = extractCourseScopes(allCourses);
                   const semFiltered =
                     courseSemesterFilter === 'ALL'
                       ? allCourses
                       : allCourses.filter(
                           (c) => parseSemesterOrNull(c.semester) === parseSemesterOrNull(courseSemesterFilter)
                         );
-                  const filteredCourses = trimmedQ
-                    ? semFiltered.filter((c) => {
+                  const deptFiltered =
+                    courseDeptFilter === 'ALL'
+                      ? semFiltered
+                      : semFiltered.filter(
+                          (c) =>
+                            String(c.department || c.college || '').trim() === courseDeptFilter ||
+                            String(c.college || '').trim() === courseDeptFilter
+                        );
+                  const searchedCourses = trimmedQ
+                    ? deptFiltered.filter((c) => {
                         const profNames = (c.professors || []).map((p) => p.name || '').join(' ');
                         const directMatch = [
                           c.name,
@@ -1370,34 +1384,75 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                             Array.from(aliasMatchedColleges).some((col) => c.department === `${col} 전체`)
                         );
                       })
-                    : semFiltered;
+                    : deptFiltered;
+                  const filteredCourses = sortCoursesList(searchedCourses, courseSortBy);
                   const visibleCourses = filteredCourses.slice(0, courseListLimit);
                   const remainingCount = Math.max(0, filteredCourses.length - visibleCourses.length);
+                  const editingChain = editingCourse
+                    ? buildCourseLineageChain(editingCourse.id, allCourses)
+                    : [];
+                  const editingExcludeIds = editingCourse
+                    ? collectSelfAndDescendantIds(editingCourse.id, allCourses)
+                    : null;
 
                   return (
                     <div className="admin-chip-list-wrap">
                       <div className="admin-chip-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span>
                           등록된 교과목 ({allCourses.length}개
-                          {trimmedQ || courseSemesterFilter !== 'ALL' ? ` · 필터 결과 ${filteredCourses.length}개` : ''}) · 연필로 수정 및 연결 리스트 수동 설정
+                          {trimmedQ || courseSemesterFilter !== 'ALL' || courseDeptFilter !== 'ALL' ? ` · 필터 결과 ${filteredCourses.length}개` : ''}) · 연필로 수정 및 연결 리스트 수동 설정
                         </span>
-                        <select
-                          className="form-select"
-                          style={{ width: 'auto', minWidth: 130, padding: '4px 8px', fontSize: '0.78rem' }}
-                          value={courseSemesterFilter}
-                          onChange={(e) => {
-                            setCourseSemesterFilter(e.target.value);
-                            setCourseListLimit(24);
-                          }}
-                          aria-label="학기별 과목 필터"
-                        >
-                          <option value="ALL">전체 학기 보기</option>
-                          {semesterOptions.map((sem) => (
-                            <option key={sem} value={sem}>
-                              {formatSemesterLabel(sem)}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="course-picker-controls" style={{ marginBottom: 0 }}>
+                          <select
+                            className="form-select course-picker-ctrl-select"
+                            value={courseSemesterFilter}
+                            onChange={(e) => {
+                              setCourseSemesterFilter(e.target.value);
+                              setCourseListLimit(24);
+                            }}
+                            aria-label="학기별 과목 필터"
+                          >
+                            <option value="ALL">전체 학기</option>
+                            {semesterOptions.map((sem) => (
+                              <option key={sem} value={sem}>
+                                {formatSemesterLabel(sem)}
+                              </option>
+                            ))}
+                          </select>
+                          {courseScopeOptions.length > 1 && (
+                            <select
+                              className="form-select course-picker-ctrl-select"
+                              value={courseDeptFilter}
+                              onChange={(e) => {
+                                setCourseDeptFilter(e.target.value);
+                                setCourseListLimit(24);
+                              }}
+                              aria-label="학과·단과대 필터"
+                            >
+                              <option value="ALL">전체 학과</option>
+                              {courseScopeOptions.map((sc) => (
+                                <option key={sc} value={sc}>
+                                  {sc}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <select
+                            className="form-select course-picker-ctrl-select"
+                            value={courseSortBy}
+                            onChange={(e) => {
+                              setCourseSortBy(e.target.value);
+                              setCourseListLimit(24);
+                            }}
+                            aria-label="교과목 정렬"
+                          >
+                            <option value="semester_desc">최신 학기순</option>
+                            <option value="semester_asc">오래된 학기순</option>
+                            <option value="name_asc">과목명순</option>
+                            <option value="code_asc">학수번호순</option>
+                            <option value="linked_first">연동 과목 우선</option>
+                          </select>
+                        </div>
                       </div>
                       <div className="admin-course-search-box">
                         <Search size={14} className="admin-course-search-icon" aria-hidden="true" />
@@ -1464,27 +1519,46 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                             </div>
                             <div className="form-group">
                               <label className="form-label">이전 학기 연동</label>
-                              <select
-                                className="form-select"
+                              <CourseSelectPicker
+                                courses={allCourses}
                                 value={editingCourse.prevCourseId || ''}
-                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, prevCourseId: e.target.value }))}
-                              >
-                                <option value="">연동 없음</option>
-                                {allCourses
-                                  .filter((cand) => cand.id !== editingCourse.id)
-                                  .sort(
-                                    (a, b) =>
-                                      compareSemesters(b.semester, a.semester) ||
-                                      String(a.name).localeCompare(String(b.name))
-                                  )
-                                  .map((cand) => (
-                                    <option key={cand.id} value={cand.id}>
-                                      [{formatSemesterLabel(cand.semester)}] {cand.name} ({cand.code})
-                                    </option>
-                                  ))}
-                              </select>
+                                onChange={(val) => setEditingCourse((prev) => ({ ...prev, prevCourseId: val }))}
+                                excludeIds={editingExcludeIds}
+                                departments={departments}
+                                colleges={colleges}
+                                specialOptions={[{ value: '', label: '연동 없음' }]}
+                                placeholder="연동 없음"
+                              />
                             </div>
                           </div>
+                          {editingChain.length > 1 && (
+                            <div className="course-lineage-chain-box">
+                              <div className="course-lineage-chain-title">
+                                <Link2 size={12} />
+                                <span>연결 리스트 체인 ({editingChain.length}개 강의 연속 연동 · 클릭하여 이어서 수정)</span>
+                              </div>
+                              <div className="course-lineage-chain-nodes">
+                                {editingChain.map((node, idx) => {
+                                  const isCurrent = node.id === editingCourse.id;
+                                  return (
+                                    <React.Fragment key={node.id}>
+                                      {idx > 0 && <span className="course-lineage-arrow">→</span>}
+                                      <button
+                                        type="button"
+                                        className={`course-lineage-node ${isCurrent ? 'current' : ''}`}
+                                        onClick={() => !isCurrent && handleStartEditCourse(node)}
+                                        disabled={isCurrent}
+                                        title={isCurrent ? '현재 수정 중인 강의' : `${node.name} 수정으로 이동`}
+                                      >
+                                        <span className="semester-pill">{formatSemesterLabel(node.semester)}</span>
+                                        <span>{node.name}</span>
+                                      </button>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                           <div className="auth-form-grid-2">
                             <div className="form-group">
                               <label className="form-label">주관 단위</label>
