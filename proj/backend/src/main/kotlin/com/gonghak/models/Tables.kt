@@ -212,3 +212,15 @@ object PushSubscriptionsTable : UUIDTable("push_subscriptions") {
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
     val updatedAt = timestamp("updated_at").clientDefault { Instant.now() }
 }
+
+object AdminTrashBinTable : UUIDTable("admin_trash_bin") {
+    val entityType = varchar("entity_type", 30) // COURSE, QUESTION, ANSWER
+    val entityId = uuid("entity_id")
+    val title = varchar("title", 200)
+    val summary = varchar("summary", 300).default("")
+    val snapshotJson = text("snapshot_json")
+    val deletedBy = uuid("deleted_by").nullable()
+    val deletedAt = timestamp("deleted_at").clientDefault { Instant.now() }
+    val expiresAt = timestamp("expires_at")
+    val restoredAt = timestamp("restored_at").nullable()
+}

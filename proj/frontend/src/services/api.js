@@ -1732,6 +1732,47 @@ export const api = {
     );
   },
 
+  async commitAdminBatch(operations = []) {
+    return await requestCatalogAdmin(
+      '/admin/batch-commit',
+      'POST',
+      { operations },
+      '일괄 커밋에 실패해 모든 변경 사항이 롤백되었습니다.'
+    );
+  },
+
+  async getAdminTrash() {
+    if (!USE_REMOTE_BACKEND) return [];
+    const res = await fetchWithTimeout(`${API_BASE_URL}/admin/trash`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { ...getAuthHeaders() }
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body?.success === false) {
+      throw new Error(body?.message || '휴지통 목록을 불러오지 못했습니다.');
+    }
+    return Array.isArray(body?.data) ? body.data : [];
+  },
+
+  async restoreAdminTrash(trashId) {
+    return await requestCatalogAdmin(
+      `/admin/trash/${encodeURIComponent(trashId)}/restore`,
+      'POST',
+      {},
+      '휴지통 항목 복구에 실패했습니다.'
+    );
+  },
+
+  async purgeAdminTrash(trashId) {
+    return await requestCatalogAdmin(
+      `/admin/trash/${encodeURIComponent(trashId)}`,
+      'DELETE',
+      null,
+      '휴지통 항목 영구 삭제에 실패했습니다.'
+    );
+  },
+
   async importCoursesExcel(file, { semester = '', autoLinkPrevSemester = true, setAsCurrentSemester = false } = {}) {
     if (!file) throw new Error('업로드할 엑셀(.xlsx) 파일을 선택해 주세요.');
     const formData = new FormData();

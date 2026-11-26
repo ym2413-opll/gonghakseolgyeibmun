@@ -9811,3 +9811,62 @@ body,
   font-weight: 700;
   cursor: default;
 }
+
+/* Admin Transaction Draft Bar & 30-day Trash Bin */
+.admin-tx-bar {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-tx-bar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-tx-op-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-tx-op-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-light);
+  color: var(--text-primary);
+  font-size: 0.76rem;
+}
+
+.admin-trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-trash-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  flex-wrap: wrap;
+}
+
+.admin-trash-card-info {
+  flex: 1 1 260px;
+  min-width: 0;
+}

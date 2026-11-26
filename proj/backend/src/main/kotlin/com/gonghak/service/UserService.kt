@@ -455,7 +455,8 @@ class UserService {
         AuthResponse(token = token, user = userDto)
     }
 
-    suspend fun grantOrRevokeAdminByUsername(usernameOrId: String, grant: Boolean = true): UserDto = dbQuery {
+    suspend fun grantOrRevokeAdminByUsername(usernameOrId: String, grant: Boolean = true): UserDto =
+        DatabaseFactory.adminTransaction("grantOrRevokeAdmin") {
         val clean = usernameOrId.trim()
         if (clean.isBlank()) throw IllegalArgumentException("대상 계정 ID를 입력해 주세요.")
 
@@ -502,7 +503,8 @@ class UserService {
         row[UsersTable.isAdmin] || row[UsersTable.role] == UserRole.ADMIN.name
     }
 
-    suspend fun getAllUsersForAdmin(): List<UserDto> = dbQuery {
+    suspend fun getAllUsersForAdmin(): List<UserDto> =
+        DatabaseFactory.adminTransaction("getAllUsersForAdmin") {
         UsersTable.select { UsersTable.isDemo eq false }
             .orderBy(UsersTable.createdAt to SortOrder.DESC)
             .map { rowToUserDto(it, includeCourses = false) }
@@ -1814,10 +1816,13 @@ class UserService {
             getCourseByIdInternal(courseId)!!
         }
 
-    suspend fun deleteCourse(courseId: UUID): Pair<Int, List<String>> =
+    suspend fun deleteCourse(courseId: UUID, deletedBy: UUID? = null): Pair<Int, List<String>> =
         DatabaseFactory.adminTransaction("deleteCourse") {
         val existing = CoursesTable.select { CoursesTable.id eq courseId }.singleOrNull()
             ?: throw IllegalArgumentException("존재하지 않는 과목입니다.")
+
+        // Archive full course + children snapshot into 30-day restorable trash bin before removing live rows
+        AdminTrashService.archiveCourseInternal(courseId, deletedBy)
 
         // Splice doubly-linked list neighbors together before deleting
         val prevId = existing[CoursesTable.prevCourseId]
@@ -1863,7 +1868,8 @@ class UserService {
         CourseAliasesTable.deleteWhere { CourseAliasesTable.courseId eq courseId }
         CoursesTable.deleteWhere { CoursesTable.id eq courseId }
 
-        questionIds.size to attachmentNames
+        // Physical attachment files are preserved until permanently purged from trash (30-day retention)
+        questionIds.size to emptyList()
     }
 
     suspend fun getAllDemoUsers(): List<UserDto> = dbQuery {

@@ -1,5 +1,6 @@
 package com.gonghak.service
 
+import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.EnvConfig
 import com.gonghak.dto.EmailLogDto
@@ -521,26 +522,29 @@ class EmailService(
         dispatchEmailAsync(job)
     }
 
-    suspend fun getEmailLogs(professorId: UUID? = null, isAdmin: Boolean = false): List<EmailLogDto> = dbQuery {
-        val query = if (isAdmin || professorId == null) {
-            EmailLogsTable.selectAll()
-        } else {
-            EmailLogsTable.select { EmailLogsTable.professorId eq professorId }
-        }
-
-        query.orderBy(EmailLogsTable.createdAt to SortOrder.DESC)
-            .limit(50)
-            .map { row ->
-                EmailLogDto(
-                    id = row[EmailLogsTable.id].value.toString(),
-                    recipientEmail = row[EmailLogsTable.recipientEmail],
-                    professorId = row[EmailLogsTable.professorId]?.toString(),
-                    questionId = row[EmailLogsTable.questionId]?.toString(),
-                    subject = row[EmailLogsTable.subject],
-                    body = row[EmailLogsTable.body],
-                    status = row[EmailLogsTable.status],
-                    createdAt = row[EmailLogsTable.createdAt].toString()
-                )
+    suspend fun getEmailLogs(professorId: UUID? = null, isAdmin: Boolean = false): List<EmailLogDto> {
+        val block: suspend () -> List<EmailLogDto> = {
+            val query = if (isAdmin || professorId == null) {
+                EmailLogsTable.selectAll()
+            } else {
+                EmailLogsTable.select { EmailLogsTable.professorId eq professorId }
             }
+
+            query.orderBy(EmailLogsTable.createdAt to SortOrder.DESC)
+                .limit(50)
+                .map { row ->
+                    EmailLogDto(
+                        id = row[EmailLogsTable.id].value.toString(),
+                        recipientEmail = row[EmailLogsTable.recipientEmail],
+                        professorId = row[EmailLogsTable.professorId]?.toString(),
+                        questionId = row[EmailLogsTable.questionId]?.toString(),
+                        subject = row[EmailLogsTable.subject],
+                        body = row[EmailLogsTable.body],
+                        status = row[EmailLogsTable.status],
+                        createdAt = row[EmailLogsTable.createdAt].toString()
+                    )
+                }
+        }
+        return if (isAdmin) DatabaseFactory.adminTransaction("getAdminEmailLogs", block = block) else dbQuery(block = block)
     }
 }

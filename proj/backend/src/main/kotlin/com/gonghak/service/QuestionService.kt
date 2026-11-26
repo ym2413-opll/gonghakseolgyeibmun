@@ -940,7 +940,7 @@ class QuestionService(
         answerId: UUID,
         actorId: UUID,
         isHidden: Boolean
-    ): AnswerDto = dbQuery {
+    ): AnswerDto = DatabaseFactory.adminTransaction("setAnswerHiddenByModerator") {
         val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
             ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
         val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
@@ -1010,7 +1010,7 @@ class QuestionService(
     }
 
     suspend fun deleteAnswerByModerator(questionId: UUID, answerId: UUID, actorId: UUID): UUID {
-        val (deletedQuestionId, savedAttachmentNames) = dbQuery {
+        val (deletedQuestionId, savedAttachmentNames) = DatabaseFactory.adminTransaction("deleteAnswerByModerator") {
             val qRow = QuestionsTable.select { QuestionsTable.id eq questionId }.singleOrNull()
                 ?: throw IllegalArgumentException("질문을 찾을 수 없습니다.")
             val aRow = AnswersTable.innerJoin(UsersTable, { AnswersTable.professorId }, { UsersTable.id })
@@ -1079,15 +1079,16 @@ class QuestionService(
         )
     }
 
-    suspend fun deleteQuestion(questionId: UUID): Boolean {
-        val savedAttachmentNames = DatabaseFactory.adminTransaction("deleteQuestion") {
+    suspend fun deleteQuestion(questionId: UUID, deletedBy: UUID? = null): Boolean {
+        DatabaseFactory.adminTransaction("deleteQuestion") {
             val exists = QuestionsTable.select { QuestionsTable.id eq questionId }.count() > 0
             if (!exists) throw IllegalArgumentException("질문을 찾을 수 없습니다.")
 
+            // Archive full question + answers + attachments snapshot into 30-day restorable trash bin
+            AdminTrashService.archiveQuestionInternal(questionId, deletedBy)
+
             val answerIds = AnswersTable.select { AnswersTable.questionId eq questionId }
                 .map { it[AnswersTable.id].value }
-            val attachmentNames = AttachmentsTable.select { AttachmentsTable.questionId eq questionId }
-                .map { it[AttachmentsTable.savedName] }
 
             NotificationsTable.deleteWhere { NotificationsTable.referenceId eq questionId }
             if (answerIds.isNotEmpty()) {
@@ -1096,10 +1097,7 @@ class QuestionService(
             AttachmentsTable.deleteWhere { AttachmentsTable.questionId eq questionId }
             AnswersTable.deleteWhere { AnswersTable.questionId eq questionId }
             QuestionsTable.deleteWhere { QuestionsTable.id eq questionId }
-            attachmentNames
         }
-
-        attachmentService?.deleteStoredFiles(savedAttachmentNames)
         return true
     }
 
@@ -1166,12 +1164,12 @@ class QuestionService(
         return true
     }
 
-    suspend fun deleteAnswer(answerId: UUID): UUID {
-        val (questionId, savedNames) = DatabaseFactory.adminTransaction("deleteAnswer") {
-            deleteAnswerInternal(answerId)
+    suspend fun deleteAnswer(answerId: UUID, deletedBy: UUID? = null): UUID {
+        return DatabaseFactory.adminTransaction("deleteAnswer") {
+            AdminTrashService.archiveAnswerInternal(answerId, deletedBy)
+            val (questionId, _) = deleteAnswerInternal(answerId)
+            questionId
         }
-        attachmentService?.deleteStoredFiles(savedNames)
-        return questionId
     }
 
     private fun deleteAnswerInternal(answerId: UUID): Pair<UUID, List<String>> {

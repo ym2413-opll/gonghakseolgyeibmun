@@ -357,6 +357,38 @@ data class ExcelCourseImportResultDto(
 )
 
 @Serializable
+data class AdminTrashItemDto(
+    val id: String,
+    val entityType: String, // COURSE, QUESTION, ANSWER
+    val entityId: String,
+    val title: String,
+    val summary: String = "",
+    val deletedBy: String? = null,
+    val deletedAt: String,
+    val expiresAt: String,
+    val remainingDays: Long = 30
+)
+
+@Serializable
+data class AdminBatchOperationDto(
+    val type: String,
+    val targetId: String? = null,
+    val label: String = "",
+    val payload: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap())
+)
+
+@Serializable
+data class AdminBatchCommitRequest(
+    val operations: List<AdminBatchOperationDto> = emptyList()
+)
+
+@Serializable
+data class AdminBatchCommitResultDto(
+    val committedCount: Int,
+    val summary: List<String> = emptyList()
+)
+
+@Serializable
 data class UpdateUserCoursesRequest(
     val courseIds: List<String> = emptyList(),
     val courseSelections: List<CourseSelectionItemDto> = emptyList()

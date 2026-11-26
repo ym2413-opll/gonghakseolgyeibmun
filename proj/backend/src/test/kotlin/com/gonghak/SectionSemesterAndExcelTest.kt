@@ -498,6 +498,86 @@ class SectionSemesterAndExcelTest {
             CoursesTable.select { CoursesTable.id eq UUID.fromString(demoCourseId) }.single()[CoursesTable.name]
         }
         assertTrue(afterFailName != "트랜잭션롤백테스트명칭", "Admin transaction must roll back course rename when subsequent link fails")
+
+        // 11. Atomic batch-commit (all-or-nothing rollback on failure, then full commit on valid batch)
+        val failBatchRes = client.post("/api/admin/batch-commit") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(
+                AdminBatchCommitRequest(
+                    operations = listOf(
+                        AdminBatchOperationDto(
+                            type = "ADD_COURSE_ALIAS",
+                            targetId = spring2027Course.id,
+                            label = "일괄별칭테스트",
+                            payload = kotlinx.serialization.json.JsonObject(
+                                mapOf("alias" to kotlinx.serialization.json.JsonPrimitive("롤백되어야할별칭"))
+                            )
+                        ),
+                        AdminBatchOperationDto(
+                            type = "LINK_COURSE",
+                            targetId = demoCourseId,
+                            label = "순환오류유발",
+                            payload = kotlinx.serialization.json.JsonObject(
+                                mapOf("prevCourseId" to kotlinx.serialization.json.JsonPrimitive(spring2027Course.id))
+                            )
+                        )
+                    )
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, failBatchRes.status)
+        val aliasCountAfterRollback = transaction {
+            CourseAliasesTable.select {
+                (CourseAliasesTable.courseId eq UUID.fromString(spring2027Course.id)) and
+                    (CourseAliasesTable.aliasName eq "롤백되어야할별칭")
+            }.count()
+        }
+        assertEquals(0L, aliasCountAfterRollback, "Batch commit failure must roll back earlier operation in the same batch")
+
+        val okBatchRes = client.post("/api/admin/batch-commit") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+            contentType(ContentType.Application.Json)
+            setBody(
+                AdminBatchCommitRequest(
+                    operations = listOf(
+                        AdminBatchOperationDto(
+                            type = "ADD_COURSE_ALIAS",
+                            targetId = spring2027Course.id,
+                            label = "일괄별칭성공",
+                            payload = kotlinx.serialization.json.JsonObject(
+                                mapOf("alias" to kotlinx.serialization.json.JsonPrimitive("일괄커밋별칭"))
+                            )
+                        ),
+                        AdminBatchOperationDto(
+                            type = "DELETE_COURSE",
+                            targetId = bridgeCourse.id,
+                            label = "브릿지과목삭제(휴지통)"
+                        )
+                    )
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.OK, okBatchRes.status)
+
+        // 12. 30-day Trash Bin: deleted bridgeCourse must appear in /api/admin/trash and restore losslessly!
+        val trashListRes = client.get("/api/admin/trash") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+        }
+        assertEquals(HttpStatusCode.OK, trashListRes.status)
+        val trashList = trashListRes.body<ApiResponse<List<AdminTrashItemDto>>>().data!!
+        val deletedBridgeItem = trashList.firstOrNull { it.entityType == "COURSE" && it.entityId == bridgeCourse.id }
+        assertTrue(deletedBridgeItem != null, "Deleted course must be preserved in 30-day trash bin")
+        assertTrue(deletedBridgeItem!!.remainingDays >= 29L, "Trash retention must be ~30 days")
+
+        val restoreRes = client.post("/api/admin/trash/${deletedBridgeItem.id}/restore") {
+            header(HttpHeaders.Authorization, bearerToken(adminId))
+        }
+        assertEquals(HttpStatusCode.OK, restoreRes.status)
+        val restoredExists = transaction {
+            CoursesTable.select { CoursesTable.id eq UUID.fromString(bridgeCourse.id) }.count() > 0L
+        }
+        assertTrue(restoredExists, "Restored course must be back in CoursesTable")
         } finally {
             // Restore shared demo state so subsequent test classes see default 2026-2, original emails & ALL_SECTIONS
             transaction {

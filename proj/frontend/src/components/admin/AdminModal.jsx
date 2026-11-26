@@ -354,18 +354,106 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   // User sanction duration state
   const [banDurationHours, setBanDurationHours] = useState(24);
 
+  // Admin Transaction Draft/Staging Mode (Batch Commit / Rollback) & 30-day Trash Bin
+  const [draftMode, setDraftMode] = useState(true);
+  const [pendingOps, setPendingOps] = useState([]);
+  const [isCommittingBatch, setIsCommittingBatch] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [trashBusyId, setTrashBusyId] = useState(null);
+
+  const stageOperation = (op) => {
+    setPendingOps((prev) => [
+      ...prev,
+      {
+        id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: op.type,
+        targetId: op.targetId || null,
+        label: op.label,
+        payload: op.payload || {}
+      }
+    ]);
+    notifySuccess(`초안에 추가됨: ${op.label} (상단에서 일괄 커밋하거나 되돌릴 수 있습니다.)`);
+  };
+
+  const handleRemovePendingOp = (opId) => {
+    setPendingOps((prev) => prev.filter((item) => item.id !== opId));
+  };
+
+  const handleRollbackBatch = () => {
+    if (pendingOps.length === 0) return;
+    setPendingOps([]);
+    notifySuccess('초안에 대기 중이던 변경 사항을 모두 되돌렸습니다.');
+  };
+
   const loadAdminData = useCallback(async () => {
     try {
-      const [userList, emails] = await Promise.all([
+      const [userList, emails, trash] = await Promise.all([
         api.getAdminUsers(),
-        api.getEmailLogs()
+        api.getEmailLogs(),
+        api.getAdminTrash().catch(() => [])
       ]);
       setUsers(Array.isArray(userList) ? userList : []);
       setEmailLogs(Array.isArray(emails) ? emails : []);
+      setTrashItems(Array.isArray(trash) ? trash : []);
     } catch (err) {
       console.warn('Admin data load warning:', err);
     }
   }, []);
+
+  const handleCommitBatch = async () => {
+    if (pendingOps.length === 0 || isCommittingBatch) return;
+    setIsCommittingBatch(true);
+    try {
+      const payloadOps = pendingOps.map(({ type, targetId, label, payload }) => ({
+        type,
+        targetId,
+        label,
+        payload
+      }));
+      await api.commitAdminBatch(payloadOps);
+      const count = pendingOps.length;
+      setPendingOps([]);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`${count}건의 변경 사항이 하나의 트랜잭션으로 일괄 커밋되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '일괄 커밋에 실패해 모든 변경 사항이 롤백되었습니다.');
+    } finally {
+      setIsCommittingBatch(false);
+    }
+  };
+
+  const handleRestoreTrash = async (item) => {
+    if (!item?.id || trashBusyId) return;
+    setTrashBusyId(item.id);
+    try {
+      await api.restoreAdminTrash(item.id);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`'${item.title}' 항목이 복구되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '복구 중 오류가 발생했습니다.');
+    } finally {
+      setTrashBusyId(null);
+    }
+  };
+
+  const handlePurgeTrash = async (item) => {
+    if (!item?.id || trashBusyId) return;
+    if (!window.confirm(`'${item.title}' 항목을 휴지통에서 영구 삭제하시겠습니까?\n영구 삭제 후에는 복구할 수 없습니다.`)) {
+      return;
+    }
+    setTrashBusyId(item.id);
+    try {
+      await api.purgeAdminTrash(item.id);
+      await loadAdminData();
+      notifySuccess(`'${item.title}' 항목이 영구 삭제되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '영구 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setTrashBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -640,17 +728,29 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     const addedName = courseName.trim();
     const addedCode = courseCode.trim();
     const cleanSem = normalizeSemester(effectiveCourseSemester, currentSemester);
-    try {
-      await api.createCourse({
-        code: addedCode,
-        name: addedName,
-        semester: cleanSem,
-        scopeType: courseScopeType,
-        college: resolvedCollege,
-        department: resolvedDepartment,
-        prevCourseId: coursePrevId !== 'AUTO' && coursePrevId !== 'NONE' ? coursePrevId : null,
-        autoLinkPrevSemester: coursePrevId === 'AUTO'
+    const payload = {
+      code: addedCode,
+      name: addedName,
+      semester: cleanSem,
+      scopeType: courseScopeType,
+      college: resolvedCollege,
+      department: resolvedDepartment,
+      prevCourseId: coursePrevId !== 'AUTO' && coursePrevId !== 'NONE' ? coursePrevId : null,
+      autoLinkPrevSemester: coursePrevId === 'AUTO'
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'CREATE_COURSE',
+        label: `과목 추가: ${addedName} (${addedCode}, ${formatSemesterLabel(cleanSem)})`,
+        payload
       });
+      setCourseCode('');
+      setCourseName('');
+      setCoursePrevId('AUTO');
+      return;
+    }
+    try {
+      await api.createCourse(payload);
       setCourseCode('');
       setCourseName('');
       setCoursePrevId('AUTO');
@@ -744,18 +844,29 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     );
     const cleanSem = normalizeSemester(editingCourse.semester.trim(), currentSemester);
     const cleanPrev = (editingCourse.prevCourseId || '').trim();
-    try {
-      const updated = await api.updateCourse(editingCourse.id, {
-        name: cleanName,
-        code: cleanCode,
-        semester: cleanSem,
-        scopeType: editingCourse.scopeType,
-        college: resolvedCollege,
-        department: resolvedDepartment,
-        prevCourseId: cleanPrev || null,
-        unlinkPrevCourse: !cleanPrev,
-        keepOldNameAsAlias: Boolean(editingCourse.keepOldNameAsAlias)
+    const payload = {
+      name: cleanName,
+      code: cleanCode,
+      semester: cleanSem,
+      scopeType: editingCourse.scopeType,
+      college: resolvedCollege,
+      department: resolvedDepartment,
+      prevCourseId: cleanPrev || null,
+      unlinkPrevCourse: !cleanPrev,
+      keepOldNameAsAlias: Boolean(editingCourse.keepOldNameAsAlias)
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_COURSE',
+        targetId: editingCourse.id,
+        label: `과목 수정: ${cleanName} (${cleanCode})`,
+        payload
       });
+      setEditingCourse(null);
+      return;
+    }
+    try {
+      const updated = await api.updateCourse(editingCourse.id, payload);
       setEditingCourse(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -767,9 +878,21 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleDeleteCourse = async (course) => {
     if (!course?.id) return;
+    if (draftMode) {
+      stageOperation({
+        type: 'DELETE_COURSE',
+        targetId: course.id,
+        label: `과목 삭제(휴지통): ${course.name} (${course.code})`,
+        payload: {}
+      });
+      if (editingCourse && String(editingCourse.id) === String(course.id)) {
+        setEditingCourse(null);
+      }
+      return;
+    }
     if (
       !window.confirm(
-        `'${course.name} (${course.code})' 과목을 삭제하시겠습니까?\n이 과목에 등록된 질문·답변 및 수강 내역도 함께 삭제됩니다.`
+        `'${course.name} (${course.code})' 과목을 삭제하시겠습니까?\n삭제된 과목과 관련 질문·답변은 휴지통에 30일간 보존되며 언제든 복구할 수 있습니다.`
       )
     ) {
       return;
@@ -779,21 +902,31 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       if (editingCourse && String(editingCourse.id) === String(course.id)) {
         setEditingCourse(null);
       }
-      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`과목 '${course.name} (${course.code})'이(가) 삭제되었습니다.`);
+      notifySuccess(`과목 '${course.name} (${course.code})'이(가) 휴지통으로 이동되었습니다. (30일간 복구 가능)`);
     } catch (err) {
       notifyError(err.message || '과목 삭제 중 오류가 발생했습니다.');
     }
   };
 
   const handleSanction = async (targetUser, action) => {
-    try {
-      await api.sanctionUser(targetUser.id, {
-        action,
-        durationHours: Number(banDurationHours) || 24,
-        durationDays: 0
+    const payload = {
+      action,
+      durationHours: Number(banDurationHours) || 24,
+      durationDays: 0
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'SANCTION_USER',
+        targetId: targetUser.id,
+        label: `계정 제재(${action}): ${targetUser.name}`,
+        payload
       });
+      return;
+    }
+    try {
+      await api.sanctionUser(targetUser.id, payload);
       await loadAdminData();
       await refreshCurrentUser();
       notifySuccess(`'${targetUser.name} (${targetUser.username || targetUser.identifier})' 계정에 [${action}] 조치가 적용되었습니다.`);
@@ -803,6 +936,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleToggleQuestionHide = async (q) => {
+    if (draftMode) {
+      stageOperation({
+        type: 'HIDE_QUESTION',
+        targetId: q.id,
+        label: `질문 ${!q.isHidden ? '가리기' : '가리기 해제'}: ${(q.title || '').slice(0, 24)}`,
+        payload: { isHidden: !q.isHidden }
+      });
+      return;
+    }
     try {
       await api.toggleHideQuestion(q.id, !q.isHidden);
       if (onDataChanged) await onDataChanged();
@@ -814,15 +956,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleDeletePost = async (q) => {
     if (!q?.id) return;
-    if (onDeleteQuestion) {
-      await onDeleteQuestion(q);
+    if (draftMode) {
+      stageOperation({
+        type: 'DELETE_QUESTION',
+        targetId: q.id,
+        label: `질문 삭제(휴지통): ${(q.title || '').slice(0, 24)}`,
+        payload: {}
+      });
       return;
     }
-    if (!window.confirm('이 질문 게시물을 영구 삭제하시겠습니까?')) return;
+    if (onDeleteQuestion) {
+      await onDeleteQuestion(q);
+      await loadAdminData();
+      return;
+    }
+    if (!window.confirm('이 질문 게시물을 삭제하시겠습니까?\n삭제된 질문은 휴지통에 30일간 보존되며 복구할 수 있습니다.')) return;
     try {
       await api.deleteQuestion(q.id);
+      await loadAdminData();
       if (onDataChanged) await onDataChanged();
-      notifySuccess('질문이 영구 삭제되었습니다.');
+      notifySuccess('질문이 휴지통으로 이동되었습니다. (30일간 복구 가능)');
     } catch (err) {
       notifyError(err.message || '게시물 삭제 실패');
     }
@@ -877,6 +1030,69 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
             <Mail size={16} />
             <span>이메일 ({emailLogs.length})</span>
           </button>
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'trash' ? 'active' : ''}`}
+            onClick={() => setActiveTab('trash')}
+          >
+            <Trash2 size={16} />
+            <span>휴지통 ({trashItems.length})</span>
+          </button>
+        </div>
+
+        {/* 관리자 트랜잭션 초안 모드 (일괄 커밋 / 롤백) 바 */}
+        <div className="admin-tx-bar">
+          <div className="admin-tx-bar-top">
+            <label className="admin-check-inline" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={draftMode}
+                onChange={(e) => setDraftMode(e.target.checked)}
+              />
+              <span>초안 모드 (변경 사항을 모아 일괄 커밋/롤백)</span>
+            </label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {pendingOps.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-xs"
+                    onClick={handleRollbackBatch}
+                    disabled={isCommittingBatch}
+                  >
+                    전체 되돌리기 ({pendingOps.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-xs"
+                    onClick={handleCommitBatch}
+                    disabled={isCommittingBatch}
+                  >
+                    <Check size={12} />
+                    {isCommittingBatch ? '커밋 중...' : `일괄 커밋 (${pendingOps.length}건)`}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {pendingOps.length > 0 && (
+            <div className="admin-tx-op-list">
+              {pendingOps.map((op, idx) => (
+                <span key={op.id} className="admin-tx-op-chip">
+                  <strong>#{idx + 1}</strong> {op.label}
+                  <button
+                    type="button"
+                    className="chip-remove-btn"
+                    onClick={() => handleRemovePendingOp(op.id)}
+                    aria-label="변경 취소"
+                    title="이 변경 사항만 취소"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="modal-body admin-modal-body">
@@ -2156,6 +2372,77 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                         <div className="admin-email-log-subject">{log.subject}</div>
                         <div className="text-xs text-muted">
                           {log.createdAt?.slice(0, 19).replace('T', ' ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'trash' && (
+            <div>
+              <h3 className="admin-panel-title" style={{ marginBottom: 8 }}>
+                <Trash2 size={18} />
+                휴지통 (30일 보존 · 복구 가능)
+              </h3>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="삭제된 교과목·질문·답변은 30일간 휴지통에 보존돼요. 보존 기간 내에는 원본 그대로 복구할 수 있고, 만료되면 첨부파일과 함께 영구 삭제돼요."
+                className="mb-help-bubble"
+              />
+              {trashItems.length === 0 ? (
+                <div className="empty-state-box">
+                  휴지통에 보관된 삭제 항목이 없습니다.
+                </div>
+              ) : (
+                <div className="admin-trash-list">
+                  {trashItems.map((item) => {
+                    const typeLabel =
+                      item.entityType === 'COURSE'
+                        ? '교과목'
+                        : item.entityType === 'QUESTION'
+                          ? '질문'
+                          : '답변';
+                    const isBusy = trashBusyId === item.id;
+                    return (
+                      <div key={item.id} className="admin-trash-card">
+                        <div className="admin-trash-card-info">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span className="semester-pill">{typeLabel}</span>
+                            <strong style={{ fontSize: '0.88rem' }}>{item.title}</strong>
+                            <span className="admin-linked-chain-badge">D-{item.remainingDays}</span>
+                          </div>
+                          {item.summary && (
+                            <div className="text-xs text-muted" style={{ marginTop: 3 }}>
+                              {item.summary}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                            삭제 시각: {item.deletedAt?.slice(0, 19).replace('T', ' ')} · 만료: {item.expiresAt?.slice(0, 10)}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-xs"
+                            onClick={() => handleRestoreTrash(item)}
+                            disabled={isBusy}
+                          >
+                            <RefreshCw size={12} />
+                            복구
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-xs"
+                            onClick={() => handlePurgeTrash(item)}
+                            disabled={isBusy}
+                          >
+                            <Trash2 size={12} />
+                            영구 삭제
+                          </button>
                         </div>
                       </div>
                     );

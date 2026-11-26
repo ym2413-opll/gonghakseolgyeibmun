@@ -77,7 +77,8 @@ object DatabaseFactory {
             EmailReplyTokensTable,
             ProcessedInboundEmailsTable,
             WebPushKeysTable,
-            PushSubscriptionsTable
+            PushSubscriptionsTable,
+            AdminTrashBinTable
         )
 
         // 1. Create missing tables first in an isolated transaction
@@ -275,6 +276,11 @@ object DatabaseFactory {
         maxAttempts: Int = 3,
         block: suspend () -> T
     ): T {
+        // Reentrant participation: if already inside an active adminTransaction (e.g. batch-commit),
+        // run directly in the enclosing transaction so all operations share one atomic commit/rollback boundary.
+        if (org.jetbrains.exposed.sql.transactions.TransactionManager.currentOrNull() != null) {
+            return block()
+        }
         var lastError: Throwable? = null
         for (attempt in 1..maxAttempts) {
             try {

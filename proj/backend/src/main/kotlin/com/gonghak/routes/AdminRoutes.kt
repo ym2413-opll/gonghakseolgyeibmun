@@ -1,11 +1,15 @@
 package com.gonghak.routes
 
+import com.gonghak.config.DatabaseFactory
 import com.gonghak.dto.*
 import com.gonghak.models.UserRole
+import com.gonghak.service.AdminTrashService
 import com.gonghak.service.EmailService
 import com.gonghak.service.ExcelCourseImporter
 import com.gonghak.service.QuestionService
 import com.gonghak.service.UserService
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.application.*
@@ -331,16 +335,16 @@ fun Route.adminRoutes(
         }
 
         delete("/courses/{id}") {
-            call.requireAdmin() ?: return@delete
+            val adminId = call.requireAdmin() ?: return@delete
             val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@delete
             try {
-                val (deletedQuestions, attachmentNames) = userService.deleteCourse(courseUuid)
+                val (deletedQuestions, attachmentNames) = userService.deleteCourse(courseUuid, adminId)
                 questionService.purgeStoredFiles(attachmentNames)
                 call.respond(
                     HttpStatusCode.OK,
                     ApiResponse(
                         success = true,
-                        message = "과목이 삭제되었습니다.",
+                        message = "과목이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
                         data = kotlinx.serialization.json.JsonObject(
                             mapOf(
                                 "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -406,20 +410,20 @@ fun Route.adminRoutes(
         patch("/answers/{id}/hide") { handleAnswerHide(call) }
         post("/answers/{id}/hide") { handleAnswerHide(call) }
 
-        // Delete question or answer permanently (Admin only)
+        // Delete question or answer (soft-archived into 30-day restorable trash bin)
         delete("/questions/{id}") {
-            call.requireAdmin() ?: return@delete
+            val adminId = call.requireAdmin() ?: return@delete
             val id = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
                 ?: return@delete call.respond(
                     HttpStatusCode.BadRequest,
                     ErrorResponse(success = false, message = "유효한 질문 ID가 아닙니다.")
                 )
-            questionService.deleteQuestion(id)
+            questionService.deleteQuestion(id, adminId)
             call.respond(
                 HttpStatusCode.OK,
                 ApiResponse(
                     success = true,
-                    message = "질문이 영구 삭제되었습니다.",
+                    message = "질문이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
                     data = kotlinx.serialization.json.JsonObject(
                         mapOf(
                             "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -431,18 +435,18 @@ fun Route.adminRoutes(
         }
 
         delete("/answers/{id}") {
-            call.requireAdmin() ?: return@delete
+            val adminId = call.requireAdmin() ?: return@delete
             val id = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
                 ?: return@delete call.respond(
                     HttpStatusCode.BadRequest,
                     ErrorResponse(success = false, message = "유효한 답변 ID가 아닙니다.")
                 )
-            val questionId = questionService.deleteAnswer(id)
+            val questionId = questionService.deleteAnswer(id, adminId)
             call.respond(
                 HttpStatusCode.OK,
                 ApiResponse(
                     success = true,
-                    message = "답변이 삭제되었습니다.",
+                    message = "답변이 휴지통으로 이동되었습니다. (30일간 복구 가능)",
                     data = kotlinx.serialization.json.JsonObject(
                         mapOf(
                             "deleted" to kotlinx.serialization.json.JsonPrimitive(true),
@@ -452,6 +456,126 @@ fun Route.adminRoutes(
                     )
                 )
             )
+        }
+
+        // Trash Bin (30-day soft-delete retention & restore)
+        get("/trash") {
+            call.requireAdmin() ?: return@get
+            val items = AdminTrashService.listTrashItems(questionService)
+            call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = items))
+        }
+
+        post("/trash/{id}/restore") {
+            call.requireAdmin() ?: return@post
+            val trashUuid = call.parseUuidParam("id", "유효하지 않은 휴지통 항목 ID입니다.") ?: return@post
+            call.respondServiceCall(HttpStatusCode.OK, "삭제된 항목이 복구되었습니다.") {
+                AdminTrashService.restoreTrashItem(trashUuid)
+            }
+        }
+
+        delete("/trash/{id}") {
+            call.requireAdmin() ?: return@delete
+            val trashUuid = call.parseUuidParam("id", "유효하지 않은 휴지통 항목 ID입니다.") ?: return@delete
+            call.respondServiceCall(HttpStatusCode.OK, "휴지통 항목이 영구 삭제되었습니다.") {
+                AdminTrashService.purgeTrashItem(trashUuid, questionService)
+            }
+        }
+
+        // Atomic Batch Commit for Admin Draft/Staging Mode (All-or-Nothing Rollback)
+        val batchJson = Json { ignoreUnknownKeys = true }
+        post("/batch-commit") {
+            val adminId = call.requireAdmin() ?: return@post
+            val request = call.receive<AdminBatchCommitRequest>()
+            if (request.operations.isEmpty()) {
+                return@post call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "적용할 변경 사항이 없습니다.")
+                )
+            }
+            if (request.operations.size > 100) {
+                return@post call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<String>(success = false, message = "한 번에 일괄 커밋할 수 있는 작업은 최대 100개입니다.")
+                )
+            }
+            call.respondServiceCall(HttpStatusCode.OK, "${request.operations.size}건의 변경 사항이 일괄 커밋되었습니다.") {
+                DatabaseFactory.adminTransaction("batchCommit") {
+                    val summary = mutableListOf<String>()
+                    request.operations.forEachIndexed { idx, op ->
+                        val stepLabel = op.label.ifBlank { op.type }
+                        try {
+                            fun requireUuid(): UUID = runCatching { UUID.fromString(op.targetId) }.getOrNull()
+                                ?: throw IllegalArgumentException("유효하지 않은 대상 ID입니다.")
+                            when (op.type.uppercase()) {
+                                "CREATE_COLLEGE" -> userService.createCollege(batchJson.decodeFromJsonElement(op.payload))
+                                "UPDATE_COLLEGE" -> userService.updateCollege(requireUuid(), batchJson.decodeFromJsonElement(op.payload))
+                                "ADD_COLLEGE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.addCollegeAlias(requireUuid(), req.alias)
+                                }
+                                "RENAME_COLLEGE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<RenameAliasRequest>(op.payload)
+                                    userService.renameCollegeAlias(requireUuid(), req.oldAlias, req.newAlias)
+                                }
+                                "REMOVE_COLLEGE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.removeCollegeAlias(requireUuid(), req.alias)
+                                }
+                                "CREATE_DEPARTMENT" -> userService.createDepartment(batchJson.decodeFromJsonElement(op.payload))
+                                "UPDATE_DEPARTMENT" -> userService.updateDepartment(requireUuid(), batchJson.decodeFromJsonElement(op.payload))
+                                "ADD_DEPARTMENT_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.addDepartmentAlias(requireUuid(), req.alias)
+                                }
+                                "RENAME_DEPARTMENT_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<RenameAliasRequest>(op.payload)
+                                    userService.renameDepartmentAlias(requireUuid(), req.oldAlias, req.newAlias)
+                                }
+                                "REMOVE_DEPARTMENT_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.removeDepartmentAlias(requireUuid(), req.alias)
+                                }
+                                "CREATE_COURSE" -> userService.createCourse(batchJson.decodeFromJsonElement(op.payload))
+                                "UPDATE_COURSE" -> userService.updateCourse(requireUuid(), batchJson.decodeFromJsonElement(op.payload))
+                                "LINK_COURSE" -> {
+                                    val req = batchJson.decodeFromJsonElement<LinkCourseRequest>(op.payload)
+                                    userService.linkCourse(requireUuid(), req.prevCourseId)
+                                }
+                                "DELETE_COURSE" -> userService.deleteCourse(requireUuid(), adminId)
+                                "ADD_COURSE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.addCourseAlias(requireUuid(), req.alias)
+                                }
+                                "RENAME_COURSE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<RenameAliasRequest>(op.payload)
+                                    userService.renameCourseAlias(requireUuid(), req.oldAlias, req.newAlias)
+                                }
+                                "REMOVE_COURSE_ALIAS" -> {
+                                    val req = batchJson.decodeFromJsonElement<DepartmentAliasRequest>(op.payload)
+                                    userService.removeCourseAlias(requireUuid(), req.alias)
+                                }
+                                "ROLLOVER_SEMESTER" -> userService.rolloverSemester(batchJson.decodeFromJsonElement(op.payload))
+                                "SANCTION_USER" -> userService.sanctionUser(requireUuid(), batchJson.decodeFromJsonElement(op.payload))
+                                "HIDE_QUESTION" -> {
+                                    val req = batchJson.decodeFromJsonElement<ToggleHideRequest>(op.payload)
+                                    questionService.setQuestionHidden(requireUuid(), req.isHidden, adminId)
+                                }
+                                "DELETE_QUESTION" -> questionService.deleteQuestion(requireUuid(), adminId)
+                                "HIDE_ANSWER" -> {
+                                    val req = batchJson.decodeFromJsonElement<ToggleHideRequest>(op.payload)
+                                    questionService.setAnswerHidden(requireUuid(), req.isHidden)
+                                }
+                                "DELETE_ANSWER" -> questionService.deleteAnswer(requireUuid(), adminId)
+                                else -> throw IllegalArgumentException("지원하지 않는 일괄 작업 유형입니다: ${op.type}")
+                            }
+                            summary.add("#${idx + 1} $stepLabel")
+                        } catch (e: IllegalArgumentException) {
+                            throw IllegalArgumentException("#${idx + 1} [$stepLabel] 실패 (전체 롤백됨): ${e.message}")
+                        }
+                    }
+                    AdminBatchCommitResultDto(committedCount = summary.size, summary = summary)
+                }
+            }
         }
 
         // View all email logs
