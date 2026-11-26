@@ -39,6 +39,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     ? currentUser.courses
     : (allCourses || []).slice(0, 12);
   const [selectedCourseId, setSelectedCourseId] = useState(studentCourses[0]?.id || '');
+  const [selectedSectionCpId, setSelectedSectionCpId] = useState(
+    studentCourses[0]?.assignedCourseProfessorId || ''
+  );
   const [selectedCategory, setSelectedCategory] = useState('lecture');
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
@@ -66,6 +69,17 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
     profId: 'user-prof-001',
     profName: '이교수'
   };
+  const courseSections = Array.isArray(currentCourse?.professors)
+    ? currentCourse.professors.filter((p) => p && p.courseProfessorId)
+    : [];
+  const activeSectionObj =
+    courseSections.find((p) => p.courseProfessorId === selectedSectionCpId) ||
+    courseSections.find((p) => p.courseProfessorId === currentCourse?.assignedCourseProfessorId) ||
+    courseSections[0] ||
+    null;
+  const effectiveProfId = activeSectionObj?.id || currentCourse.profId;
+  const effectiveProfName = activeSectionObj?.name || currentCourse.profName;
+  const effectiveCpId = activeSectionObj?.courseProfessorId || currentCourse.assignedCourseProfessorId || null;
   const catDef = CATEGORY_DEFINITIONS[selectedCategory] || CATEGORY_DEFINITIONS.lecture;
 
   // 카테고리 변경 시 규칙 적용
@@ -188,8 +202,9 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
         courseId: currentCourse.id,
         courseName: currentCourse.name,
         courseGroup: currentCourse.group || '',
-        profId: currentCourse.profId,
-        profName: currentCourse.profName,
+        courseProfessorId: effectiveCpId,
+        profId: effectiveProfId,
+        profName: effectiveProfName,
         category: selectedCategory,
         title: summaryTitle,
         content: finalContent,
@@ -253,7 +268,10 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                   type="button"
                   key={c.id}
                   className={`course-chip ${selectedCourseId === c.id ? 'active' : ''}`}
-                  onClick={() => setSelectedCourseId(c.id)}
+                  onClick={() => {
+                    setSelectedCourseId(c.id);
+                    setSelectedSectionCpId(c.assignedCourseProfessorId || '');
+                  }}
                 >
                   <span className="course-name">{c.name}</span>
                   <span className="course-prof">
@@ -262,6 +280,31 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                 </button>
               ))}
             </div>
+
+            {courseSections.length > 1 && (
+              <div className="course-section-subpicker" style={{ marginTop: 8 }}>
+                <span className="course-section-subpicker-label">분반 선택</span>
+                <div className="course-section-chip-list">
+                  {courseSections.map((sec) => {
+                    const isSecActive = effectiveCpId === sec.courseProfessorId;
+                    return (
+                      <button
+                        type="button"
+                        key={sec.courseProfessorId}
+                        className={`section-select-chip ${isSecActive ? 'active' : ''}`}
+                        onClick={() => setSelectedSectionCpId(sec.courseProfessorId)}
+                      >
+                        <strong>{sec.section}</strong>
+                        <span>· {sec.name}</span>
+                        {sec.department && sec.department !== '공통' ? (
+                          <span className="text-muted">({sec.department})</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2. 카테고리 선택 */}
@@ -374,7 +417,7 @@ export default function QuestionForm({ onQuestionCreated, onCancel }) {
                     tier="ALL"
                     mode="floating"
                     placement="bottom-end"
-                    text="유사한 기존 질문과 답변을 확인해요."
+                    text="같은 과목의 다른 분반과 이전 학기 연동 강의까지 포함해 유사한 기존 질답을 찾아줘요."
                   >
                     <button
                       type="button"

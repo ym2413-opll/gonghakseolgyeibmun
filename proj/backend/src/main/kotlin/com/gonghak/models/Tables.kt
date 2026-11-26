@@ -55,6 +55,8 @@ object CoursesTable : UUIDTable("courses") {
     val major = varchar("major", 100).default("")
     val completionType = varchar("completion_type", 50).default("")
     val credit = integer("credit").default(3)
+    val prevCourseId = uuid("prev_course_id").nullable()
+    val nextCourseId = uuid("next_course_id").nullable()
 }
 
 object CourseProfessorsTable : UUIDTable("course_professors") {
@@ -68,6 +70,7 @@ object EnrollmentsTable : UUIDTable("enrollments") {
     val courseId = uuid("course_id").references(CoursesTable.id)
     val studentId = uuid("student_id").references(UsersTable.id)
     val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id).nullable()
+    val courseProfessorId = uuid("course_professor_id").references(CourseProfessorsTable.id).nullable()
 }
 
 object ProfessorCategorySettingsTable : UUIDTable("professor_category_settings") {
@@ -88,7 +91,17 @@ object ProfessorNotificationSettingsTable : UUIDTable("professor_notification_se
     val quietHoursEnd = varchar("quiet_hours_end", 10).default("08:00")
     val notifyOtherProfessorQuestions = bool("notify_other_professor_questions").default(false)
     val emailEnabled = bool("email_enabled").default(true)
+    val notificationScope = varchar("notification_scope", 24).default("ALL_SECTIONS") // NONE, ASSIGNED_SECTION, ALL_SECTIONS
+    val emailScope = varchar("email_scope", 24).default("ASSIGNED_SECTION") // NONE, ASSIGNED_SECTION, ALL_SECTIONS
     val notificationEmail = varchar("notification_email", 150).nullable()
+}
+
+object SystemSettingsTable : org.jetbrains.exposed.sql.Table("system_settings") {
+    val settingKey = varchar("setting_key", 64)
+    val settingValue = text("setting_value")
+    val updatedAt = timestamp("updated_at").clientDefault { Instant.now() }
+
+    override val primaryKey = PrimaryKey(settingKey)
 }
 
 object UserSettingsTable : UUIDTable("user_settings") {
@@ -103,6 +116,8 @@ object QuestionsTable : UUIDTable("questions") {
     val courseId = uuid("course_id").references(CoursesTable.id)
     val studentId = uuid("student_id").references(UsersTable.id)
     val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id)
+    val courseProfessorId = uuid("course_professor_id").nullable()
+    val createdSemester = varchar("created_semester", 20).default("")
     val category = varchar("category", 20) // GRADE, ASSIGNMENT, LECTURE
     val title = varchar("title", 200)
     val rawContent = text("raw_content")

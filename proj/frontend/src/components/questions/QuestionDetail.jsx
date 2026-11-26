@@ -6,6 +6,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { formatFileSize, isSafeAttachmentUrl } from '../../utils/fileSecurity';
 import { sanitizeAnonymousStudentText } from '../../utils/anonymize';
+import { formatSemesterLabel, isNonCurrentSemesterThread } from '../../utils/semester';
 import AttachmentUploader, { insertSnippetAtCursor } from '../common/AttachmentUploader';
 import MarkdownContent, { MarkdownModeTabs } from '../common/MarkdownContent';
 import AiRefineModal from '../student/AiRefineModal';
@@ -122,7 +123,8 @@ const QuestionDetail = ({
   onDeleteAnswer,
   onBack
 }) => {
-  const { currentUser, isProfessor, isAdmin, allCourses, refreshCurrentUser } = useAuth();
+  const { currentUser, isProfessor, isAdmin, allCourses, currentSemester, refreshCurrentUser } = useAuth();
+  const showSemesterBadge = isNonCurrentSemesterThread(question, currentSemester);
   const { checkBlueWhiteUnlock } = useTheme();
   const [answerText, setAnswerText] = useState('');
   const [answerAttachments, setAnswerAttachments] = useState([]);
@@ -560,7 +562,16 @@ const QuestionDetail = ({
           <span className={`badge ${category.badgeClass}`}>{category.name}</span>
           <span className="course-pill">
             <BookOpen size={13} /> {question.courseName}
+            {question.section ? ` (${question.section})` : ''}
           </span>
+          {showSemesterBadge && (
+            <span
+              className="semester-pill"
+              title={`현재 활성 학기(${formatSemesterLabel(currentSemester)})가 아닌 ${formatSemesterLabel(question.semester)}에 작성된 스레드입니다.`}
+            >
+              {formatSemesterLabel(question.semester)} 작성
+            </span>
+          )}
           <span className="prof-pill">
             담당: {question.profName || question.assignedProfessorName || '담당교수'}
           </span>

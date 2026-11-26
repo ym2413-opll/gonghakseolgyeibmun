@@ -43,6 +43,25 @@ data class UpdateAdminNicknameRequest(
 )
 
 @Serializable
+data class CourseSelectionItemDto(
+    val courseId: String,
+    val courseProfessorId: String? = null
+)
+
+@Serializable
+data class ProfessorSignupCourseInput(
+    val name: String,
+    val code: String = "",
+    val semester: String = "",
+    val section: String = "01분반",
+    val college: String = "",
+    val department: String = "",
+    val completionType: String = "전선",
+    val credit: Int = 3,
+    val schedule: String = ""
+)
+
+@Serializable
 data class RegisterRequest(
     val role: UserRole = UserRole.STUDENT,
     val username: String = "",
@@ -55,7 +74,9 @@ data class RegisterRequest(
     val email: String? = null,      // 교수 이메일
     val professorInviteCode: String? = null,
     val courseIds: List<String> = emptyList(),
-    val courseNames: List<String> = emptyList()
+    val courseNames: List<String> = emptyList(),
+    val courseSelections: List<CourseSelectionItemDto> = emptyList(),
+    val newCourses: List<ProfessorSignupCourseInput> = emptyList()
 )
 
 @Serializable
@@ -108,6 +129,8 @@ data class ProfessorNotificationSettingDto(
     val quietHoursEnd: String,
     val notifyOtherProfessorQuestions: Boolean,
     val emailEnabled: Boolean = true,
+    val notificationScope: String = "ALL_SECTIONS", // NONE, ASSIGNED_SECTION, ALL_SECTIONS
+    val emailScope: String = "ASSIGNED_SECTION",    // NONE, ASSIGNED_SECTION, ALL_SECTIONS
     val notificationEmail: String? = null
 )
 
@@ -118,6 +141,8 @@ data class UpdateProfessorNotificationSettingRequest(
     val quietHoursEnd: String? = null,
     val notifyOtherProfessorQuestions: Boolean? = null,
     val emailEnabled: Boolean? = null,
+    val notificationScope: String? = null,
+    val emailScope: String? = null,
     val notificationEmail: String? = null
 )
 
@@ -133,6 +158,8 @@ data class UnifiedSettingDto(
     val dndEndTime: String = "08:00",
     val coProfNotification: Boolean = true,
     val emailEnabled: Boolean = true,
+    val notificationScope: String = "ALL_SECTIONS",
+    val emailScope: String = "ASSIGNED_SECTION",
     val notificationEmail: String? = null,
     val activeCategories: Map<String, Boolean> = mapOf("grade" to true, "assignment" to true, "lecture" to true),
     val exhibitionMode: Boolean = false
@@ -150,6 +177,8 @@ data class UpdateUnifiedSettingRequest(
     val dndEndTime: String? = null,
     val coProfNotification: Boolean? = null,
     val emailEnabled: Boolean? = null,
+    val notificationScope: String? = null,
+    val emailScope: String? = null,
     val notificationEmail: String? = null,
     val activeCategories: Map<String, Boolean>? = null,
     val exhibitionMode: Boolean? = null
@@ -174,7 +203,8 @@ data class ProfessorSimpleDto(
     val department: String,
     val section: String,
     val schedule: String = "",
-    val isRegistered: Boolean = true
+    val isRegistered: Boolean = true,
+    val courseProfessorId: String? = null
 )
 
 @Serializable
@@ -192,7 +222,17 @@ data class CourseDto(
     val availableCategories: List<QuestionCategory> = emptyList(),
     val assignedProfessorId: String? = null,
     val assignedProfessorName: String? = null,
-    val assignedProfessorRegistered: Boolean = true
+    val assignedProfessorRegistered: Boolean = true,
+    val assignedCourseProfessorId: String? = null,
+    val assignedSection: String? = null,
+    val myCourseProfessorIds: List<String> = emptyList(),
+    val mySections: List<String> = emptyList(),
+    val prevCourseId: String? = null,
+    val prevCourseName: String? = null,
+    val prevCourseSemester: String? = null,
+    val nextCourseId: String? = null,
+    val nextCourseName: String? = null,
+    val nextCourseSemester: String? = null
 )
 
 @Serializable
@@ -264,7 +304,9 @@ data class CreateCourseRequest(
     val credit: Int = 3,
     val professorId: String? = null,
     val section: String = "01분반",
-    val schedule: String = ""
+    val schedule: String = "",
+    val prevCourseId: String? = null,
+    val autoLinkPrevSemester: Boolean = true
 )
 
 @Serializable
@@ -277,12 +319,44 @@ data class UpdateCourseRequest(
     val department: String? = null,
     val major: String? = null,
     val completionType: String? = null,
-    val credit: Int? = null
+    val credit: Int? = null,
+    val prevCourseId: String? = null,
+    val unlinkPrevCourse: Boolean = false
+)
+
+@Serializable
+data class LinkCourseRequest(
+    val prevCourseId: String? = null
+)
+
+@Serializable
+data class SemesterRolloverRequest(
+    val targetSemester: String,
+    val autoLinkSameNameCourses: Boolean = true
+)
+
+@Serializable
+data class SemesterRolloverResultDto(
+    val previousSemester: String,
+    val currentSemester: String,
+    val autoLinkedCount: Int,
+    val availableSemesters: List<String>
+)
+
+@Serializable
+data class ExcelCourseImportResultDto(
+    val semester: String,
+    val createdCourses: Int,
+    val updatedCourses: Int,
+    val createdSections: Int,
+    val autoLinkedCourses: Int,
+    val totalRowsRead: Int
 )
 
 @Serializable
 data class UpdateUserCoursesRequest(
-    val courseIds: List<String> = emptyList()
+    val courseIds: List<String> = emptyList(),
+    val courseSelections: List<CourseSelectionItemDto> = emptyList()
 )
 
 @Serializable
@@ -297,6 +371,8 @@ data class CourseListResponse(
 data class CourseSummaryDto(
     val title: String? = null,
     val semester: String,
+    val currentSemester: String = semester,
+    val availableSemesters: List<String> = emptyList(),
     val totalCourses: Long,
     val totalSections: Long,
     val totalProfessors: Long,
@@ -439,6 +515,7 @@ data class CreateQuestionRequest(
     val courseId: String = "",
     val courseName: String? = null,
     val courseGroup: String? = null,
+    val courseProfessorId: String? = null,
     val profId: String? = null,
     val profName: String? = null,
     val category: QuestionCategory = QuestionCategory.LECTURE,
@@ -536,7 +613,12 @@ data class QuestionListItemDto(
     val canDelete: Boolean = false,
     val answers: List<AnswerDto> = emptyList(),
     val attachmentCount: Int = 0,
-    val attachments: List<AttachmentDto> = emptyList()
+    val attachments: List<AttachmentDto> = emptyList(),
+    val courseProfessorId: String? = null,
+    val section: String? = null,
+    val semester: String = "",
+    val currentSemester: String = "",
+    val isPastSemester: Boolean = false
 )
 
 @Serializable
@@ -577,7 +659,12 @@ data class QuestionDetailDto(
     val isDeleted: Boolean = false,
     val deletedAt: String? = null,
     val canDelete: Boolean = false,
-    val attachments: List<AttachmentDto> = emptyList()
+    val attachments: List<AttachmentDto> = emptyList(),
+    val courseProfessorId: String? = null,
+    val section: String? = null,
+    val semester: String = "",
+    val currentSemester: String = "",
+    val isPastSemester: Boolean = false
 )
 
 @Serializable
@@ -616,7 +703,12 @@ data class SimilarQuestionDto(
     val similarityScore: Int = (similarity * 100).toInt(),
     val answers: List<AnswerDto> = emptyList(),
     val attachmentCount: Int = 0,
-    val attachments: List<AttachmentDto> = emptyList()
+    val attachments: List<AttachmentDto> = emptyList(),
+    val courseName: String? = null,
+    val section: String? = null,
+    val semester: String = "",
+    val currentSemester: String = "",
+    val isPastSemester: Boolean = false
 )
 
 @Serializable

@@ -5,6 +5,7 @@ import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.DatabaseFactory.dbQueryWithRetry
 import com.gonghak.dto.*
 import com.gonghak.models.*
+import com.gonghak.util.SemesterUtils
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -26,6 +27,7 @@ class QuestionService(
         val detail: QuestionDetailDto,
         val questionId: UUID,
         val assignedProfId: UUID,
+        val courseProfessorId: UUID?,
         val courseId: UUID,
         val courseName: String,
         val title: String,
@@ -188,10 +190,56 @@ class QuestionService(
 
     private data class SimilarQuestionCandidate(
         val questionId: UUID,
+        val category: QuestionCategory,
+        val courseName: String,
+        val section: String?,
+        val semester: String,
+        val currentSemester: String,
         val title: String,
         val refinedContent: String,
         val answerDtos: List<AnswerDto>
     )
+
+    private fun getCurrentSemesterInternal(): String {
+        val raw = SystemSettingsTable.select { SystemSettingsTable.settingKey eq "current_semester" }
+            .singleOrNull()
+            ?.get(SystemSettingsTable.settingValue)
+        return SemesterUtils.normalizeSemester(raw, SemesterUtils.DEFAULT_SEMESTER)
+    }
+
+    /**
+     * Collects `courseId` plus all courses in its doubly-linked list (`prevCourseId` <-> `nextCourseId`),
+     * as well as any course rows sharing the exact same normalized name & base code (across sections/semesters).
+     */
+    private fun collectSameLineageCourseIdsInternal(startCourseId: UUID): Set<UUID> {
+        val result = linkedSetOf(startCourseId)
+        val startRow = CoursesTable.select { CoursesTable.id eq startCourseId }.singleOrNull() ?: return result
+
+        var back = startRow[CoursesTable.prevCourseId]
+        var guard = 0
+        while (back != null && guard++ < 40 && result.add(back)) {
+            back = CoursesTable.select { CoursesTable.id eq back }.singleOrNull()?.get(CoursesTable.prevCourseId)
+        }
+
+        var forward = startRow[CoursesTable.nextCourseId]
+        guard = 0
+        while (forward != null && guard++ < 40 && result.add(forward)) {
+            forward = CoursesTable.select { CoursesTable.id eq forward }.singleOrNull()?.get(CoursesTable.nextCourseId)
+        }
+
+        val startBaseCode = SemesterUtils.splitCourseCodeAndSection(startRow[CoursesTable.code]).first
+        val startNormName = SemesterUtils.normalizeCourseNameForMatch(startRow[CoursesTable.name])
+        if (startBaseCode.isNotBlank() && startNormName.isNotEmpty()) {
+            CoursesTable.selectAll().forEach { row ->
+                val candCode = SemesterUtils.splitCourseCodeAndSection(row[CoursesTable.code]).first
+                val candName = SemesterUtils.normalizeCourseNameForMatch(row[CoursesTable.name])
+                if (candCode.equals(startBaseCode, ignoreCase = true) && candName == startNormName) {
+                    result.add(row[CoursesTable.id].value)
+                }
+            }
+        }
+        return result
+    }
     private val banDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
         .withZone(ZoneId.of("Asia/Seoul"))
 
@@ -259,7 +307,20 @@ class QuestionService(
 
             val courseProfs = CourseProfessorsTable.innerJoin(UsersTable, { CourseProfessorsTable.professorId }, { UsersTable.id })
                 .select { CourseProfessorsTable.courseId eq courseUUID }
+                .orderBy(CourseProfessorsTable.section to SortOrder.ASC)
                 .toList()
+
+            val requestedCpRow = request.courseProfessorId?.trim()?.takeIf { it.isNotBlank() }?.let { rawCpId ->
+                val cpUuid = runCatching { UUID.fromString(rawCpId) }.getOrNull()
+                    ?: throw IllegalArgumentException("유효하지 않은 분반 ID입니다.")
+                courseProfs.firstOrNull { it[CourseProfessorsTable.id].value == cpUuid }
+                    ?: throw IllegalArgumentException("해당 교과목에 존재하지 않는 분반입니다.")
+            }
+
+            val enrolledCpId = enrollment?.get(EnrollmentsTable.courseProfessorId)
+            val enrolledSectionRow = enrolledCpId?.let { targetCp ->
+                courseProfs.firstOrNull { it[CourseProfessorsTable.id].value == targetCp }
+            }
             val enrolledProfId = enrollment?.get(EnrollmentsTable.assignedProfessorId)
             val enrolledIsRegistered = enrolledProfId?.let { eId ->
                 courseProfs.any {
@@ -268,17 +329,30 @@ class QuestionService(
                         !it[UsersTable.passwordHash].isNullOrBlank()
                 }
             } ?: false
-            val firstRegisteredProfId = courseProfs.firstOrNull {
+            val requestedProfSectionRow = requestedProfUUID?.let { pUuid ->
+                courseProfs.firstOrNull { it[CourseProfessorsTable.professorId] == pUuid }
+            }
+            val firstRegisteredSectionRow = courseProfs.firstOrNull {
                 !it[UsersTable.isDemo] && !it[UsersTable.passwordHash].isNullOrBlank()
-            }?.get(CourseProfessorsTable.professorId)
+            }
 
-            val assignedProfId = when {
-                enrolledProfId != null && enrolledIsRegistered -> enrolledProfId
-                requestedProfUUID != null -> requestedProfUUID
-                firstRegisteredProfId != null -> firstRegisteredProfId
-                enrolledProfId != null -> enrolledProfId
-                else -> courseProfs.firstOrNull()?.get(CourseProfessorsTable.professorId)
-            } ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
+            val chosenSectionRow = when {
+                requestedCpRow != null -> requestedCpRow
+                enrolledSectionRow != null &&
+                    (requestedProfUUID == null || enrolledSectionRow[CourseProfessorsTable.professorId] == requestedProfUUID) &&
+                    (!enrolledSectionRow[UsersTable.isDemo] && !enrolledSectionRow[UsersTable.passwordHash].isNullOrBlank()) -> enrolledSectionRow
+                requestedProfSectionRow != null -> requestedProfSectionRow
+                enrolledSectionRow != null -> enrolledSectionRow
+                firstRegisteredSectionRow != null -> firstRegisteredSectionRow
+                enrolledProfId != null && enrolledIsRegistered -> courseProfs.firstOrNull { it[CourseProfessorsTable.professorId] == enrolledProfId }
+                else -> courseProfs.firstOrNull()
+            }
+
+            val resolvedCpId = chosenSectionRow?.get(CourseProfessorsTable.id)?.value
+            val assignedProfId = chosenSectionRow?.get(CourseProfessorsTable.professorId)
+                ?: requestedProfUUID
+                ?: enrolledProfId
+                ?: throw IllegalArgumentException("아직 해당 교과목의 담당 교수가 배정되지 않았습니다.")
 
             // 3. Validate if professor has enabled this category
             val categorySetting = ProfessorCategorySettingsTable.select {
@@ -331,12 +405,16 @@ class QuestionService(
 
             val qId = UUID.randomUUID()
             val now = Instant.now()
+            val activeSem = getCurrentSemesterInternal()
+            val courseSem = SemesterUtils.normalizeSemester(courseRow[CoursesTable.semester], activeSem)
 
             QuestionsTable.insert {
                 it[id] = qId
                 it[courseId] = courseUUID
                 it[studentId] = currentUserId
                 it[assignedProfessorId] = assignedProfId
+                it[courseProfessorId] = resolvedCpId
+                it[createdSemester] = courseSem
                 it[category] = request.category.name
                 it[title] = effectiveTitle
                 it[rawContent] = effectiveRaw
@@ -368,6 +446,7 @@ class QuestionService(
                 detail = getQuestionDetailInternal(qId, currentUserId),
                 questionId = qId,
                 assignedProfId = assignedProfId,
+                courseProfessorId = resolvedCpId,
                 courseId = courseUUID,
                 courseName = courseName,
                 title = effectiveTitle,
@@ -397,7 +476,8 @@ class QuestionService(
             questionTitle = created.title,
             category = request.category,
             questionContent = created.contentForMail,
-            authorDisplay = created.authorDisplayForMail
+            authorDisplay = created.authorDisplayForMail,
+            courseProfessorId = created.courseProfessorId
         )
 
         return created.detail
@@ -451,6 +531,14 @@ class QuestionService(
         val allUsersMap = UsersTable.selectAll().associate { uRow ->
             uRow[UsersTable.id].value to toAuthorSummary(uRow)
         }
+        val curSemester = getCurrentSemesterInternal()
+        val allCourseProfRows = CourseProfessorsTable.selectAll().toList()
+        val sectionByCpId = allCourseProfRows.associate {
+            it[CourseProfessorsTable.id].value to it[CourseProfessorsTable.section]
+        }
+        val sectionByCourseAndProf = allCourseProfRows
+            .groupBy { it[CourseProfessorsTable.courseId] to it[CourseProfessorsTable.professorId] }
+            .mapValues { (_, list) -> list.first()[CourseProfessorsTable.section] }
 
         query.map { row ->
             val qId = row[QuestionsTable.id].value
@@ -549,6 +637,14 @@ class QuestionService(
                 attachmentsByQuestionId[qId]?.map(::rowToAttachmentDto) ?: emptyList()
             }
 
+            val qCpId = row[QuestionsTable.courseProfessorId]
+            val qSection = (if (qCpId != null) sectionByCpId[qCpId] else null)
+                ?: sectionByCourseAndProf[row[QuestionsTable.courseId] to assignedProfId]
+            val qSem = SemesterUtils.normalizeSemester(
+                row[QuestionsTable.createdSemester].ifBlank { row[CoursesTable.semester] },
+                curSemester
+            )
+
             QuestionListItemDto(
                 id = qId.toString(),
                 courseId = row[QuestionsTable.courseId].toString(),
@@ -582,6 +678,11 @@ class QuestionService(
                 answers = answerDtos,
                 attachmentCount = visibleAttachments.size,
                 attachments = visibleAttachments,
+                courseProfessorId = qCpId?.toString(),
+                section = qSection,
+                semester = qSem,
+                currentSemester = curSemester,
+                isPastSemester = (qSem.isNotBlank() && curSemester.isNotBlank() && qSem != curSemester),
                 createdAt = row[QuestionsTable.createdAt].toString()
             )
         }
@@ -738,6 +839,20 @@ class QuestionService(
             else -> actualRefined
         }
 
+        val curSemester = getCurrentSemesterInternal()
+        val qCpId = qRow[QuestionsTable.courseProfessorId]
+        val qSection = (if (qCpId != null) {
+            CourseProfessorsTable.select { CourseProfessorsTable.id eq qCpId }
+                .singleOrNull()?.get(CourseProfessorsTable.section)
+        } else null) ?: CourseProfessorsTable.select {
+            (CourseProfessorsTable.courseId eq qRow[QuestionsTable.courseId]) and
+                (CourseProfessorsTable.professorId eq assignedProfId)
+        }.firstOrNull()?.get(CourseProfessorsTable.section)
+        val qSem = SemesterUtils.normalizeSemester(
+            qRow[QuestionsTable.createdSemester].ifBlank { course?.get(CoursesTable.semester).orEmpty() },
+            curSemester
+        )
+
         return QuestionDetailDto(
             id = questionId.toString(),
             courseId = qRow[QuestionsTable.courseId].toString(),
@@ -775,6 +890,11 @@ class QuestionService(
             status = QuestionStatus.valueOf(qRow[QuestionsTable.status]),
             answers = answersList,
             attachments = attachmentDtos,
+            courseProfessorId = qCpId?.toString(),
+            section = qSection,
+            semester = qSem,
+            currentSemester = curSemester,
+            isPastSemester = (qSem.isNotBlank() && curSemester.isNotBlank() && qSem != curSemester),
             createdAt = qRow[QuestionsTable.createdAt].toString()
         )
     }
@@ -1532,11 +1652,23 @@ class QuestionService(
         }
 
         val candidates = dbQuery {
+            val curSemester = getCurrentSemesterInternal()
+            val targetCourseIds = collectSameLineageCourseIdsInternal(courseId).toList()
+            val courseInfoMap = CoursesTable.select { CoursesTable.id inList targetCourseIds }
+                .associate { it[CoursesTable.id].value to (it[CoursesTable.name] to it[CoursesTable.semester]) }
+            val sectionMap = CourseProfessorsTable.select { CourseProfessorsTable.courseId inList targetCourseIds }
+                .associate { it[CourseProfessorsTable.id].value to it[CourseProfessorsTable.section] }
+            val fallbackSectionMap = CourseProfessorsTable.select { CourseProfessorsTable.courseId inList targetCourseIds }
+                .toList()
+                .groupBy { it[CourseProfessorsTable.courseId] to it[CourseProfessorsTable.professorId] }
+                .mapValues { (_, list) -> list.first()[CourseProfessorsTable.section] }
+
+            // Include all sections of the same course + linked-list courses across LECTURE & ASSIGNMENT (excluding GRADE)
             val questions = QuestionsTable.select {
-                (QuestionsTable.courseId eq courseId) and
-                        (QuestionsTable.category eq category.name) and
-                        (QuestionsTable.isHidden eq false) and
-                        (QuestionsTable.isDeletedByAuthor eq false)
+                (QuestionsTable.courseId inList targetCourseIds) and
+                    (QuestionsTable.category neq QuestionCategory.GRADE.name) and
+                    (QuestionsTable.isHidden eq false) and
+                    (QuestionsTable.isDeletedByAuthor eq false)
             }.toList()
 
             val profNames = UsersTable.select { UsersTable.role eq UserRole.PROFESSOR.name }
@@ -1570,8 +1702,23 @@ class QuestionService(
                         )
                     }
 
+                val qCourseId = row[QuestionsTable.courseId]
+                val (cName, cSem) = courseInfoMap[qCourseId] ?: ("" to curSemester)
+                val qCpId = row[QuestionsTable.courseProfessorId]
+                val qSec = (if (qCpId != null) sectionMap[qCpId] else null)
+                    ?: fallbackSectionMap[qCourseId to row[QuestionsTable.assignedProfessorId]]
+                val qSem = SemesterUtils.normalizeSemester(
+                    row[QuestionsTable.createdSemester].ifBlank { cSem },
+                    curSemester
+                )
+
                 SimilarQuestionCandidate(
                     questionId = qId,
+                    category = QuestionCategory.valueOf(row[QuestionsTable.category]),
+                    courseName = cName,
+                    section = qSec,
+                    semester = qSem,
+                    currentSemester = curSemester,
                     title = row[QuestionsTable.title],
                     refinedContent = row[QuestionsTable.refinedContent],
                     answerDtos = answers
@@ -1598,16 +1745,24 @@ class QuestionService(
                         title = cand.title,
                         snippet = snippet,
                         content = cand.refinedContent,
-                        category = category,
+                        category = cand.category,
                         similarity = sim,
                         similarityScore = simScore,
                         answerCount = cand.answerDtos.size,
                         topAnswerSnippet = topAnswer?.let { stripMarkdownAndMathForPreview(it).take(150) },
-                        answers = cand.answerDtos
+                        answers = cand.answerDtos,
+                        courseName = cand.courseName.ifBlank { null },
+                        section = cand.section,
+                        semester = cand.semester,
+                        currentSemester = cand.currentSemester,
+                        isPastSemester = (cand.semester.isNotBlank() && cand.currentSemester.isNotBlank() && cand.semester != cand.currentSemester)
                     )
                 )
             }
-            results.sortedByDescending { it.similarity }.take(limit)
+            results.sortedWith(
+                compareByDescending<SimilarQuestionDto> { it.similarity }
+                    .thenByDescending { it.category == category }
+            ).take(limit)
         }
     }
 

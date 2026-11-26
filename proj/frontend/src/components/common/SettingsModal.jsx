@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import CoursePicker from './CoursePicker';
+import CoursePicker, { buildCourseSelectionsPayload } from './CoursePicker';
 import AdminNicknameForm from '../admin/AdminNicknameForm';
 import HelpBubble from './HelpBubble';
 import { Sun, Moon, Leaf, Type, X, Check, BookOpen, Save, Bell, ShieldAlert, Sparkles } from 'lucide-react';
@@ -35,17 +35,31 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const { browserPermission, requestPermission, sendTestNotification } = useNotifications();
 
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
+  const [sectionSelections, setSectionSelections] = useState({});
   const [courseSaving, setCourseSaving] = useState(false);
   const [courseStatus, setCourseStatus] = useState({ type: '', text: '' });
   const [notifTestStatus, setNotifTestStatus] = useState({ type: '', text: '' });
 
   useEffect(() => {
     if (!isOpen) return;
-    const initialIds = Array.isArray(currentUser?.courses)
-      ? currentUser.courses.map((c) => c.id).filter(Boolean)
-      : [];
+    const userCourses = Array.isArray(currentUser?.courses) ? currentUser.courses : [];
+    const initialIds = userCourses.map((c) => c.id).filter(Boolean);
+    const initSecMap = {};
+    userCourses.forEach((c) => {
+      if (!c?.id) return;
+      if (isProfessor) {
+        if (Array.isArray(c.myCourseProfessorIds) && c.myCourseProfessorIds.length > 0) {
+          initSecMap[c.id] = c.myCourseProfessorIds;
+        } else if (c.assignedCourseProfessorId) {
+          initSecMap[c.id] = [c.assignedCourseProfessorId];
+        }
+      } else if (c.assignedCourseProfessorId) {
+        initSecMap[c.id] = c.assignedCourseProfessorId;
+      }
+    });
     setSelectedCourseIds(initialIds);
-  }, [isOpen, currentUser?.courses]);
+    setSectionSelections(initSecMap);
+  }, [isOpen, currentUser?.courses, isProfessor]);
 
   useEffect(() => {
     if (isOpen) {
@@ -71,7 +85,13 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
     setCourseSaving(true);
     setCourseStatus({ type: '', text: '' });
     try {
-      await updateUserCourses(selectedCourseIds);
+      const selectionsPayload = buildCourseSelectionsPayload(
+        selectedCourseIds,
+        sectionSelections,
+        allCourses,
+        isProfessor
+      );
+      await updateUserCourses(selectedCourseIds, selectionsPayload);
       if (onCoursesUpdated) await onCoursesUpdated();
       setCourseStatus({
         type: 'success',
@@ -365,7 +385,7 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                 <HelpBubble
                   tier="ALL"
                   mode="inline"
-                  text="과목명·학수번호·학과(구 명칭 포함)·교수명으로 검색해 저장하면 게시판에 바로 반영돼요."
+                  text="과목명·학수번호·학과(구 명칭 포함)·교수명으로 검색하고, 여러 분반이 있는 과목은 본인 분반을 선택해 저장해요. '이전 학기 포함'으로 지난 학기 강의도 찾을 수 있어요."
                   className="mb-help-bubble"
                 />
                 <div className="settings-title-group" style={{ marginBottom: 10 }}>
@@ -386,6 +406,9 @@ const SettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
                   courses={allCourses}
                   selectedIds={selectedCourseIds}
                   onChange={setSelectedCourseIds}
+                  sectionMode={isProfessor ? 'multi' : 'single'}
+                  sectionSelections={sectionSelections}
+                  onSectionSelectionsChange={setSectionSelections}
                   label={isProfessor ? '담당 교과목' : '수강 과목'}
                   helperText="최소 1개 이상"
                 />

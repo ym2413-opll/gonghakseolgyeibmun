@@ -3,13 +3,16 @@ package com.gonghak.routes
 import com.gonghak.dto.*
 import com.gonghak.models.UserRole
 import com.gonghak.service.EmailService
+import com.gonghak.service.ExcelCourseImporter
 import com.gonghak.service.QuestionService
 import com.gonghak.service.UserService
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 private suspend fun ApplicationCall.parseUuidParam(paramName: String, invalidMessage: String): UUID? {
@@ -209,6 +212,94 @@ fun Route.adminRoutes(
             val request = call.receive<UpdateCourseRequest>()
             call.respondServiceCall(HttpStatusCode.OK, "과목 정보가 수정되었습니다.") {
                 userService.updateCourse(courseUuid, request)
+            }
+        }
+
+        put("/courses/{id}/link") {
+            call.requireAdmin() ?: return@put
+            val courseUuid = call.parseUuidParam("id", "유효하지 않은 과목 ID입니다.") ?: return@put
+            val request = call.receive<LinkCourseRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "학기 간 강의 연결 설정이 저장되었습니다.") {
+                userService.linkCourse(courseUuid, request.prevCourseId)
+            }
+        }
+
+        post("/semesters/rollover") {
+            call.requireAdmin() ?: return@post
+            val request = call.receive<SemesterRolloverRequest>()
+            call.respondServiceCall(HttpStatusCode.OK, "현재 활성 학기 및 강의 연동이 반영되었습니다.") {
+                userService.rolloverSemester(request)
+            }
+        }
+
+        post("/courses/import-excel") {
+            call.requireAdmin() ?: return@post
+            val multipart = call.receiveMultipart()
+            var fileBytes: ByteArray? = null
+            var fileName = ""
+            var overrideSemester: String? = null
+            var autoLinkPrev = true
+            var setAsCurrent = false
+
+            try {
+                multipart.forEachPart { part ->
+                    try {
+                        when (part) {
+                            is PartData.FileItem -> {
+                                fileName = part.originalFileName.orEmpty()
+                                part.streamProvider().use { input ->
+                                    val baos = ByteArrayOutputStream()
+                                    val buf = ByteArray(8192)
+                                    var total = 0
+                                    while (true) {
+                                        val r = input.read(buf)
+                                        if (r == -1) break
+                                        total += r
+                                        if (total > ExcelCourseImporter.MAX_UPLOAD_BYTES) {
+                                            throw IllegalArgumentException("엑셀 파일 크기는 최대 15MB까지 업로드할 수 있습니다.")
+                                        }
+                                        baos.write(buf, 0, r)
+                                    }
+                                    fileBytes = baos.toByteArray()
+                                }
+                            }
+                            is PartData.FormItem -> {
+                                when (part.name) {
+                                    "semester" -> overrideSemester = part.value.trim().takeIf { it.isNotEmpty() }
+                                    "autoLinkPrevSemester" -> autoLinkPrev = part.value.trim().lowercase() !in setOf("false", "0", "no")
+                                    "setAsCurrentSemester" -> setAsCurrent = part.value.trim().lowercase() in setOf("true", "1", "yes")
+                                }
+                            }
+                            else -> Unit
+                        }
+                    } finally {
+                        part.dispose()
+                    }
+                }
+
+                val bytes = fileBytes ?: throw IllegalArgumentException("업로드할 .xlsx 엑셀 파일을 선택해 주세요.")
+                if (fileName.isNotBlank() && !fileName.lowercase().endsWith(".xlsx")) {
+                    throw IllegalArgumentException(".xlsx 형식의 엑셀 파일만 업로드할 수 있습니다.")
+                }
+
+                val result = userService.importCoursesFromExcel(
+                    fileBytes = bytes,
+                    overrideSemester = overrideSemester,
+                    autoLinkPrevSemester = autoLinkPrev,
+                    setAsCurrentSemester = setAsCurrent
+                )
+                call.respond(
+                    HttpStatusCode.OK,
+                    ApiResponse(
+                        success = true,
+                        message = "${result.semester} 학기 강의 일괄 등록 완료 (신규 ${result.createdCourses}개, 갱신 ${result.updatedCourses}개, 분반 ${result.createdSections}개, 전학기 자동연동 ${result.autoLinkedCourses}개)",
+                        data = result
+                    )
+                )
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse<String>(success = false, message = e.message))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Forbidden, ApiResponse<String>(success = false, message = e.message))
             }
         }
 

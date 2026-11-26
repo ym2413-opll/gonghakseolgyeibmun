@@ -9,20 +9,27 @@ export const AuthProvider = ({ children }) => {
   const [colleges, setColleges] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
+  const [currentSemester, setCurrentSemester] = useState('2026-2');
+  const [availableSemesters, setAvailableSemesters] = useState(['2026-2']);
   const [isLoading, setIsLoading] = useState(true);
   const [authModalMode, setAuthModalMode] = useState('prompt'); // 'prompt' | 'login' | 'register'
   const [showHelpOnboarding, setShowHelpOnboarding] = useState(false);
 
   const refreshCatalog = useCallback(async () => {
     try {
-      const [collegeList, deptList, courseList] = await Promise.all([
+      const [collegeList, deptList, courseList, summary] = await Promise.all([
         api.getColleges(),
         api.getDepartments(),
-        api.getAllCourses()
+        api.getAllCourses(),
+        api.getCoursesSummary()
       ]);
       if (Array.isArray(collegeList)) setColleges(collegeList);
       if (Array.isArray(deptList)) setDepartments(deptList);
       if (Array.isArray(courseList)) setAllCourses(courseList);
+      if (summary?.currentSemester) setCurrentSemester(summary.currentSemester);
+      if (Array.isArray(summary?.availableSemesters) && summary.availableSemesters.length > 0) {
+        setAvailableSemesters(summary.availableSemesters);
+      }
     } catch (err) {
       console.error('Failed to load catalog:', err);
     }
@@ -140,8 +147,8 @@ export const AuthProvider = ({ children }) => {
     setShowHelpOnboarding(false);
   };
 
-  const updateUserCourses = useCallback(async (courseIds) => {
-    const updatedUser = await api.updateUserCourses(courseIds);
+  const updateUserCourses = useCallback(async (courseIds, courseSelections = []) => {
+    const updatedUser = await api.updateUserCourses(courseIds, courseSelections);
     if (updatedUser && updatedUser.id) {
       setCurrentUser((prev) => {
         const merged = { ...(prev || {}), ...updatedUser };
@@ -188,6 +195,8 @@ export const AuthProvider = ({ children }) => {
         colleges,
         departments,
         allCourses,
+        currentSemester,
+        availableSemesters,
         authModalMode,
         setAuthModalMode,
         showHelpOnboarding,

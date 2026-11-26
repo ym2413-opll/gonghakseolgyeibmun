@@ -66,6 +66,7 @@ object DatabaseFactory {
             EnrollmentsTable,
             ProfessorCategorySettingsTable,
             ProfessorNotificationSettingsTable,
+            SystemSettingsTable,
             UserSettingsTable,
             QuestionsTable,
             AnswersTable,
@@ -154,7 +155,14 @@ object DatabaseFactory {
             "ALTER TABLE questions ADD COLUMN IF NOT EXISTS is_thread_open BOOLEAN DEFAULT FALSE",
             "ALTER TABLE questions ADD COLUMN IF NOT EXISTS last_sequence_number INTEGER DEFAULT 1",
             "ALTER TABLE answers ADD COLUMN IF NOT EXISTS sequence_number INTEGER DEFAULT 2",
-            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS answer_id UUID NULL"
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS answer_id UUID NULL",
+            "ALTER TABLE courses ADD COLUMN IF NOT EXISTS prev_course_id UUID NULL",
+            "ALTER TABLE courses ADD COLUMN IF NOT EXISTS next_course_id UUID NULL",
+            "ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS course_professor_id UUID NULL",
+            "ALTER TABLE professor_notification_settings ADD COLUMN IF NOT EXISTS notification_scope VARCHAR(24) DEFAULT 'ALL_SECTIONS'",
+            "ALTER TABLE professor_notification_settings ADD COLUMN IF NOT EXISTS email_scope VARCHAR(24) DEFAULT 'ASSIGNED_SECTION'",
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS course_professor_id UUID NULL",
+            "ALTER TABLE questions ADD COLUMN IF NOT EXISTS created_semester VARCHAR(20) DEFAULT ''"
         ).forEach { alterStmt ->
             runCatching {
                 transaction { exec(alterStmt) }
@@ -168,6 +176,7 @@ object DatabaseFactory {
             seedConvertedCoursesData()
             seedDemoData()
             backfillQuestionSequences()
+            backfillSemesterAndSections()
         }
     }
 
@@ -757,6 +766,8 @@ object DatabaseFactory {
                 it[quietHoursEnd] = "08:00"
                 it[notifyOtherProfessorQuestions] = true
                 it[emailEnabled] = true
+                it[notificationScope] = "ALL_SECTIONS"
+                it[emailScope] = "ALL_SECTIONS"
                 it[notificationEmail] = mail
             }
         }
@@ -871,6 +882,63 @@ object DatabaseFactory {
                 val newLast = answers.size + 1
                 QuestionsTable.update({ QuestionsTable.id eq qId }) {
                     it[lastSequenceNumber] = maxOf(currentLast, newLast)
+                }
+            }
+        }
+    }
+
+    private fun backfillSemesterAndSections() {
+        // Ensure current_semester exists in SystemSettingsTable
+        if (SystemSettingsTable.select { SystemSettingsTable.settingKey eq "current_semester" }.count() == 0L) {
+            SystemSettingsTable.insert {
+                it[settingKey] = "current_semester"
+                it[settingValue] = "2026-2"
+                it[updatedAt] = Instant.now()
+            }
+        }
+
+        // Backfill enrollments.course_professor_id when null
+        val courseProfByPair = CourseProfessorsTable.selectAll()
+            .toList()
+            .groupBy { it[CourseProfessorsTable.courseId] to it[CourseProfessorsTable.professorId] }
+        val firstCourseProfByCourse = CourseProfessorsTable.selectAll()
+            .toList()
+            .groupBy { it[CourseProfessorsTable.courseId] }
+
+        EnrollmentsTable.select { EnrollmentsTable.courseProfessorId.isNull() }
+            .toList()
+            .forEach { row ->
+                val eId = row[EnrollmentsTable.id].value
+                val cId = row[EnrollmentsTable.courseId]
+                val pId = row[EnrollmentsTable.assignedProfessorId]
+                val matched = (if (pId != null) courseProfByPair[cId to pId]?.firstOrNull() else null)
+                    ?: firstCourseProfByCourse[cId]?.firstOrNull()
+                if (matched != null) {
+                    val cpId = matched[CourseProfessorsTable.id].value
+                    val resolvedProfId = matched[CourseProfessorsTable.professorId]
+                    EnrollmentsTable.update({ EnrollmentsTable.id eq eId }) {
+                        it[courseProfessorId] = cpId
+                        if (pId == null) it[assignedProfessorId] = resolvedProfId
+                    }
+                }
+            }
+
+        // Backfill questions.course_professor_id and questions.created_semester
+        val courseSemesterMap = CoursesTable.selectAll()
+            .associate { it[CoursesTable.id].value to it[CoursesTable.semester] }
+
+        QuestionsTable.selectAll().toList().forEach { q ->
+            val qId = q[QuestionsTable.id].value
+            val cId = q[QuestionsTable.courseId]
+            val pId = q[QuestionsTable.assignedProfessorId]
+            val curCp = q[QuestionsTable.courseProfessorId]
+            val curSem = q[QuestionsTable.createdSemester]
+            val resolvedCp = curCp ?: courseProfByPair[cId to pId]?.firstOrNull()?.get(CourseProfessorsTable.id)?.value
+            val resolvedSem = curSem.ifBlank { courseSemesterMap[cId].orEmpty().ifBlank { "2026-2" } }
+            if (curCp != resolvedCp || curSem != resolvedSem) {
+                QuestionsTable.update({ QuestionsTable.id eq qId }) {
+                    if (resolvedCp != null) it[courseProfessorId] = resolvedCp
+                    it[createdSemester] = resolvedSem
                 }
             }
         }

@@ -1,6 +1,7 @@
 package com.gonghak.service
 
 import com.gonghak.models.QuestionCategory
+import com.gonghak.util.SemesterUtils
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -35,7 +36,10 @@ data class EmailThreadSnapshot(
     val isThreadOpen: Boolean,
     val isCoProfessorAlert: Boolean,
     val hasReplyRoute: Boolean,
-    val posts: List<EmailThreadPost>
+    val posts: List<EmailThreadPost>,
+    val section: String? = null,
+    val semester: String = "",
+    val currentSemester: String = ""
 )
 
 /**
@@ -320,7 +324,15 @@ object EmailThreadHtmlRenderer {
         sb.append("<div style=\"background-color:#ffffff;border:1px solid #e4e4e7;border-radius:12px;padding:20px 22px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,0.04);\">")
         sb.append("<div style=\"margin-bottom:10px;line-height:2.0;\">")
         sb.append(renderPill(catLabel, catBg, catColor, catBorder, bold = true))
-        sb.append(renderPill(snapshot.courseName, "#f4f4f5", "#18181b", "#e4e4e7", bold = true))
+        val courseLabel = if (!snapshot.section.isNullOrBlank()) {
+            "${snapshot.courseName} (${snapshot.section})"
+        } else {
+            snapshot.courseName
+        }
+        sb.append(renderPill(courseLabel, "#f4f4f5", "#18181b", "#e4e4e7", bold = true))
+        if (snapshot.semester.isNotBlank() && snapshot.currentSemester.isNotBlank() && snapshot.semester != snapshot.currentSemester) {
+            sb.append(renderPill("${SemesterUtils.formatDisplayLabel(snapshot.semester)} 작성", "#eff6ff", "#1d4ed8", "#bfdbfe", bold = true))
+        }
         sb.append(renderPill("담당: ${snapshot.professorName}", "#fafafa", "#52525b", "#e4e4e7"))
         if (snapshot.isThreadOpen) {
             sb.append(renderPill("열림", "#f0fdf4", "#15803d", "#bbf7d0"))

@@ -17,6 +17,8 @@ const DEFAULT_PROF_SETTINGS = {
   dndStartTime: '22:00',
   dndEndTime: '08:00',
   coProfNotification: true,
+  notificationScope: 'ALL_SECTIONS',
+  emailScope: 'ASSIGNED_SECTION',
   activeCategories: {
     grade: true,
     assignment: true,
@@ -127,10 +129,12 @@ export function NotificationProvider({ children }) {
 
   const isProfessorRef = useRef(isProfessor);
   const isCurrentlyInDndRef = useRef(isCurrentlyInDnd);
+  const notificationScopeRef = useRef(effectiveProfSettings?.notificationScope || 'ALL_SECTIONS');
   useEffect(() => {
     isProfessorRef.current = isProfessor;
     isCurrentlyInDndRef.current = isCurrentlyInDnd;
-  }, [isProfessor, isCurrentlyInDnd]);
+    notificationScopeRef.current = effectiveProfSettings?.notificationScope || 'ALL_SECTIONS';
+  }, [isProfessor, isCurrentlyInDnd, effectiveProfSettings?.notificationScope]);
 
   const markAsRead = useCallback(async (id) => {
     try {
@@ -189,7 +193,8 @@ export function NotificationProvider({ children }) {
           })
         );
         const inDnd = isProfessorRef.current ? isCurrentlyInDndRef.current() : false;
-        if (!inDnd && getBrowserNotificationPermission() === 'granted') {
+        const profSuppressAll = isProfessorRef.current && notificationScopeRef.current === 'NONE';
+        if (!inDnd && !profSuppressAll && getBrowserNotificationPermission() === 'granted') {
           toDispatch.slice(0, 3).forEach((item) => {
             sendBrowserNotification(item.title, {
               body: item.message,
@@ -222,6 +227,8 @@ export function NotificationProvider({ children }) {
           dndStartTime: s.dndStartTime || '22:00',
           dndEndTime: s.dndEndTime || '08:00',
           coProfNotification: s.coProfNotification !== undefined ? s.coProfNotification : true,
+          notificationScope: s.notificationScope || (s.coProfNotification === false ? 'ASSIGNED_SECTION' : 'ALL_SECTIONS'),
+          emailScope: s.emailScope || (!s.emailEnabled ? 'NONE' : s.coProfNotification ? 'ALL_SECTIONS' : 'ASSIGNED_SECTION'),
           activeCategories: s.activeCategories || { grade: true, assignment: true, lecture: true }
         }));
       }

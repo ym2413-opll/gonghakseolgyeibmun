@@ -497,33 +497,57 @@ initializeStorage();
 function mapCourseDto(c) {
   if (!c || typeof c !== 'object') return c;
   const professors = Array.isArray(c.professors)
-    ? c.professors.map((p) => (p && typeof p === 'object' ? { ...p, isRegistered: p.isRegistered !== false } : p))
+    ? c.professors.map((p) =>
+        p && typeof p === 'object'
+          ? {
+              ...p,
+              isRegistered: p.isRegistered !== false,
+              courseProfessorId: p.courseProfessorId || null
+            }
+          : p
+      )
     : [];
+  const rawAssignedCpId = c.assignedCourseProfessorId || '';
   const rawAssignedId = c.assignedProfessorId || c.profId || '';
-  const matchedProf = rawAssignedId
-    ? professors.find((p) => p.id === rawAssignedId)
+  const matchedBySection = rawAssignedCpId
+    ? professors.find((p) => p.courseProfessorId === rawAssignedCpId)
     : null;
+  const matchedProf =
+    matchedBySection || (rawAssignedId ? professors.find((p) => p.id === rawAssignedId) : null);
   const primaryProf = matchedProf || professors.find((p) => p.isRegistered !== false) || professors[0] || null;
   const explicitProfName = [c.assignedProfessorName, c.profName]
     .map((n) => (n || '').trim())
     .find((n) => n && n !== '미배정');
-  const resolvedProfId = rawAssignedId || primaryProf?.id || '';
-  const resolvedProfName = explicitProfName || primaryProf?.name || '미배정';
+  const resolvedProfId = matchedBySection?.id || rawAssignedId || primaryProf?.id || '';
+  const resolvedProfName = matchedBySection?.name || explicitProfName || primaryProf?.name || '미배정';
   const resolvedProfRegistered =
     primaryProf != null
       ? primaryProf.isRegistered !== false
       : c.assignedProfessorRegistered !== false;
-  const resolvedSection = primaryProf?.section || c.section || '01분반';
+  const resolvedSection =
+    c.assignedSection || matchedBySection?.section || primaryProf?.section || c.section || '01분반';
+  const resolvedCpId = rawAssignedCpId || primaryProf?.courseProfessorId || null;
 
   return {
     id: c.id,
     name: c.name,
     code: c.code,
-    semester: c.semester || '2026-1',
+    semester: c.semester || '2026-2',
     college: c.college || '',
     department: c.department || primaryProf?.department || '',
     group: c.group || 'COMMON',
     section: resolvedSection,
+    assignedSection: resolvedSection,
+    courseProfessorId: resolvedCpId,
+    assignedCourseProfessorId: resolvedCpId,
+    myCourseProfessorIds: Array.isArray(c.myCourseProfessorIds) ? c.myCourseProfessorIds : [],
+    mySections: Array.isArray(c.mySections) ? c.mySections : [],
+    prevCourseId: c.prevCourseId || null,
+    prevCourseName: c.prevCourseName || null,
+    prevCourseSemester: c.prevCourseSemester || null,
+    nextCourseId: c.nextCourseId || null,
+    nextCourseName: c.nextCourseName || null,
+    nextCourseSemester: c.nextCourseSemester || null,
     profId: resolvedProfId,
     profName: resolvedProfName,
     assignedProfessorId: resolvedProfId,
@@ -744,9 +768,11 @@ export const api = {
             email: payload.email?.trim() || null,
             professorInviteCode: payload.professorInviteCode?.trim() || null,
             courseIds: Array.isArray(payload.courseIds) ? payload.courseIds : [],
-            courseNames: Array.isArray(payload.courseNames) ? payload.courseNames : []
+            courseNames: Array.isArray(payload.courseNames) ? payload.courseNames : [],
+            courseSelections: Array.isArray(payload.courseSelections) ? payload.courseSelections : [],
+            newCourses: Array.isArray(payload.newCourses) ? payload.newCourses : []
           })
-        }, 5000);
+        }, 8000);
 
         const body = await parseJsonSafe(res);
         if (!res.ok || body.success === false) {
@@ -902,6 +928,45 @@ export const api = {
       }
     }
     return safeGetStorage(STORAGE_KEY_DEPARTMENTS, INITIAL_DEPARTMENTS).map(normalizeCatalogEntry);
+  },
+
+  async getCoursesSummary() {
+    if (USE_REMOTE_BACKEND) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/courses/summary`, {
+          credentials: 'include',
+          headers: getAuthHeaders()
+        }, 4000);
+        if (res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const data = body?.data || body;
+          if (data && typeof data === 'object') {
+            return {
+              semester: data.currentSemester || data.semester || '2026-2',
+              currentSemester: data.currentSemester || data.semester || '2026-2',
+              availableSemesters: Array.isArray(data.availableSemesters)
+                ? data.availableSemesters
+                : [data.currentSemester || data.semester || '2026-2'],
+              title: data.title || '',
+              totalCourses: data.totalCourses || 0,
+              totalSections: data.totalSections || 0,
+              totalProfessors: data.totalProfessors || 0
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[API] getCoursesSummary fallback:', e);
+      }
+    }
+    return {
+      semester: '2026-2',
+      currentSemester: '2026-2',
+      availableSemesters: ['2026-2'],
+      title: '2026학년도 2학기 개설과목 및 강의시간표',
+      totalCourses: 0,
+      totalSections: 0,
+      totalProfessors: 0
+    };
   },
 
   async getAllCourses() {
@@ -1610,9 +1675,62 @@ export const api = {
     return { deleted: true, courseId };
   },
 
-  async updateUserCourses(courseIds) {
+  async linkCourse(courseId, prevCourseId = null) {
+    const data = await requestCatalogAdmin(
+      `/admin/courses/${encodeURIComponent(courseId)}/link`,
+      'PUT',
+      { prevCourseId: prevCourseId || null },
+      '학기 간 강의 연동 설정에 실패했습니다.'
+    );
+    return data ? mapCourseDto(data) : data;
+  },
+
+  async rolloverSemester({ targetSemester, autoLinkSameNameCourses = true }) {
+    return await requestCatalogAdmin(
+      '/admin/semesters/rollover',
+      'POST',
+      { targetSemester, autoLinkSameNameCourses: Boolean(autoLinkSameNameCourses) },
+      '활성 학기 전환에 실패했습니다.'
+    );
+  },
+
+  async importCoursesExcel(file, { semester = '', autoLinkPrevSemester = true, setAsCurrentSemester = false } = {}) {
+    if (!file) throw new Error('업로드할 엑셀(.xlsx) 파일을 선택해 주세요.');
+    const formData = new FormData();
+    formData.append('file', file);
+    if (semester && semester.trim()) {
+      formData.append('semester', semester.trim());
+    }
+    formData.append('autoLinkPrevSemester', String(Boolean(autoLinkPrevSemester)));
+    formData.append('setAsCurrentSemester', String(Boolean(setAsCurrentSemester)));
+
+    const res = await fetchWithTimeout(`${API_BASE_URL}/admin/courses/import-excel`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        ...getAuthHeaders()
+      },
+      body: formData
+    }, 30000);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body?.success === false) {
+      const err = new Error(body?.message || '엑셀 강의 일괄 등록에 실패했습니다.');
+      err.isHttpError = true;
+      err.status = res.status;
+      throw err;
+    }
+    return {
+      ...(body?.data || {}),
+      message: body?.message || '엑셀 강의 일괄 등록이 완료되었습니다.'
+    };
+  },
+
+  async updateUserCourses(courseIds, courseSelections = []) {
     const ids = Array.isArray(courseIds) ? [...new Set(courseIds.filter(Boolean))] : [];
-    if (ids.length === 0) {
+    const cleanSelections = Array.isArray(courseSelections)
+      ? courseSelections.filter((s) => s && s.courseId)
+      : [];
+    if (ids.length === 0 && cleanSelections.length === 0) {
       throw new Error('최소 1개 이상의 과목을 선택해야 합니다.');
     }
 
@@ -1625,7 +1743,7 @@ export const api = {
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
-          body: JSON.stringify({ courseIds: ids })
+          body: JSON.stringify({ courseIds: ids, courseSelections: cleanSelections })
         });
         const body = await res.json().catch(() => ({}));
         if (res.ok && body.data) {
@@ -1969,6 +2087,8 @@ export const api = {
       dndEndTime: '08:00',
       coProfNotification: true,
       emailEnabled: true,
+      notificationScope: 'ALL_SECTIONS',
+      emailScope: 'ASSIGNED_SECTION',
       notificationEmail: sessionUser?.email || '',
       activeCategories: { grade: true, assignment: true, lecture: true },
       ...(settingsMap[uid] || {})
@@ -2671,7 +2791,10 @@ export const api = {
     }
 
     const questions = safeGetStorage(STORAGE_KEY_QUESTIONS, INITIAL_QUESTIONS);
-    return calculateSimilarQuestions(queryText, questions, 3);
+    const sameCourseQuestions = courseId
+      ? questions.filter((q) => String(q.courseId) === String(courseId))
+      : questions;
+    return calculateSimilarQuestions(queryText, sameCourseQuestions, 3);
   },
 
   async refineQuestionAI(

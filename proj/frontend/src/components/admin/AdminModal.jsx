@@ -7,6 +7,14 @@ import ProfessorNameList from '../common/ProfessorNameList';
 import AdminNicknameForm from './AdminNicknameForm';
 import HelpBubble from '../common/HelpBubble';
 import {
+  buildSemesterOptions,
+  compareSemesters,
+  formatSemesterLabel,
+  isNonCurrentSemesterThread,
+  normalizeSemester,
+  parseSemesterOrNull
+} from '../../utils/semester';
+import {
   ShieldAlert,
   X,
   Building2,
@@ -27,7 +35,10 @@ import {
   Sparkles,
   Check,
   Pencil,
-  Search
+  Search,
+  Upload,
+  Link2,
+  Calendar
 } from 'lucide-react';
 
 const CatalogChipList = ({
@@ -243,7 +254,15 @@ const CourseScopeTargetField = ({
 };
 
 const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQuestion }) => {
-  const { colleges = [], departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
+  const {
+    colleges = [],
+    departments,
+    allCourses,
+    currentSemester = '2026-2',
+    availableSemesters = [],
+    refreshCatalog,
+    refreshCurrentUser
+  } = useAuth();
   const { exhibitionMode, updateExhibitionMode } = useTheme();
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'users' | 'posts' | 'emails'
   const [users, setUsers] = useState([]);
@@ -272,13 +291,31 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
-  const [courseSemester, setCourseSemester] = useState('2026-1');
+  const [courseSemester, setCourseSemester] = useState('');
   const [courseScopeType, setCourseScopeType] = useState('DEPARTMENT');
   const [courseCollege, setCourseCollege] = useState('');
   const [courseDept, setCourseDept] = useState('');
-  const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department }
+  const [coursePrevId, setCoursePrevId] = useState('AUTO'); // 'AUTO' | 'NONE' | '<uuid>'
+  const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department, prevCourseId }
   const [courseSearchQuery, setCourseSearchQuery] = useState('');
+  const [courseSemesterFilter, setCourseSemesterFilter] = useState('ALL');
   const [courseListLimit, setCourseListLimit] = useState(24);
+
+  // Semester rollover & Excel bulk import state
+  const [rolloverTargetSem, setRolloverTargetSem] = useState('');
+  const [rolloverAutoLink, setRolloverAutoLink] = useState(true);
+  const [isRollingOver, setIsRollingOver] = useState(false);
+
+  const [excelFile, setExcelFile] = useState(null);
+  const [excelTargetSem, setExcelTargetSem] = useState('');
+  const [excelAutoLink, setExcelAutoLink] = useState(true);
+  const [excelSetCurrent, setExcelSetCurrent] = useState(false);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const excelInputRef = useRef(null);
+
+  const semesterOptions = buildSemesterOptions(currentSemester, availableSemesters);
+  const effectiveCourseSemester = courseSemester || currentSemester || '2026-2';
+  const effectiveRolloverSem = rolloverTargetSem || currentSemester || '2026-2';
 
   const availableColleges = Array.from(
     new Set(
@@ -517,6 +554,63 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     };
   };
 
+  const handleRolloverSemester = async (e) => {
+    e.preventDefault();
+    const cleanTarget = normalizeSemester(effectiveRolloverSem, currentSemester);
+    setIsRollingOver(true);
+    try {
+      const res = await api.rolloverSemester({
+        targetSemester: cleanTarget,
+        autoLinkSameNameCourses: rolloverAutoLink
+      });
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(
+        `현재 활성 학기가 '${formatSemesterLabel(res?.currentSemester || cleanTarget)}'로 설정되었습니다.` +
+          (res?.autoLinkedCount > 0 ? ` (전학기 동일 과목명 ${res.autoLinkedCount}개 자동 연동됨)` : '')
+      );
+    } catch (err) {
+      notifyError(err.message || '학기 전환 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsRollingOver(false);
+    }
+  };
+
+  const handleImportExcel = async (e) => {
+    e.preventDefault();
+    if (!excelFile) {
+      notifyError('업로드할 강의시간표 엑셀(.xlsx) 파일을 선택해 주세요.');
+      return;
+    }
+    if (!excelFile.name.toLowerCase().endsWith('.xlsx')) {
+      notifyError('.xlsx 형식의 엑셀 파일만 업로드할 수 있습니다.');
+      return;
+    }
+    if (excelFile.size === 0 || excelFile.size > 15 * 1024 * 1024) {
+      notifyError('파일 크기는 15MB 이하의 비어 있지 않은 .xlsx 파일이어야 합니다.');
+      return;
+    }
+    setIsImportingExcel(true);
+    try {
+      const res = await api.importCoursesExcel(excelFile, {
+        semester: excelTargetSem.trim(),
+        autoLinkPrevSemester: excelAutoLink,
+        setAsCurrentSemester: excelSetCurrent
+      });
+      setExcelFile(null);
+      if (excelInputRef.current) {
+        excelInputRef.current.value = '';
+      }
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(res?.message || '엑셀 강의 일괄 등록이 완료되었습니다.');
+    } catch (err) {
+      notifyError(err.message || '엑셀 업로드 중 오류가 발생했습니다.');
+    } finally {
+      setIsImportingExcel(false);
+    }
+  };
+
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!courseCode.trim() || !courseName.trim()) return;
@@ -537,20 +631,24 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
     const addedName = courseName.trim();
     const addedCode = courseCode.trim();
+    const cleanSem = normalizeSemester(effectiveCourseSemester, currentSemester);
     try {
       await api.createCourse({
         code: addedCode,
         name: addedName,
-        semester: courseSemester.trim() || '2026-1',
+        semester: cleanSem,
         scopeType: courseScopeType,
         college: resolvedCollege,
-        department: resolvedDepartment
+        department: resolvedDepartment,
+        prevCourseId: coursePrevId !== 'AUTO' && coursePrevId !== 'NONE' ? coursePrevId : null,
+        autoLinkPrevSemester: coursePrevId === 'AUTO'
       });
       setCourseCode('');
       setCourseName('');
+      setCoursePrevId('AUTO');
       await refreshCatalog();
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`과목 '${addedName} (${addedCode})'이(가) 동적으로 추가되었습니다.`);
+      notifySuccess(`과목 '${addedName} (${addedCode}, ${formatSemesterLabel(cleanSem)})'이(가) 추가되었습니다.`);
     } catch (err) {
       notifyError(err.message || '과목 추가 중 오류가 발생했습니다.');
     }
@@ -578,10 +676,11 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       id: course.id,
       name: course.name || '',
       code: course.code || '',
-      semester: course.semester || '2026-1',
+      semester: course.semester || currentSemester || '2026-2',
       scopeType: inferredScope,
       college: inferredCollege,
-      department: inferredDept
+      department: inferredDept,
+      prevCourseId: course.prevCourseId || ''
     });
   };
 
@@ -599,14 +698,18 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       editingCourse.college,
       editingCourse.department
     );
+    const cleanSem = normalizeSemester(editingCourse.semester.trim(), currentSemester);
+    const cleanPrev = (editingCourse.prevCourseId || '').trim();
     try {
       const updated = await api.updateCourse(editingCourse.id, {
         name: cleanName,
         code: cleanCode,
-        semester: editingCourse.semester.trim() || '2026-1',
+        semester: cleanSem,
         scopeType: editingCourse.scopeType,
         college: resolvedCollege,
-        department: resolvedDepartment
+        department: resolvedDepartment,
+        prevCourseId: cleanPrev || null,
+        unlinkPrevCourse: !cleanPrev
       });
       setEditingCourse(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
@@ -750,10 +853,130 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
               <HelpBubble
                 tier="ALL"
                 mode="inline"
-                text="학과·단과대(구 명칭 별칭 포함)와 교과목을 추가·수정·삭제하고, 관리자 닉네임과 시연용 전시 모드를 설정해요."
+                text="엑셀(.xlsx) 시간표 일괄 등록, 정규·계절학기 전환 및 전학기 동일 강의 자동·수동 연결 리스트 관리, 학과·단과대·교과목 동적 관리를 수행해요."
                 className="mb-help-bubble"
               />
+              <datalist id="admin-semester-datalist">
+                {semesterOptions.map((sem) => (
+                  <option key={sem} value={sem}>
+                    {formatSemesterLabel(sem)}
+                  </option>
+                ))}
+              </datalist>
               <div className="admin-catalog-grid">
+              {/* 학기 전환 · 강의 연동 & 엑셀 일괄 등록 */}
+              <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="admin-semester-excel-grid">
+                  <div>
+                    <h3 className="admin-panel-title">
+                      <Calendar size={18} />
+                      활성 학기 · 강의 연동
+                    </h3>
+                    <p className="text-xs text-muted" style={{ marginBottom: 10 }}>
+                      현재 활성 학기: <strong>{formatSemesterLabel(currentSemester)}</strong> · 정규·계절학기를 지원하며 타 학기 스레드에는 작성 학기가 표시됩니다.
+                    </p>
+                    <HelpBubble
+                      tier="ALL"
+                      mode="inline"
+                      text="새 학기로 전환하면 전학기와 이름이 같은 강의가 자동으로 연동돼요. 연동된 강의는 이전 학기 질문과 유사 질답 기록을 함께 이어볼 수 있어요."
+                      className="mb-help-bubble"
+                    />
+                    <form onSubmit={handleRolloverSemester} className="admin-compact-form">
+                      <div className="auth-form-grid-2">
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">활성 학기</label>
+                          <input
+                            type="text"
+                            list="admin-semester-datalist"
+                            className="form-input"
+                            placeholder="예: 2027-1, 2026-여름, 2026-겨울"
+                            value={effectiveRolloverSem}
+                            onChange={(e) => setRolloverTargetSem(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 6, justifyContent: 'flex-end', display: 'flex', flexDirection: 'column' }}>
+                          <label className="admin-check-inline">
+                            <input
+                              type="checkbox"
+                              checked={rolloverAutoLink}
+                              onChange={(e) => setRolloverAutoLink(e.target.checked)}
+                            />
+                            <span>전학기 동일 과목명 자동 연동</span>
+                          </label>
+                        </div>
+                      </div>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={isRollingOver}>
+                        <RefreshCw size={14} />
+                        {isRollingOver ? '적용 중...' : '활성 학기 적용'}
+                      </button>
+                    </form>
+                  </div>
+
+                  <div>
+                    <h3 className="admin-panel-title">
+                      <Upload size={18} />
+                      엑셀 강의 일괄 등록
+                    </h3>
+                    <p className="text-xs text-muted" style={{ marginBottom: 10 }}>
+                      강의시간표 엑셀(<code>.xlsx</code>)을 업로드하면 학정번호의 분반을 분리해 과목·분반·교수를 일괄 등록합니다.
+                    </p>
+                    <HelpBubble
+                      tier="ALL"
+                      mode="inline"
+                      text="학교 개설강좌 엑셀(.xlsx)을 올리면 같은 과목의 여러 분반과 담당 교수가 자동으로 묶여 등록돼요. 적용 학기를 비우면 파일에서 학기를 자동 감지해요."
+                      className="mb-help-bubble"
+                    />
+                    <form onSubmit={handleImportExcel} className="admin-compact-form">
+                      <div className="auth-form-grid-2">
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">엑셀 파일 (.xlsx) *</label>
+                          <input
+                            ref={excelInputRef}
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            className="form-input"
+                            onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">적용 학기 (비우면 자동 감지)</label>
+                          <input
+                            type="text"
+                            list="admin-semester-datalist"
+                            className="form-input"
+                            placeholder="예: 2026-2, 2026-여름"
+                            value={excelTargetSem}
+                            onChange={(e) => setExcelTargetSem(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <label className="admin-check-inline">
+                          <input
+                            type="checkbox"
+                            checked={excelAutoLink}
+                            onChange={(e) => setExcelAutoLink(e.target.checked)}
+                          />
+                          <span>전학기 동일 과목명 자동 연동</span>
+                        </label>
+                        <label className="admin-check-inline">
+                          <input
+                            type="checkbox"
+                            checked={excelSetCurrent}
+                            onChange={(e) => setExcelSetCurrent(e.target.checked)}
+                          />
+                          <span>등록 학기로 활성 학기 전환</span>
+                        </label>
+                      </div>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={isImportingExcel}>
+                        <Upload size={14} />
+                        {isImportingExcel ? '등록 중...' : '엑셀 일괄 등록'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
               <div className="admin-panel-card">
                 <h3 className="admin-panel-title">
                   <Building2 size={18} />
@@ -1024,9 +1247,10 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       <label className="form-label">개설 학기</label>
                       <input
                         type="text"
+                        list="admin-semester-datalist"
                         className="form-input"
-                        placeholder="예: 2026-1"
-                        value={courseSemester}
+                        placeholder="예: 2026-2, 2026-여름"
+                        value={effectiveCourseSemester}
                         onChange={(e) => setCourseSemester(e.target.value)}
                       />
                     </div>
@@ -1042,6 +1266,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       onChange={(e) => setCourseName(e.target.value)}
                       required
                     />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">이전 학기 연동</label>
+                    <select
+                      className="form-select"
+                      value={coursePrevId}
+                      onChange={(e) => setCoursePrevId(e.target.value)}
+                    >
+                      <option value="AUTO">자동 연동 (전학기 동일 과목명)</option>
+                      <option value="NONE">연동 없음</option>
+                      {allCourses
+                        .slice()
+                        .sort((a, b) => compareSemesters(b.semester, a.semester) || String(a.name).localeCompare(String(b.name)))
+                        .map((cand) => (
+                          <option key={cand.id} value={cand.id}>
+                            [{formatSemesterLabel(cand.semester)}] {cand.name} ({cand.code})
+                          </option>
+                        ))}
+                    </select>
                   </div>
 
                   <div className="auth-form-grid-2">
@@ -1096,10 +1340,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                           .map((col) => col.name)
                       : []
                   );
+                  const semFiltered =
+                    courseSemesterFilter === 'ALL'
+                      ? allCourses
+                      : allCourses.filter(
+                          (c) => parseSemesterOrNull(c.semester) === parseSemesterOrNull(courseSemesterFilter)
+                        );
                   const filteredCourses = trimmedQ
-                    ? allCourses.filter((c) => {
+                    ? semFiltered.filter((c) => {
                         const profNames = (c.professors || []).map((p) => p.name || '').join(' ');
-                        const directMatch = [c.name, c.code, c.department, c.college, c.profName, profNames]
+                        const directMatch = [
+                          c.name,
+                          c.code,
+                          c.semester,
+                          c.department,
+                          c.college,
+                          c.profName,
+                          profNames,
+                          c.prevCourseName,
+                          c.nextCourseName
+                        ]
                           .filter(Boolean)
                           .some((field) => String(field).toLowerCase().includes(trimmedQ));
                         if (directMatch) return true;
@@ -1110,14 +1370,34 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                             Array.from(aliasMatchedColleges).some((col) => c.department === `${col} 전체`)
                         );
                       })
-                    : allCourses;
+                    : semFiltered;
                   const visibleCourses = filteredCourses.slice(0, courseListLimit);
                   const remainingCount = Math.max(0, filteredCourses.length - visibleCourses.length);
 
                   return (
                     <div className="admin-chip-list-wrap">
-                      <div className="admin-chip-header">
-                        등록된 교과목 ({allCourses.length}개{trimmedQ ? ` · 검색 결과 ${filteredCourses.length}개` : ''}) · 연필/휴지통으로 수정·삭제
+                      <div className="admin-chip-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span>
+                          등록된 교과목 ({allCourses.length}개
+                          {trimmedQ || courseSemesterFilter !== 'ALL' ? ` · 필터 결과 ${filteredCourses.length}개` : ''}) · 연필로 수정 및 연결 리스트 수동 설정
+                        </span>
+                        <select
+                          className="form-select"
+                          style={{ width: 'auto', minWidth: 130, padding: '4px 8px', fontSize: '0.78rem' }}
+                          value={courseSemesterFilter}
+                          onChange={(e) => {
+                            setCourseSemesterFilter(e.target.value);
+                            setCourseListLimit(24);
+                          }}
+                          aria-label="학기별 과목 필터"
+                        >
+                          <option value="ALL">전체 학기 보기</option>
+                          {semesterOptions.map((sem) => (
+                            <option key={sem} value={sem}>
+                              {formatSemesterLabel(sem)}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="admin-course-search-box">
                         <Search size={14} className="admin-course-search-icon" aria-hidden="true" />
@@ -1171,14 +1451,39 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                               />
                             </div>
                           </div>
-                          <div className="form-group">
-                            <label className="form-label">개설 학기</label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              value={editingCourse.semester}
-                              onChange={(e) => setEditingCourse((prev) => ({ ...prev, semester: e.target.value }))}
-                            />
+                          <div className="auth-form-grid-2">
+                            <div className="form-group">
+                              <label className="form-label">개설 학기</label>
+                              <input
+                                type="text"
+                                list="admin-semester-datalist"
+                                className="form-input"
+                                value={editingCourse.semester}
+                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, semester: e.target.value }))}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label className="form-label">이전 학기 연동</label>
+                              <select
+                                className="form-select"
+                                value={editingCourse.prevCourseId || ''}
+                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, prevCourseId: e.target.value }))}
+                              >
+                                <option value="">연동 없음</option>
+                                {allCourses
+                                  .filter((cand) => cand.id !== editingCourse.id)
+                                  .sort(
+                                    (a, b) =>
+                                      compareSemesters(b.semester, a.semester) ||
+                                      String(a.name).localeCompare(String(b.name))
+                                  )
+                                  .map((cand) => (
+                                    <option key={cand.id} value={cand.id}>
+                                      [{formatSemesterLabel(cand.semester)}] {cand.name} ({cand.code})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
                           </div>
                           <div className="auth-form-grid-2">
                             <div className="form-group">
@@ -1233,6 +1538,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                         <div className="admin-chip-list admin-course-chip-list">
                           {visibleCourses.map((c) => (
                             <span key={c.id} className="admin-dept-chip">
+                              <span className="semester-pill" style={{ marginRight: 4 }}>
+                                {formatSemesterLabel(c.semester)}
+                              </span>
                               {c.name}{' '}
                               <small>
                                 ({c.code}
@@ -1240,6 +1548,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                                 {' · 담당: '}
                                 <ProfessorNameList course={c} mode="all" />)
                               </small>
+                              {(c.prevCourseId || c.nextCourseId) && (
+                                <span
+                                  className="admin-linked-chain-badge"
+                                  title={[
+                                    c.prevCourseId
+                                      ? `이전: [${formatSemesterLabel(c.prevCourseSemester)}] ${c.prevCourseName || ''}`
+                                      : null,
+                                    c.nextCourseId
+                                      ? `다음: [${formatSemesterLabel(c.nextCourseSemester)}] ${c.nextCourseName || ''}`
+                                      : null
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' / ')}
+                                >
+                                  <Link2 size={10} />
+                                  {c.prevCourseSemester ? `${c.prevCourseSemester}←` : ''}
+                                  연동
+                                  {c.nextCourseSemester ? `→${c.nextCourseSemester}` : ''}
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 className="admin-chip-action-btn"
@@ -1541,8 +1869,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     {questions.map((q) => (
                       <tr key={q.id} className={q.isHidden ? 'row-withdrawn' : ''}>
                         <td>
-                          <div className="font-semibold">{q.courseName}</div>
-                          <div className="text-xs text-muted">{String(q.category).toUpperCase()}</div>
+                          <div className="font-semibold">
+                            {q.courseName}
+                            {q.section ? ` (${q.section})` : ''}
+                          </div>
+                          <div className="text-xs text-muted">
+                            {String(q.category).toUpperCase()}
+                            {isNonCurrentSemesterThread(q, currentSemester)
+                              ? ` · ${formatSemesterLabel(q.semester)} 작성`
+                              : ''}
+                          </div>
                         </td>
                         <td>
                           <div className="font-semibold">{q.title}</div>
