@@ -93,9 +93,9 @@ class R3OverhaulTest {
             role = UserRole.PROFESSOR,
             username = "prof_r3_01",
             password = "profpass1234",
-            name = "최테스트교수",
+            name = "최교수",
             department = "소프트웨어학과",
-            email = "choi.r3.prof@kw.ac.kr",
+            email = "r3.choi.prof@kw.ac.kr",
             courseIds = listOf("33333333-3333-3333-3333-333333333301")
         )
         val profRegRes = client.post("/api/auth/register") {
@@ -105,7 +105,7 @@ class R3OverhaulTest {
         assertEquals(HttpStatusCode.Created, profRegRes.status)
         val profAuth = profRegRes.body<ApiResponse<AuthResponse>>().data
         assertNotNull(profAuth)
-        assertEquals("choi.r3.prof@kw.ac.kr", profAuth.user.email)
+        assertEquals("r3.choi.prof@kw.ac.kr", profAuth.user.email)
 
         // 5. Duplicate Professor Email should fail
         val dupProfEmailRes = client.post("/api/auth/register") {
@@ -1035,7 +1035,7 @@ class R3OverhaulTest {
         val deptList = client.get("/api/departments")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
             .body<ApiResponse<List<DepartmentDto>>>().data!!
-        assertTrue(deptList.isNotEmpty() && deptList.any { it.name == "소프트웨어학부" })
+        assertTrue(deptList.isNotEmpty() && deptList.any { it.name == "전자공학과" })
 
         val nextDomesticPreview = client.get("/api/auth/next-student-id?year=2029&isForeign=false")
             .also { assertEquals(HttpStatusCode.OK, it.status) }
@@ -1055,7 +1055,7 @@ class R3OverhaulTest {
                     username = "",
                     password = "stupass1234",
                     name = "김일반",
-                    department = "소프트웨어학부",
+                    department = "전자공학과",
                     entryYear = 2029,
                     isForeign = false,
                     identifier = "AUTO",

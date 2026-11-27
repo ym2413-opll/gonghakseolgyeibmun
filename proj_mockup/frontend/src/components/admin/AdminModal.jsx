@@ -4,8 +4,22 @@ import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfessorNameList from '../common/ProfessorNameList';
+import { CourseSelectPicker } from '../common/CoursePicker';
 import AdminNicknameForm from './AdminNicknameForm';
 import HelpBubble from '../common/HelpBubble';
+import {
+  buildCourseLineageChain,
+  collectSelfAndDescendantIds,
+  extractCourseScopes,
+  sortCoursesList
+} from '../../utils/courseLineage';
+import {
+  buildSemesterOptions,
+  formatSemesterLabel,
+  isNonCurrentSemesterThread,
+  normalizeSemester,
+  parseSemesterOrNull
+} from '../../utils/semester';
 import {
   ShieldAlert,
   X,
@@ -27,7 +41,10 @@ import {
   Sparkles,
   Check,
   Pencil,
-  Search
+  Search,
+  Upload,
+  Link2,
+  Calendar
 } from 'lucide-react';
 
 const CatalogChipList = ({
@@ -243,7 +260,15 @@ const CourseScopeTargetField = ({
 };
 
 const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQuestion }) => {
-  const { colleges = [], departments, allCourses, refreshCatalog, refreshCurrentUser } = useAuth();
+  const {
+    colleges = [],
+    departments,
+    allCourses,
+    currentSemester = '2026-2',
+    availableSemesters = [],
+    refreshCatalog,
+    refreshCurrentUser
+  } = useAuth();
   const { exhibitionMode, updateExhibitionMode } = useTheme();
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'users' | 'posts' | 'emails'
   const [users, setUsers] = useState([]);
@@ -272,13 +297,33 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
-  const [courseSemester, setCourseSemester] = useState('2026-1');
+  const [courseSemester, setCourseSemester] = useState('');
   const [courseScopeType, setCourseScopeType] = useState('DEPARTMENT');
   const [courseCollege, setCourseCollege] = useState('');
   const [courseDept, setCourseDept] = useState('');
-  const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department }
+  const [coursePrevId, setCoursePrevId] = useState('AUTO'); // 'AUTO' | 'NONE' | '<uuid>'
+  const [editingCourse, setEditingCourse] = useState(null); // { id, name, code, semester, scopeType, college, department, prevCourseId }
   const [courseSearchQuery, setCourseSearchQuery] = useState('');
+  const [courseSemesterFilter, setCourseSemesterFilter] = useState('ALL');
+  const [courseDeptFilter, setCourseDeptFilter] = useState('ALL');
+  const [courseSortBy, setCourseSortBy] = useState('semester_desc');
   const [courseListLimit, setCourseListLimit] = useState(24);
+
+  // Semester rollover & Excel bulk import state
+  const [rolloverTargetSem, setRolloverTargetSem] = useState('');
+  const [rolloverAutoLink, setRolloverAutoLink] = useState(true);
+  const [isRollingOver, setIsRollingOver] = useState(false);
+
+  const [excelFile, setExcelFile] = useState(null);
+  const [excelTargetSem, setExcelTargetSem] = useState('');
+  const [excelAutoLink, setExcelAutoLink] = useState(true);
+  const [excelSetCurrent, setExcelSetCurrent] = useState(false);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const excelInputRef = useRef(null);
+
+  const semesterOptions = buildSemesterOptions(currentSemester, availableSemesters);
+  const effectiveCourseSemester = courseSemester || currentSemester || '2026-2';
+  const effectiveRolloverSem = rolloverTargetSem || currentSemester || '2026-2';
 
   const availableColleges = Array.from(
     new Set(
@@ -309,18 +354,106 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   // User sanction duration state
   const [banDurationHours, setBanDurationHours] = useState(24);
 
+  // Admin Transaction Draft/Staging Mode (Batch Commit / Rollback) & 30-day Trash Bin
+  const [draftMode, setDraftMode] = useState(true);
+  const [pendingOps, setPendingOps] = useState([]);
+  const [isCommittingBatch, setIsCommittingBatch] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [trashBusyId, setTrashBusyId] = useState(null);
+
+  const stageOperation = (op) => {
+    setPendingOps((prev) => [
+      ...prev,
+      {
+        id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: op.type,
+        targetId: op.targetId || null,
+        label: op.label,
+        payload: op.payload || {}
+      }
+    ]);
+    notifySuccess(`적용 대기 목록에 추가됨: ${op.label} (상단에서 일괄 적용 또는 철회할 수 있습니다.)`);
+  };
+
+  const handleRemovePendingOp = (opId) => {
+    setPendingOps((prev) => prev.filter((item) => item.id !== opId));
+  };
+
+  const handleRollbackBatch = () => {
+    if (pendingOps.length === 0) return;
+    setPendingOps([]);
+    notifySuccess('대기 중인 변경 사항을 모두 철회했습니다.');
+  };
+
   const loadAdminData = useCallback(async () => {
     try {
-      const [userList, emails] = await Promise.all([
+      const [userList, emails, trash] = await Promise.all([
         api.getAdminUsers(),
-        api.getEmailLogs()
+        api.getEmailLogs(),
+        api.getAdminTrash().catch(() => [])
       ]);
       setUsers(Array.isArray(userList) ? userList : []);
       setEmailLogs(Array.isArray(emails) ? emails : []);
+      setTrashItems(Array.isArray(trash) ? trash : []);
     } catch (err) {
       console.warn('Admin data load warning:', err);
     }
   }, []);
+
+  const handleCommitBatch = async () => {
+    if (pendingOps.length === 0 || isCommittingBatch) return;
+    setIsCommittingBatch(true);
+    try {
+      const payloadOps = pendingOps.map(({ type, targetId, label, payload }) => ({
+        type,
+        targetId,
+        label,
+        payload
+      }));
+      await api.commitAdminBatch(payloadOps);
+      const count = pendingOps.length;
+      setPendingOps([]);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`${count}건의 변경 사항이 일괄 적용되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '일괄 적용에 실패해 모든 변경 사항이 철회되었습니다.');
+    } finally {
+      setIsCommittingBatch(false);
+    }
+  };
+
+  const handleRestoreTrash = async (item) => {
+    if (!item?.id || trashBusyId) return;
+    setTrashBusyId(item.id);
+    try {
+      await api.restoreAdminTrash(item.id);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(`'${item.title}' 항목이 복구되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '복구 중 오류가 발생했습니다.');
+    } finally {
+      setTrashBusyId(null);
+    }
+  };
+
+  const handlePurgeTrash = async (item) => {
+    if (!item?.id || trashBusyId) return;
+    if (!window.confirm(`'${item.title}' 항목을 휴지통에서 영구 삭제하시겠습니까?\n영구 삭제 후에는 복구할 수 없습니다.`)) {
+      return;
+    }
+    setTrashBusyId(item.id);
+    try {
+      await api.purgeAdminTrash(item.id);
+      await loadAdminData();
+      notifySuccess(`'${item.title}' 항목이 영구 삭제되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '영구 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setTrashBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -362,12 +495,20 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
+    const payload = {
+      name: addedDeptName,
+      college: deptCollege.trim() || '광운대학교',
+      aliases: initialAliases
+    };
+    if (draftMode) {
+      stageOperation({ type: 'CREATE_DEPARTMENT', label: `학과 추가: ${addedDeptName}`, payload });
+      setDeptName('');
+      setDeptCollege('');
+      setDeptAliasesInput('');
+      return;
+    }
     try {
-      await api.createDepartment({
-        name: addedDeptName,
-        college: deptCollege.trim() || '광운대학교',
-        aliases: initialAliases
-      });
+      await api.createDepartment(payload);
       setDeptName('');
       setDeptCollege('');
       setDeptAliasesInput('');
@@ -383,6 +524,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     const targetId = effectiveAliasTargetDeptId;
     const cleanAlias = aliasNewName.trim();
     if (!targetId || !cleanAlias) return;
+    if (draftMode) {
+      const targetName = departments.find((d) => String(d.id) === String(targetId))?.name || '학과';
+      stageOperation({
+        type: 'ADD_DEPARTMENT_ALIAS',
+        targetId,
+        label: `학과 별칭 추가: ${targetName} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setAliasNewName('');
+      return;
+    }
     try {
       const updated = await api.addDepartmentAlias(targetId, cleanAlias);
       setAliasNewName('');
@@ -394,6 +546,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleRemoveAlias = async (deptId, aliasName) => {
+    if (draftMode) {
+      const targetName = departments.find((d) => String(d.id) === String(deptId))?.name || '학과';
+      stageOperation({
+        type: 'REMOVE_DEPARTMENT_ALIAS',
+        targetId: deptId,
+        label: `학과 별칭 삭제: ${targetName} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      return;
+    }
     try {
       await api.removeDepartmentAlias(deptId, aliasName);
       await refreshCatalog();
@@ -406,12 +568,23 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleSaveEditedDept = async (e) => {
     e.preventDefault();
     if (!editingDept || !editingDept.name.trim()) return;
-    try {
-      const updated = await api.updateDepartment(editingDept.id, {
-        name: editingDept.name.trim(),
-        college: editingDept.college.trim() || undefined,
-        keepOldNameAsAlias: editingDept.keepOldNameAsAlias
+    const payload = {
+      name: editingDept.name.trim(),
+      college: editingDept.college.trim() || undefined,
+      keepOldNameAsAlias: editingDept.keepOldNameAsAlias
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_DEPARTMENT',
+        targetId: editingDept.id,
+        label: `학과 수정: ${payload.name}`,
+        payload
       });
+      setEditingDept(null);
+      return;
+    }
+    try {
+      const updated = await api.updateDepartment(editingDept.id, payload);
       setEditingDept(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -429,11 +602,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean);
+    const payload = { name: addedName, aliases: initialAliases };
+    if (draftMode) {
+      stageOperation({ type: 'CREATE_COLLEGE', label: `단과대학 추가: ${addedName}`, payload });
+      setNewCollegeName('');
+      setNewCollegeAliasesInput('');
+      return;
+    }
     try {
-      await api.createCollege({
-        name: addedName,
-        aliases: initialAliases
-      });
+      await api.createCollege(payload);
       setNewCollegeName('');
       setNewCollegeAliasesInput('');
       await refreshCatalog();
@@ -448,6 +625,17 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     const targetId = effectiveAliasTargetCollegeId;
     const cleanAlias = collegeAliasNewName.trim();
     if (!targetId || !cleanAlias) return;
+    if (draftMode) {
+      const targetName = colleges.find((c) => String(c.id) === String(targetId))?.name || '단과대학';
+      stageOperation({
+        type: 'ADD_COLLEGE_ALIAS',
+        targetId,
+        label: `단과대학 별칭 추가: ${targetName} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setCollegeAliasNewName('');
+      return;
+    }
     try {
       const updated = await api.addCollegeAlias(targetId, cleanAlias);
       setCollegeAliasNewName('');
@@ -459,6 +647,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleRemoveCollegeAlias = async (collegeId, aliasName) => {
+    if (draftMode) {
+      const targetName = colleges.find((c) => String(c.id) === String(collegeId))?.name || '단과대학';
+      stageOperation({
+        type: 'REMOVE_COLLEGE_ALIAS',
+        targetId: collegeId,
+        label: `단과대학 별칭 삭제: ${targetName} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      return;
+    }
     try {
       await api.removeCollegeAlias(collegeId, aliasName);
       await refreshCatalog();
@@ -471,11 +669,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   const handleSaveEditedCollege = async (e) => {
     e.preventDefault();
     if (!editingCollege || !editingCollege.name.trim()) return;
-    try {
-      const updated = await api.updateCollege(editingCollege.id, {
-        name: editingCollege.name.trim(),
-        keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
+    const payload = {
+      name: editingCollege.name.trim(),
+      keepOldNameAsAlias: editingCollege.keepOldNameAsAlias
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_COLLEGE',
+        targetId: editingCollege.id,
+        label: `단과대학 수정: ${payload.name}`,
+        payload
       });
+      setEditingCollege(null);
+      return;
+    }
+    try {
+      const updated = await api.updateCollege(editingCollege.id, payload);
       setEditingCollege(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -487,11 +696,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleSubmitRenameAlias = async () => {
     if (!editingAlias || !editingAlias.value.trim()) return;
+    const nextAlias = editingAlias.value.trim();
+    if (draftMode) {
+      stageOperation({
+        type: editingAlias.entityKey === 'dept' ? 'RENAME_DEPARTMENT_ALIAS' : 'RENAME_COLLEGE_ALIAS',
+        targetId: editingAlias.itemId,
+        label: `별칭 변경: ${editingAlias.oldAlias} → ${nextAlias}`,
+        payload: { oldAlias: editingAlias.oldAlias, newAlias: nextAlias }
+      });
+      setEditingAlias(null);
+      return;
+    }
     try {
       if (editingAlias.entityKey === 'dept') {
-        await api.renameDepartmentAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+        await api.renameDepartmentAlias(editingAlias.itemId, editingAlias.oldAlias, nextAlias);
       } else {
-        await api.renameCollegeAlias(editingAlias.itemId, editingAlias.oldAlias, editingAlias.value.trim());
+        await api.renameCollegeAlias(editingAlias.itemId, editingAlias.oldAlias, nextAlias);
       }
       setEditingAlias(null);
       await refreshCatalog();
@@ -517,6 +737,74 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
     };
   };
 
+  const handleRolloverSemester = async (e) => {
+    e.preventDefault();
+    const cleanTarget = normalizeSemester(effectiveRolloverSem, currentSemester);
+    if (draftMode) {
+      stageOperation({
+        type: 'ROLLOVER_SEMESTER',
+        label: `활성 학기 전환: ${formatSemesterLabel(cleanTarget)}`,
+        payload: {
+          targetSemester: cleanTarget,
+          autoLinkSameNameCourses: Boolean(rolloverAutoLink)
+        }
+      });
+      return;
+    }
+    setIsRollingOver(true);
+    try {
+      const res = await api.rolloverSemester({
+        targetSemester: cleanTarget,
+        autoLinkSameNameCourses: rolloverAutoLink
+      });
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(
+        `현재 활성 학기가 '${formatSemesterLabel(res?.currentSemester || cleanTarget)}'로 설정되었습니다.` +
+          (res?.autoLinkedCount > 0 ? ` (전학기 동일 과목명 ${res.autoLinkedCount}개 자동 연동됨)` : '')
+      );
+    } catch (err) {
+      notifyError(err.message || '학기 전환 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsRollingOver(false);
+    }
+  };
+
+  const handleImportExcel = async (e) => {
+    e.preventDefault();
+    if (!excelFile) {
+      notifyError('업로드할 강의시간표 엑셀(.xlsx) 파일을 선택해 주세요.');
+      return;
+    }
+    if (!excelFile.name.toLowerCase().endsWith('.xlsx')) {
+      notifyError('.xlsx 형식의 엑셀 파일만 업로드할 수 있습니다.');
+      return;
+    }
+    if (excelFile.size === 0 || excelFile.size > 15 * 1024 * 1024) {
+      notifyError('파일 크기는 15MB 이하의 비어 있지 않은 .xlsx 파일이어야 합니다.');
+      return;
+    }
+    setIsImportingExcel(true);
+    try {
+      const res = await api.importCoursesExcel(excelFile, {
+        semester: excelTargetSem.trim(),
+        autoLinkPrevSemester: excelAutoLink,
+        setAsCurrentSemester: excelSetCurrent
+      });
+      setExcelFile(null);
+      if (excelInputRef.current) {
+        excelInputRef.current.value = '';
+      }
+      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      if (onDataChanged) await onDataChanged();
+      notifySuccess(res?.message || '엑셀 강의 일괄 등록이 완료되었습니다.');
+    } catch (err) {
+      notifyError(err.message || '엑셀 업로드 중 오류가 발생했습니다.');
+    } finally {
+      setIsImportingExcel(false);
+    }
+  };
+
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!courseCode.trim() || !courseName.trim()) return;
@@ -537,20 +825,36 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
     const addedName = courseName.trim();
     const addedCode = courseCode.trim();
-    try {
-      await api.createCourse({
-        code: addedCode,
-        name: addedName,
-        semester: courseSemester.trim() || '2026-1',
-        scopeType: courseScopeType,
-        college: resolvedCollege,
-        department: resolvedDepartment
+    const cleanSem = normalizeSemester(effectiveCourseSemester, currentSemester);
+    const payload = {
+      code: addedCode,
+      name: addedName,
+      semester: cleanSem,
+      scopeType: courseScopeType,
+      college: resolvedCollege,
+      department: resolvedDepartment,
+      prevCourseId: coursePrevId !== 'AUTO' && coursePrevId !== 'NONE' ? coursePrevId : null,
+      autoLinkPrevSemester: coursePrevId === 'AUTO'
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'CREATE_COURSE',
+        label: `과목 추가: ${addedName} (${addedCode}, ${formatSemesterLabel(cleanSem)})`,
+        payload
       });
       setCourseCode('');
       setCourseName('');
+      setCoursePrevId('AUTO');
+      return;
+    }
+    try {
+      await api.createCourse(payload);
+      setCourseCode('');
+      setCourseName('');
+      setCoursePrevId('AUTO');
       await refreshCatalog();
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`과목 '${addedName} (${addedCode})'이(가) 동적으로 추가되었습니다.`);
+      notifySuccess(`과목 '${addedName} (${addedCode}, ${formatSemesterLabel(cleanSem)})'이(가) 추가되었습니다.`);
     } catch (err) {
       notifyError(err.message || '과목 추가 중 오류가 발생했습니다.');
     }
@@ -578,11 +882,72 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       id: course.id,
       name: course.name || '',
       code: course.code || '',
-      semester: course.semester || '2026-1',
+      semester: course.semester || currentSemester || '2026-2',
       scopeType: inferredScope,
       college: inferredCollege,
-      department: inferredDept
+      department: inferredDept,
+      prevCourseId: course.prevCourseId || '',
+      keepOldNameAsAlias: true,
+      aliases: Array.isArray(course.aliases) ? course.aliases : [],
+      newAliasInput: ''
     });
+  };
+
+  const handleAddCourseAlias = async () => {
+    if (!editingCourse?.id) return;
+    const cleanAlias = String(editingCourse.newAliasInput || '').trim();
+    if (!cleanAlias) {
+      notifyError('추가할 과목 별칭을 입력해 주세요.');
+      return;
+    }
+    if (draftMode) {
+      stageOperation({
+        type: 'ADD_COURSE_ALIAS',
+        targetId: editingCourse.id,
+        label: `과목 별칭 추가: ${editingCourse.name} ← ${cleanAlias}`,
+        payload: { alias: cleanAlias }
+      });
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: [...(prev.aliases || []), cleanAlias], newAliasInput: '' } : prev
+      );
+      return;
+    }
+    try {
+      const updated = await api.addCourseAlias(editingCourse.id, cleanAlias);
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: updated?.aliases || [...(prev.aliases || []), cleanAlias], newAliasInput: '' } : prev
+      );
+      await refreshCatalog();
+      notifySuccess(`과목 별칭 '${cleanAlias}'이(가) 추가되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 별칭 추가에 실패했습니다.');
+    }
+  };
+
+  const handleRemoveCourseAlias = async (aliasName) => {
+    if (!editingCourse?.id || !aliasName) return;
+    if (draftMode) {
+      stageOperation({
+        type: 'REMOVE_COURSE_ALIAS',
+        targetId: editingCourse.id,
+        label: `과목 별칭 삭제: ${editingCourse.name} (${aliasName})`,
+        payload: { alias: aliasName }
+      });
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: (prev.aliases || []).filter((a) => a !== aliasName) } : prev
+      );
+      return;
+    }
+    try {
+      const updated = await api.removeCourseAlias(editingCourse.id, aliasName);
+      setEditingCourse((prev) =>
+        prev ? { ...prev, aliases: updated?.aliases || (prev.aliases || []).filter((a) => a !== aliasName) } : prev
+      );
+      await refreshCatalog();
+      notifySuccess(`과목 별칭 '${aliasName}'이(가) 삭제되었습니다.`);
+    } catch (err) {
+      notifyError(err.message || '과목 별칭 삭제에 실패했습니다.');
+    }
   };
 
   const handleSaveEditedCourse = async (e) => {
@@ -599,15 +964,31 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       editingCourse.college,
       editingCourse.department
     );
-    try {
-      const updated = await api.updateCourse(editingCourse.id, {
-        name: cleanName,
-        code: cleanCode,
-        semester: editingCourse.semester.trim() || '2026-1',
-        scopeType: editingCourse.scopeType,
-        college: resolvedCollege,
-        department: resolvedDepartment
+    const cleanSem = normalizeSemester(editingCourse.semester.trim(), currentSemester);
+    const cleanPrev = (editingCourse.prevCourseId || '').trim();
+    const payload = {
+      name: cleanName,
+      code: cleanCode,
+      semester: cleanSem,
+      scopeType: editingCourse.scopeType,
+      college: resolvedCollege,
+      department: resolvedDepartment,
+      prevCourseId: cleanPrev || null,
+      unlinkPrevCourse: !cleanPrev,
+      keepOldNameAsAlias: Boolean(editingCourse.keepOldNameAsAlias)
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'UPDATE_COURSE',
+        targetId: editingCourse.id,
+        label: `과목 수정: ${cleanName} (${cleanCode})`,
+        payload
       });
+      setEditingCourse(null);
+      return;
+    }
+    try {
+      const updated = await api.updateCourse(editingCourse.id, payload);
       setEditingCourse(null);
       await Promise.all([refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
@@ -619,9 +1000,21 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleDeleteCourse = async (course) => {
     if (!course?.id) return;
+    if (draftMode) {
+      stageOperation({
+        type: 'DELETE_COURSE',
+        targetId: course.id,
+        label: `과목 삭제(휴지통): ${course.name} (${course.code})`,
+        payload: {}
+      });
+      if (editingCourse && String(editingCourse.id) === String(course.id)) {
+        setEditingCourse(null);
+      }
+      return;
+    }
     if (
       !window.confirm(
-        `'${course.name} (${course.code})' 과목을 삭제하시겠습니까?\n이 과목에 등록된 질문·답변 및 수강 내역도 함께 삭제됩니다.`
+        `'${course.name} (${course.code})' 과목을 삭제하시겠습니까?\n삭제된 과목과 관련 질문·답변은 휴지통에 30일간 보존되며 언제든 복구할 수 있습니다.`
       )
     ) {
       return;
@@ -631,21 +1024,31 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
       if (editingCourse && String(editingCourse.id) === String(course.id)) {
         setEditingCourse(null);
       }
-      await Promise.all([refreshCatalog(), refreshCurrentUser()]);
+      await Promise.all([loadAdminData(), refreshCatalog(), refreshCurrentUser()]);
       if (onDataChanged) await onDataChanged();
-      notifySuccess(`과목 '${course.name} (${course.code})'이(가) 삭제되었습니다.`);
+      notifySuccess(`과목 '${course.name} (${course.code})'이(가) 휴지통으로 이동되었습니다. (30일간 복구 가능)`);
     } catch (err) {
       notifyError(err.message || '과목 삭제 중 오류가 발생했습니다.');
     }
   };
 
   const handleSanction = async (targetUser, action) => {
-    try {
-      await api.sanctionUser(targetUser.id, {
-        action,
-        durationHours: Number(banDurationHours) || 24,
-        durationDays: 0
+    const payload = {
+      action,
+      durationHours: Number(banDurationHours) || 24,
+      durationDays: 0
+    };
+    if (draftMode) {
+      stageOperation({
+        type: 'SANCTION_USER',
+        targetId: targetUser.id,
+        label: `계정 제재(${action}): ${targetUser.name}`,
+        payload
       });
+      return;
+    }
+    try {
+      await api.sanctionUser(targetUser.id, payload);
       await loadAdminData();
       await refreshCurrentUser();
       notifySuccess(`'${targetUser.name} (${targetUser.username || targetUser.identifier})' 계정에 [${action}] 조치가 적용되었습니다.`);
@@ -655,6 +1058,15 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
   };
 
   const handleToggleQuestionHide = async (q) => {
+    if (draftMode) {
+      stageOperation({
+        type: 'HIDE_QUESTION',
+        targetId: q.id,
+        label: `질문 ${!q.isHidden ? '가리기' : '가리기 해제'}: ${(q.title || '').slice(0, 24)}`,
+        payload: { isHidden: !q.isHidden }
+      });
+      return;
+    }
     try {
       await api.toggleHideQuestion(q.id, !q.isHidden);
       if (onDataChanged) await onDataChanged();
@@ -666,15 +1078,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
 
   const handleDeletePost = async (q) => {
     if (!q?.id) return;
-    if (onDeleteQuestion) {
-      await onDeleteQuestion(q);
+    if (draftMode) {
+      stageOperation({
+        type: 'DELETE_QUESTION',
+        targetId: q.id,
+        label: `질문 삭제(휴지통): ${(q.title || '').slice(0, 24)}`,
+        payload: {}
+      });
       return;
     }
-    if (!window.confirm('이 질문 게시물을 영구 삭제하시겠습니까?')) return;
+    if (onDeleteQuestion) {
+      await onDeleteQuestion(q);
+      await loadAdminData();
+      return;
+    }
+    if (!window.confirm('이 질문 게시물을 삭제하시겠습니까?\n삭제된 질문은 휴지통에 30일간 보존되며 복구할 수 있습니다.')) return;
     try {
       await api.deleteQuestion(q.id);
+      await loadAdminData();
       if (onDataChanged) await onDataChanged();
-      notifySuccess('질문이 영구 삭제되었습니다.');
+      notifySuccess('질문이 휴지통으로 이동되었습니다. (30일간 복구 가능)');
     } catch (err) {
       notifyError(err.message || '게시물 삭제 실패');
     }
@@ -729,6 +1152,69 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
             <Mail size={16} />
             <span>이메일 ({emailLogs.length})</span>
           </button>
+          <button
+            type="button"
+            className={`admin-tab-btn ${activeTab === 'trash' ? 'active' : ''}`}
+            onClick={() => setActiveTab('trash')}
+          >
+            <Trash2 size={16} />
+            <span>휴지통 ({trashItems.length})</span>
+          </button>
+        </div>
+
+        {/* 관리자 일괄 적용 / 철회 바 */}
+        <div className="admin-tx-bar">
+          <div className="admin-tx-bar-top">
+            <label className="admin-check-inline" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={draftMode}
+                onChange={(e) => setDraftMode(e.target.checked)}
+              />
+              <span>변경 사항 모아 적용/철회</span>
+            </label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {pendingOps.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-xs"
+                    onClick={handleRollbackBatch}
+                    disabled={isCommittingBatch}
+                  >
+                    전체 철회 ({pendingOps.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-xs"
+                    onClick={handleCommitBatch}
+                    disabled={isCommittingBatch}
+                  >
+                    <Check size={12} />
+                    {isCommittingBatch ? '적용 중...' : `일괄 적용 (${pendingOps.length}건)`}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {pendingOps.length > 0 && (
+            <div className="admin-tx-op-list">
+              {pendingOps.map((op, idx) => (
+                <span key={op.id} className="admin-tx-op-chip">
+                  <strong>#{idx + 1}</strong> {op.label}
+                  <button
+                    type="button"
+                    className="chip-remove-btn"
+                    onClick={() => handleRemovePendingOp(op.id)}
+                    aria-label="철회"
+                    title="이 변경 사항 철회"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="modal-body admin-modal-body">
@@ -750,10 +1236,130 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
               <HelpBubble
                 tier="ALL"
                 mode="inline"
-                text="학과·단과대(구 명칭 별칭 포함)와 교과목을 추가·수정·삭제하고, 관리자 닉네임과 시연용 전시 모드를 설정해요."
+                text="엑셀(.xlsx) 시간표 일괄 등록, 정규·계절학기 전환 및 전학기 동일 강의 자동·수동 연결 리스트 관리, 학과·단과대·교과목 동적 관리를 수행해요."
                 className="mb-help-bubble"
               />
+              <datalist id="admin-semester-datalist">
+                {semesterOptions.map((sem) => (
+                  <option key={sem} value={sem}>
+                    {formatSemesterLabel(sem)}
+                  </option>
+                ))}
+              </datalist>
               <div className="admin-catalog-grid">
+              {/* 학기 전환 · 강의 연동 & 엑셀 일괄 등록 */}
+              <div className="admin-panel-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="admin-semester-excel-grid">
+                  <div>
+                    <h3 className="admin-panel-title">
+                      <Calendar size={18} />
+                      활성 학기 · 강의 연동
+                    </h3>
+                    <p className="text-xs text-muted" style={{ marginBottom: 10 }}>
+                      현재 활성 학기: <strong>{formatSemesterLabel(currentSemester)}</strong> · 정규·계절학기를 지원하며 타 학기 스레드에는 작성 학기가 표시됩니다.
+                    </p>
+                    <HelpBubble
+                      tier="ALL"
+                      mode="inline"
+                      text="새 학기로 전환하면 전학기와 이름이 같은 강의가 자동으로 연동돼요. 연동된 강의는 이전 학기 질문과 유사 질답 기록을 함께 이어볼 수 있어요."
+                      className="mb-help-bubble"
+                    />
+                    <form onSubmit={handleRolloverSemester} className="admin-compact-form">
+                      <div className="auth-form-grid-2">
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">활성 학기</label>
+                          <input
+                            type="text"
+                            list="admin-semester-datalist"
+                            className="form-input"
+                            placeholder="예: 2027-1, 2026-여름, 2026-겨울"
+                            value={effectiveRolloverSem}
+                            onChange={(e) => setRolloverTargetSem(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 6, justifyContent: 'flex-end', display: 'flex', flexDirection: 'column' }}>
+                          <label className="admin-check-inline">
+                            <input
+                              type="checkbox"
+                              checked={rolloverAutoLink}
+                              onChange={(e) => setRolloverAutoLink(e.target.checked)}
+                            />
+                            <span>전학기 동일 과목명 자동 연동</span>
+                          </label>
+                        </div>
+                      </div>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={isRollingOver}>
+                        <RefreshCw size={14} />
+                        {isRollingOver ? '적용 중...' : '활성 학기 적용'}
+                      </button>
+                    </form>
+                  </div>
+
+                  <div>
+                    <h3 className="admin-panel-title">
+                      <Upload size={18} />
+                      엑셀 강의 일괄 등록
+                    </h3>
+                    <p className="text-xs text-muted" style={{ marginBottom: 10 }}>
+                      강의시간표 엑셀(<code>.xlsx</code>)을 업로드하면 학정번호의 분반을 분리해 과목·분반·교수를 일괄 등록합니다.
+                    </p>
+                    <HelpBubble
+                      tier="ALL"
+                      mode="inline"
+                      text="학교 개설강좌 엑셀(.xlsx)을 올리면 같은 과목의 여러 분반과 담당 교수가 자동으로 묶여 등록돼요. 적용 학기를 비우면 파일에서 학기를 자동 감지해요."
+                      className="mb-help-bubble"
+                    />
+                    <form onSubmit={handleImportExcel} className="admin-compact-form">
+                      <div className="auth-form-grid-2">
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">엑셀 파일 (.xlsx) *</label>
+                          <input
+                            ref={excelInputRef}
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            className="form-input"
+                            onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 6 }}>
+                          <label className="form-label">적용 학기 (비우면 자동 감지)</label>
+                          <input
+                            type="text"
+                            list="admin-semester-datalist"
+                            className="form-input"
+                            placeholder="예: 2026-2, 2026-여름"
+                            value={excelTargetSem}
+                            onChange={(e) => setExcelTargetSem(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <label className="admin-check-inline">
+                          <input
+                            type="checkbox"
+                            checked={excelAutoLink}
+                            onChange={(e) => setExcelAutoLink(e.target.checked)}
+                          />
+                          <span>전학기 동일 과목명 자동 연동</span>
+                        </label>
+                        <label className="admin-check-inline">
+                          <input
+                            type="checkbox"
+                            checked={excelSetCurrent}
+                            onChange={(e) => setExcelSetCurrent(e.target.checked)}
+                          />
+                          <span>등록 학기로 활성 학기 전환</span>
+                        </label>
+                      </div>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={isImportingExcel}>
+                        <Upload size={14} />
+                        {isImportingExcel ? '등록 중...' : '엑셀 일괄 등록'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
               <div className="admin-panel-card">
                 <h3 className="admin-panel-title">
                   <Building2 size={18} />
@@ -1024,9 +1630,10 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       <label className="form-label">개설 학기</label>
                       <input
                         type="text"
+                        list="admin-semester-datalist"
                         className="form-input"
-                        placeholder="예: 2026-1"
-                        value={courseSemester}
+                        placeholder="예: 2026-2, 2026-여름"
+                        value={effectiveCourseSemester}
                         onChange={(e) => setCourseSemester(e.target.value)}
                       />
                     </div>
@@ -1041,6 +1648,22 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                       value={courseName}
                       onChange={(e) => setCourseName(e.target.value)}
                       required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">이전 학기 연동</label>
+                    <CourseSelectPicker
+                      courses={allCourses}
+                      value={coursePrevId}
+                      onChange={setCoursePrevId}
+                      departments={departments}
+                      colleges={colleges}
+                      specialOptions={[
+                        { value: 'AUTO', label: '자동 연동 (전학기 동일 과목명)' },
+                        { value: 'NONE', label: '연동 없음' }
+                      ]}
+                      placeholder="연동할 강의를 선택하세요"
                     />
                   </div>
 
@@ -1096,10 +1719,36 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                           .map((col) => col.name)
                       : []
                   );
-                  const filteredCourses = trimmedQ
-                    ? allCourses.filter((c) => {
+                  const courseScopeOptions = extractCourseScopes(allCourses);
+                  const semFiltered =
+                    courseSemesterFilter === 'ALL'
+                      ? allCourses
+                      : allCourses.filter(
+                          (c) => parseSemesterOrNull(c.semester) === parseSemesterOrNull(courseSemesterFilter)
+                        );
+                  const deptFiltered =
+                    courseDeptFilter === 'ALL'
+                      ? semFiltered
+                      : semFiltered.filter(
+                          (c) =>
+                            String(c.department || c.college || '').trim() === courseDeptFilter ||
+                            String(c.college || '').trim() === courseDeptFilter
+                        );
+                  const searchedCourses = trimmedQ
+                    ? deptFiltered.filter((c) => {
                         const profNames = (c.professors || []).map((p) => p.name || '').join(' ');
-                        const directMatch = [c.name, c.code, c.department, c.college, c.profName, profNames]
+                        const directMatch = [
+                          c.name,
+                          c.code,
+                          c.semester,
+                          c.department,
+                          c.college,
+                          c.profName,
+                          profNames,
+                          c.prevCourseName,
+                          c.nextCourseName,
+                          ...(Array.isArray(c.aliases) ? c.aliases : [])
+                        ]
                           .filter(Boolean)
                           .some((field) => String(field).toLowerCase().includes(trimmedQ));
                         if (directMatch) return true;
@@ -1110,14 +1759,75 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                             Array.from(aliasMatchedColleges).some((col) => c.department === `${col} 전체`)
                         );
                       })
-                    : allCourses;
+                    : deptFiltered;
+                  const filteredCourses = sortCoursesList(searchedCourses, courseSortBy);
                   const visibleCourses = filteredCourses.slice(0, courseListLimit);
                   const remainingCount = Math.max(0, filteredCourses.length - visibleCourses.length);
+                  const editingChain = editingCourse
+                    ? buildCourseLineageChain(editingCourse.id, allCourses)
+                    : [];
+                  const editingExcludeIds = editingCourse
+                    ? collectSelfAndDescendantIds(editingCourse.id, allCourses)
+                    : null;
 
                   return (
                     <div className="admin-chip-list-wrap">
-                      <div className="admin-chip-header">
-                        등록된 교과목 ({allCourses.length}개{trimmedQ ? ` · 검색 결과 ${filteredCourses.length}개` : ''}) · 연필/휴지통으로 수정·삭제
+                      <div className="admin-chip-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span>
+                          등록된 교과목 ({allCourses.length}개
+                          {trimmedQ || courseSemesterFilter !== 'ALL' || courseDeptFilter !== 'ALL' ? ` · 필터 결과 ${filteredCourses.length}개` : ''}) · 연필로 수정 및 연결 리스트 수동 설정
+                        </span>
+                        <div className="course-picker-controls" style={{ marginBottom: 0 }}>
+                          <select
+                            className="form-select course-picker-ctrl-select"
+                            value={courseSemesterFilter}
+                            onChange={(e) => {
+                              setCourseSemesterFilter(e.target.value);
+                              setCourseListLimit(24);
+                            }}
+                            aria-label="학기별 과목 필터"
+                          >
+                            <option value="ALL">전체 학기</option>
+                            {semesterOptions.map((sem) => (
+                              <option key={sem} value={sem}>
+                                {formatSemesterLabel(sem)}
+                              </option>
+                            ))}
+                          </select>
+                          {courseScopeOptions.length > 1 && (
+                            <select
+                              className="form-select course-picker-ctrl-select"
+                              value={courseDeptFilter}
+                              onChange={(e) => {
+                                setCourseDeptFilter(e.target.value);
+                                setCourseListLimit(24);
+                              }}
+                              aria-label="학과·단과대 필터"
+                            >
+                              <option value="ALL">전체 학과</option>
+                              {courseScopeOptions.map((sc) => (
+                                <option key={sc} value={sc}>
+                                  {sc}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <select
+                            className="form-select course-picker-ctrl-select"
+                            value={courseSortBy}
+                            onChange={(e) => {
+                              setCourseSortBy(e.target.value);
+                              setCourseListLimit(24);
+                            }}
+                            aria-label="교과목 정렬"
+                          >
+                            <option value="semester_desc">최신 학기순</option>
+                            <option value="semester_asc">오래된 학기순</option>
+                            <option value="name_asc">과목명순</option>
+                            <option value="code_asc">학수번호순</option>
+                            <option value="linked_first">연동 과목 우선</option>
+                          </select>
+                        </div>
                       </div>
                       <div className="admin-course-search-box">
                         <Search size={14} className="admin-course-search-icon" aria-hidden="true" />
@@ -1171,15 +1881,59 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                               />
                             </div>
                           </div>
-                          <div className="form-group">
-                            <label className="form-label">개설 학기</label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              value={editingCourse.semester}
-                              onChange={(e) => setEditingCourse((prev) => ({ ...prev, semester: e.target.value }))}
-                            />
+                          <div className="auth-form-grid-2">
+                            <div className="form-group">
+                              <label className="form-label">개설 학기</label>
+                              <input
+                                type="text"
+                                list="admin-semester-datalist"
+                                className="form-input"
+                                value={editingCourse.semester}
+                                onChange={(e) => setEditingCourse((prev) => ({ ...prev, semester: e.target.value }))}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label className="form-label">이전 학기 연동</label>
+                              <CourseSelectPicker
+                                courses={allCourses}
+                                value={editingCourse.prevCourseId || ''}
+                                onChange={(val) => setEditingCourse((prev) => ({ ...prev, prevCourseId: val }))}
+                                excludeIds={editingExcludeIds}
+                                departments={departments}
+                                colleges={colleges}
+                                specialOptions={[{ value: '', label: '연동 없음' }]}
+                                placeholder="연동 없음"
+                              />
+                            </div>
                           </div>
+                          {editingChain.length > 1 && (
+                            <div className="course-lineage-chain-box">
+                              <div className="course-lineage-chain-title">
+                                <Link2 size={12} />
+                                <span>연결 리스트 체인 ({editingChain.length}개 강의 연속 연동 · 클릭하여 이어서 수정)</span>
+                              </div>
+                              <div className="course-lineage-chain-nodes">
+                                {editingChain.map((node, idx) => {
+                                  const isCurrent = node.id === editingCourse.id;
+                                  return (
+                                    <React.Fragment key={node.id}>
+                                      {idx > 0 && <span className="course-lineage-arrow">→</span>}
+                                      <button
+                                        type="button"
+                                        className={`course-lineage-node ${isCurrent ? 'current' : ''}`}
+                                        onClick={() => !isCurrent && handleStartEditCourse(node)}
+                                        disabled={isCurrent}
+                                        title={isCurrent ? '현재 수정 중인 강의' : `${node.name} 수정으로 이동`}
+                                      >
+                                        <span className="semester-pill">{formatSemesterLabel(node.semester)}</span>
+                                        <span>{node.name}</span>
+                                      </button>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                           <div className="auth-form-grid-2">
                             <div className="form-group">
                               <label className="form-label">주관 단위</label>
@@ -1210,6 +1964,69 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                               onChangeDepartment={(val) => setEditingCourse((prev) => ({ ...prev, department: val }))}
                             />
                           </div>
+                          <div className="course-lineage-chain-box">
+                            <div className="course-lineage-chain-title">
+                              <Link2 size={12} />
+                              <span>과목 별칭 (연결 리스트)</span>
+                            </div>
+                            <label className="admin-check-inline" style={{ marginBottom: 6 }}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingCourse.keepOldNameAsAlias)}
+                                onChange={(e) =>
+                                  setEditingCourse((prev) => ({ ...prev, keepOldNameAsAlias: e.target.checked }))
+                                }
+                              />
+                              <span>과목명 변경 시 기존 명칭을 별칭 연결 리스트에 자동 보존</span>
+                            </label>
+                            {(editingCourse.aliases || []).length > 0 && (
+                              <div className="course-lineage-chain-nodes" style={{ marginBottom: 6 }}>
+                                {editingCourse.aliases.map((al, idx) => (
+                                  <React.Fragment key={al}>
+                                    {idx > 0 && <span className="course-lineage-arrow">→</span>}
+                                    <span className="course-lineage-node" style={{ cursor: 'default' }}>
+                                      <span>{al}</span>
+                                      <button
+                                        type="button"
+                                        className="chip-remove-btn"
+                                        onClick={() => handleRemoveCourseAlias(al)}
+                                        aria-label={`별칭 ${al} 삭제`}
+                                        title={`별칭 ${al} 삭제`}
+                                      >
+                                        <X size={11} />
+                                      </button>
+                                    </span>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <input
+                                type="text"
+                                className="form-input"
+                                style={{ flex: 1 }}
+                                placeholder="추가할 구 과목명/별칭 입력..."
+                                value={editingCourse.newAliasInput || ''}
+                                onChange={(e) =>
+                                  setEditingCourse((prev) => ({ ...prev, newAliasInput: e.target.value }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddCourseAlias();
+                                  }
+                                }}
+                                maxLength={100}
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-xs"
+                                onClick={handleAddCourseAlias}
+                              >
+                                별칭 추가
+                              </button>
+                            </div>
+                          </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <button type="submit" className="btn btn-primary btn-xs">저장</button>
                             <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingCourse(null)}>취소</button>
@@ -1233,6 +2050,9 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                         <div className="admin-chip-list admin-course-chip-list">
                           {visibleCourses.map((c) => (
                             <span key={c.id} className="admin-dept-chip">
+                              <span className="semester-pill" style={{ marginRight: 4 }}>
+                                {formatSemesterLabel(c.semester)}
+                              </span>
                               {c.name}{' '}
                               <small>
                                 ({c.code}
@@ -1240,6 +2060,26 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                                 {' · 담당: '}
                                 <ProfessorNameList course={c} mode="all" />)
                               </small>
+                              {(c.prevCourseId || c.nextCourseId) && (
+                                <span
+                                  className="admin-linked-chain-badge"
+                                  title={[
+                                    c.prevCourseId
+                                      ? `이전: [${formatSemesterLabel(c.prevCourseSemester)}] ${c.prevCourseName || ''}`
+                                      : null,
+                                    c.nextCourseId
+                                      ? `다음: [${formatSemesterLabel(c.nextCourseSemester)}] ${c.nextCourseName || ''}`
+                                      : null
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' / ')}
+                                >
+                                  <Link2 size={10} />
+                                  {c.prevCourseSemester ? `${c.prevCourseSemester}←` : ''}
+                                  연동
+                                  {c.nextCourseSemester ? `→${c.nextCourseSemester}` : ''}
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 className="admin-chip-action-btn"
@@ -1541,8 +2381,16 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                     {questions.map((q) => (
                       <tr key={q.id} className={q.isHidden ? 'row-withdrawn' : ''}>
                         <td>
-                          <div className="font-semibold">{q.courseName}</div>
-                          <div className="text-xs text-muted">{String(q.category).toUpperCase()}</div>
+                          <div className="font-semibold">
+                            {q.courseName}
+                            {q.section ? ` (${q.section})` : ''}
+                          </div>
+                          <div className="text-xs text-muted">
+                            {String(q.category).toUpperCase()}
+                            {isNonCurrentSemesterThread(q, currentSemester)
+                              ? ` · ${formatSemesterLabel(q.semester)} 작성`
+                              : ''}
+                          </div>
                         </td>
                         <td>
                           <div className="font-semibold">{q.title}</div>
@@ -1646,6 +2494,77 @@ const AdminModal = ({ isOpen, onClose, questions = [], onDataChanged, onDeleteQu
                         <div className="admin-email-log-subject">{log.subject}</div>
                         <div className="text-xs text-muted">
                           {log.createdAt?.slice(0, 19).replace('T', ' ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'trash' && (
+            <div>
+              <h3 className="admin-panel-title" style={{ marginBottom: 8 }}>
+                <Trash2 size={18} />
+                휴지통 (90일 보존 · 복구 가능)
+              </h3>
+              <HelpBubble
+                tier="ALL"
+                mode="inline"
+                text="삭제된 교과목·질문·답변은 전기통신사업법 및 통신비밀보호법 시행령 기준에 따라 3개월(90일)간 무손실 압축(GZIP) 상태로 보존돼요. 보존 기간 내에는 원본 그대로 복구할 수 있어요."
+                className="mb-help-bubble"
+              />
+              {trashItems.length === 0 ? (
+                <div className="empty-state-box">
+                  휴지통에 보관된 삭제 항목이 없습니다.
+                </div>
+              ) : (
+                <div className="admin-trash-list">
+                  {trashItems.map((item) => {
+                    const typeLabel =
+                      item.entityType === 'COURSE'
+                        ? '교과목'
+                        : item.entityType === 'QUESTION'
+                          ? '질문'
+                          : '답변';
+                    const isBusy = trashBusyId === item.id;
+                    return (
+                      <div key={item.id} className="admin-trash-card">
+                        <div className="admin-trash-card-info">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span className="semester-pill">{typeLabel}</span>
+                            <strong style={{ fontSize: '0.88rem' }}>{item.title}</strong>
+                            <span className="admin-linked-chain-badge">D-{item.remainingDays}</span>
+                          </div>
+                          {item.summary && (
+                            <div className="text-xs text-muted" style={{ marginTop: 3 }}>
+                              {item.summary}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                            삭제 시각: {item.deletedAt?.slice(0, 19).replace('T', ' ')} · 만료: {item.expiresAt?.slice(0, 10)}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-xs"
+                            onClick={() => handleRestoreTrash(item)}
+                            disabled={isBusy}
+                          >
+                            <RefreshCw size={12} />
+                            복구
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-xs"
+                            onClick={() => handlePurgeTrash(item)}
+                            disabled={isBusy}
+                          >
+                            <Trash2 size={12} />
+                            영구 삭제
+                          </button>
                         </div>
                       </div>
                     );

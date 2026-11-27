@@ -2,6 +2,8 @@
 import React, { useState } from 'react';
 import { Search, CheckCircle, ChevronDown, ChevronUp, AlertCircle, BookOpen, X } from 'lucide-react';
 import { CATEGORY_DEFINITIONS } from '../../services/mockData';
+import { useAuth } from '../../context/AuthContext';
+import { formatSemesterLabel, isNonCurrentSemesterThread } from '../../utils/semester';
 import MarkdownContent from '../common/MarkdownContent';
 import HelpBubble from '../common/HelpBubble';
 
@@ -12,6 +14,7 @@ export default function SimilarQuestionsModal({
   queryText,
   onResolveWithSimilar
 }) {
+  const { currentSemester } = useAuth();
   const safeList = Array.isArray(similarList) ? similarList : [];
   const [expandedId, setExpandedId] = useState(safeList[0]?.id || null);
 
@@ -59,6 +62,16 @@ export default function SimilarQuestionsModal({
                           유사도 {item.similarityScore}%
                         </span>
                         <span className={`cat-pill ${catDef.badgeClass || ''}`}>{catDef.name || item.category}</span>
+                        {isNonCurrentSemesterThread(item, currentSemester) && (
+                          <span className="semester-pill">
+                            {formatSemesterLabel(item.semester)}
+                          </span>
+                        )}
+                        {item.section && (
+                          <span className="text-xs text-muted" style={{ whiteSpace: 'nowrap' }}>
+                            {item.section}
+                          </span>
+                        )}
                         <span className="sim-title">{item.title}</span>
                       </div>
                       <div className="summary-right">

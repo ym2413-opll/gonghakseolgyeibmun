@@ -47,7 +47,7 @@ class EmailReplyWebhookTest {
     private val testWebhookSecret = "cf-email-worker-test-secret-0123456789"
     private val testReplyDomain = "reply.kw-qna.example"
 
-    private val studentId = "11111111-1111-1111-1111-111111111101" // 이서준
+    private val studentId = "11111111-1111-1111-1111-111111111101" // 서영민
     private val assignedProfId = "22222222-2222-2222-2222-222222222201" // 김교수
     private val courseId = "33333333-3333-3333-3333-333333333301" // 공학설계입문
 
@@ -496,7 +496,7 @@ class EmailReplyWebhookTest {
                     questionTitle = "IMAP 회신 테스트 질문",
                     questionContent = "원문 질문 내용",
                     category = QuestionCategory.ASSIGNMENT,
-                    authorDisplay = "이서준"
+                    authorDisplay = "서영민"
                 )
             }
             assertNotNull(job)

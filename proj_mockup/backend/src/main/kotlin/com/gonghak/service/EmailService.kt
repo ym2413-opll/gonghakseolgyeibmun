@@ -1,15 +1,20 @@
 package com.gonghak.service
 
+import com.gonghak.config.DatabaseFactory
 import com.gonghak.config.DatabaseFactory.dbQuery
 import com.gonghak.config.EnvConfig
 import com.gonghak.dto.EmailLogDto
 import com.gonghak.models.AnswersTable
 import com.gonghak.models.AttachmentsTable
+import com.gonghak.models.CourseProfessorsTable
+import com.gonghak.models.CoursesTable
 import com.gonghak.models.EmailLogsTable
 import com.gonghak.models.QuestionCategory
 import com.gonghak.models.QuestionsTable
+import com.gonghak.models.SystemSettingsTable
 import com.gonghak.models.UserRole
 import com.gonghak.models.UsersTable
+import com.gonghak.util.SemesterUtils
 import com.gonghak.worker.SmtpInlineImage
 import com.gonghak.worker.SmtpJobPayload
 import com.gonghak.worker.SmtpTransport
@@ -339,6 +344,21 @@ class EmailService(
                 isQuestionHidden -> "관리자에 의해 숨겨진 글입니다."
                 else -> qRow[QuestionsTable.title].ifBlank { fallbackTitle }
             }
+            val curSem = SemesterUtils.normalizeSemester(
+                SystemSettingsTable.select { SystemSettingsTable.settingKey eq "current_semester" }
+                    .singleOrNull()?.get(SystemSettingsTable.settingValue),
+                SemesterUtils.DEFAULT_SEMESTER
+            )
+            val courseRow = CoursesTable.select { CoursesTable.id eq qRow[QuestionsTable.courseId] }.singleOrNull()
+            val qSem = SemesterUtils.normalizeSemester(
+                qRow[QuestionsTable.createdSemester].ifBlank { courseRow?.get(CoursesTable.semester).orEmpty() },
+                curSem
+            )
+            val qCpId = qRow[QuestionsTable.courseProfessorId]
+            val qSec = if (qCpId != null) {
+                CourseProfessorsTable.select { CourseProfessorsTable.id eq qCpId }
+                    .singleOrNull()?.get(CourseProfessorsTable.section)
+            } else null
             val snapshot = EmailThreadSnapshot(
                 courseName = fallbackCourseName,
                 category = fallbackCategory,
@@ -347,7 +367,10 @@ class EmailService(
                 isThreadOpen = qRow[QuestionsTable.isThreadOpen],
                 isCoProfessorAlert = isCoProfessor,
                 hasReplyRoute = hasReplyRoute,
-                posts = posts
+                posts = posts,
+                section = qSec,
+                semester = qSem,
+                currentSemester = curSem
             )
             return EmailThreadHtmlRenderer.renderThreadEmailHtml(snapshot) to inlineImages
         }
@@ -499,26 +522,29 @@ class EmailService(
         dispatchEmailAsync(job)
     }
 
-    suspend fun getEmailLogs(professorId: UUID? = null, isAdmin: Boolean = false): List<EmailLogDto> = dbQuery {
-        val query = if (isAdmin || professorId == null) {
-            EmailLogsTable.selectAll()
-        } else {
-            EmailLogsTable.select { EmailLogsTable.professorId eq professorId }
-        }
-
-        query.orderBy(EmailLogsTable.createdAt to SortOrder.DESC)
-            .limit(50)
-            .map { row ->
-                EmailLogDto(
-                    id = row[EmailLogsTable.id].value.toString(),
-                    recipientEmail = row[EmailLogsTable.recipientEmail],
-                    professorId = row[EmailLogsTable.professorId]?.toString(),
-                    questionId = row[EmailLogsTable.questionId]?.toString(),
-                    subject = row[EmailLogsTable.subject],
-                    body = row[EmailLogsTable.body],
-                    status = row[EmailLogsTable.status],
-                    createdAt = row[EmailLogsTable.createdAt].toString()
-                )
+    suspend fun getEmailLogs(professorId: UUID? = null, isAdmin: Boolean = false): List<EmailLogDto> {
+        val block: suspend () -> List<EmailLogDto> = {
+            val query = if (isAdmin || professorId == null) {
+                EmailLogsTable.selectAll()
+            } else {
+                EmailLogsTable.select { EmailLogsTable.professorId eq professorId }
             }
+
+            query.orderBy(EmailLogsTable.createdAt to SortOrder.DESC)
+                .limit(50)
+                .map { row ->
+                    EmailLogDto(
+                        id = row[EmailLogsTable.id].value.toString(),
+                        recipientEmail = row[EmailLogsTable.recipientEmail],
+                        professorId = row[EmailLogsTable.professorId]?.toString(),
+                        questionId = row[EmailLogsTable.questionId]?.toString(),
+                        subject = row[EmailLogsTable.subject],
+                        body = row[EmailLogsTable.body],
+                        status = row[EmailLogsTable.status],
+                        createdAt = row[EmailLogsTable.createdAt].toString()
+                    )
+                }
+        }
+        return if (isAdmin) DatabaseFactory.adminTransaction("getAdminEmailLogs", block = block) else dbQuery(block = block)
     }
 }

@@ -2,31 +2,51 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { api } from '../../services/api';
 import { CATEGORY_LIST } from '../../services/mockData';
-import CoursePicker from '../common/CoursePicker';
+import CoursePicker, { buildCourseSelectionsPayload } from '../common/CoursePicker';
 import HelpBubble from '../common/HelpBubble';
 import {
   X,
+  Bell,
   BellOff,
   Clock,
   Sliders,
-  Users,
   Save,
   CheckCircle2,
   Mail,
   BookOpen
 } from 'lucide-react';
 
+const SCOPE_OPTIONS = [
+  {
+    value: 'NONE',
+    label: '없음',
+    desc: '수신하지 않음'
+  },
+  {
+    value: 'ASSIGNED_SECTION',
+    label: '담당 분반만',
+    desc: '내 담당 분반 질문만 수신'
+  },
+  {
+    value: 'ALL_SECTIONS',
+    label: '다른 분반도',
+    desc: '같은 강의 타 분반 질문도 수신'
+  }
+];
+
 const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const { settings, updateAllSettings } = useTheme();
   const { currentUser, allCourses, updateUserCourses } = useAuth();
+  const { updateProfSettings } = useNotifications();
 
   const [dndEnabled, setDndEnabled] = useState(true);
   const [dndStartTime, setDndStartTime] = useState('22:00');
   const [dndEndTime, setDndEndTime] = useState('08:00');
-  const [coProfNotification, setCoProfNotification] = useState(true);
-  const [emailEnabled, setEmailEnabled] = useState(true);
+  const [notificationScope, setNotificationScope] = useState('ALL_SECTIONS');
+  const [emailScope, setEmailScope] = useState('ASSIGNED_SECTION');
   const [notificationEmail, setNotificationEmail] = useState('');
   const [activeCategories, setActiveCategories] = useState({
     grade: true,
@@ -37,6 +57,7 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   const [savedToast, setSavedToast] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
+  const [sectionSelections, setSectionSelections] = useState({});
   const [courseError, setCourseError] = useState('');
   const savedTimerRef = useRef(null);
 
@@ -48,20 +69,41 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    const ids = Array.isArray(currentUser?.courses)
-      ? currentUser.courses.map((c) => c.id).filter(Boolean)
-      : [];
+    const userCourses = Array.isArray(currentUser?.courses) ? currentUser.courses : [];
+    const ids = userCourses.map((c) => c.id).filter(Boolean);
+    const initSecMap = {};
+    userCourses.forEach((c) => {
+      if (!c?.id) return;
+      if (Array.isArray(c.myCourseProfessorIds) && c.myCourseProfessorIds.length > 0) {
+        initSecMap[c.id] = c.myCourseProfessorIds;
+      } else if (c.assignedCourseProfessorId) {
+        initSecMap[c.id] = [c.assignedCourseProfessorId];
+      }
+    });
     setSelectedCourseIds(ids);
+    setSectionSelections(initSecMap);
     setCourseError('');
   }, [isOpen, currentUser?.courses]);
 
   useEffect(() => {
     if (settings) {
-      setDndEnabled(settings.dndEnabled ?? true);
+      setDndEnabled(settings.dndEnabled ?? false);
       setDndStartTime(settings.dndStartTime || '22:00');
       setDndEndTime(settings.dndEndTime || '08:00');
-      setCoProfNotification(settings.coProfNotification ?? true);
-      setEmailEnabled(settings.emailEnabled ?? true);
+
+      const resolvedNotifScope =
+        settings.notificationScope ||
+        (settings.coProfNotification === false ? 'ASSIGNED_SECTION' : 'ALL_SECTIONS');
+      const resolvedEmailScope =
+        settings.emailScope ||
+        (settings.emailEnabled === false
+          ? 'NONE'
+          : settings.coProfNotification
+            ? 'ALL_SECTIONS'
+            : 'ASSIGNED_SECTION');
+
+      setNotificationScope(resolvedNotifScope);
+      setEmailScope(resolvedEmailScope);
       setNotificationEmail(settings.notificationEmail || currentUser?.email || '');
       setActiveCategories(
         settings.activeCategories || {
@@ -78,7 +120,8 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   useEffect(() => {
     let active = true;
     if (isOpen && currentUser?.id) {
-      api.getEmailLogs(currentUser.id)
+      api
+        .getEmailLogs(currentUser.id)
         .then((logs) => {
           if (active) setEmailLogs(Array.isArray(logs) ? logs.slice(0, 5) : []);
         })
@@ -92,6 +135,8 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
   }, [isOpen, currentUser?.id]);
 
   if (!isOpen) return null;
+
+  const emailEnabled = emailScope !== 'NONE';
 
   const handleCategoryToggle = (catId) => {
     setActiveCategories((prev) => ({
@@ -107,18 +152,42 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
       setCourseError('담당 교과목은 최소 1개 이상 선택해야 합니다.');
       return;
     }
+    if (emailScope !== 'NONE') {
+      const trimmedEmail = notificationEmail.trim();
+      if (!trimmedEmail) {
+        setCourseError('이메일 알림을 받으시려면 수신용 이메일 주소를 입력하거나 이메일 범위를 "없음"으로 선택해 주세요.');
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        setCourseError('올바른 이메일 주소 형식을 입력해 주세요.');
+        return;
+      }
+    }
     setIsSaving(true);
     try {
-      await updateUserCourses(selectedCourseIds);
-      await updateAllSettings({
+      const selectionsPayload = buildCourseSelectionsPayload(
+        selectedCourseIds,
+        sectionSelections,
+        allCourses,
+        true
+      );
+      await updateUserCourses(selectedCourseIds, selectionsPayload);
+
+      const settingsPayload = {
         dndEnabled,
         dndStartTime,
         dndEndTime,
-        coProfNotification,
-        emailEnabled,
+        notificationScope,
+        emailScope,
+        emailEnabled: emailScope !== 'NONE',
+        coProfNotification: notificationScope === 'ALL_SECTIONS' || emailScope === 'ALL_SECTIONS',
         notificationEmail: notificationEmail.trim(),
         activeCategories
-      });
+      };
+      await updateAllSettings(settingsPayload);
+      if (updateProfSettings) {
+        await updateProfSettings(settingsPayload);
+      }
       if (onCoursesUpdated) await onCoursesUpdated();
       setSavedToast(true);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
@@ -150,25 +219,36 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
           <HelpBubble
             tier="ALL"
             mode="inline"
-            text="담당 과목, 이메일 수신 주소, 방해금지 시간대를 설정해요. 방해금지 중 알림은 종료 시각에 한꺼번에 전달돼요."
+            text="포털 알림과 이메일 수신 범위를 각각 '없음 / 담당 분반만 / 다른 분반도' 중에서 독립적으로 선택할 수 있어요."
             className="mb-help-bubble"
           />
 
+          {/* 1. 담당 교과목 설정 */}
           <div className="settings-section">
             <div className="settings-title-group" style={{ marginBottom: 10 }}>
               <BookOpen size={17} className="text-primary" />
               <div>
                 <h4 className="settings-section-title">담당 교과목 설정</h4>
                 <p className="settings-section-desc">
-                  강의를 담당하며 질문을 수신할 교과목을 선택합니다. (최소 1개 이상)
+                  강의를 담당하며 질문을 수신할 교과목과 분반을 선택합니다. (최소 1개 이상)
                 </p>
               </div>
             </div>
+
+            <HelpBubble
+              tier="ALL"
+              mode="inline"
+              text="여러 분반이 개설된 과목은 담당하는 분반을 복수로 선택할 수 있어요. 이전 학기 강의가 필요하면 '이전 학기 포함'을 체크해 보세요."
+              className="mb-help-bubble"
+            />
 
             <CoursePicker
               courses={allCourses}
               selectedIds={selectedCourseIds}
               onChange={setSelectedCourseIds}
+              sectionMode="multi"
+              sectionSelections={sectionSelections}
+              onSectionSelectionsChange={setSectionSelections}
               label="담당 교과목"
               helperText="최소 1개 이상"
             />
@@ -176,23 +256,74 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
           <div className="settings-divider" />
 
+          {/* 2. 알림 수신 범위 ('없음' | '담당 분반만' | '다른 분반도') */}
           <div className="settings-section">
-            <div className="settings-header-row">
-              <div className="settings-title-group">
-                <Mail size={17} className="text-primary" />
-                <div>
-                  <h4 className="settings-section-title">이메일 알림</h4>
-                  <p className="settings-section-desc">새 질문 등록 시 이메일로 전달합니다.</p>
-                </div>
+            <div className="settings-title-group" style={{ marginBottom: 10 }}>
+              <Bell size={17} className="text-primary" />
+              <div>
+                <h4 className="settings-section-title">알림 수신 범위</h4>
+                <p className="settings-section-desc">
+                  새 질문 등록 시 포털 및 브라우저 알림 수신 범위를 선택합니다.
+                </p>
               </div>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={emailEnabled}
-                  onChange={(e) => setEmailEnabled(e.target.checked)}
-                />
-                <span className="toggle-slider" />
-              </label>
+            </div>
+
+            <div className="scope-selector-grid" role="radiogroup" aria-label="알림 수신 범위">
+              {SCOPE_OPTIONS.map((opt) => {
+                const active = notificationScope === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={`scope-option-card ${active ? 'active' : ''}`}
+                    onClick={() => setNotificationScope(opt.value)}
+                  >
+                    <span className="scope-option-title">{opt.label}</span>
+                    <span className="scope-option-desc">{opt.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="settings-divider" />
+
+          {/* 3. 이메일 수신 범위 ('없음' | '담당 분반만' | '다른 분반도') */}
+          <div className="settings-section">
+            <div className="settings-title-group" style={{ marginBottom: 10 }}>
+              <Mail size={17} className="text-primary" />
+              <div>
+                <h4 className="settings-section-title">이메일 수신 범위</h4>
+                <p className="settings-section-desc">
+                  새 질문 등록 시 이메일 수신 범위를 선택합니다.
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="scope-selector-grid"
+              role="radiogroup"
+              aria-label="이메일 수신 범위"
+              style={{ marginBottom: 12 }}
+            >
+              {SCOPE_OPTIONS.map((opt) => {
+                const active = emailScope === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={`scope-option-card ${active ? 'active' : ''}`}
+                    onClick={() => setEmailScope(opt.value)}
+                  >
+                    <span className="scope-option-title">{opt.label}</span>
+                    <span className="scope-option-desc">{opt.desc}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className={`dnd-time-box ${!emailEnabled ? 'disabled' : ''}`}>
@@ -235,14 +366,16 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
           <div className="settings-divider" />
 
-          {/* 2. 방해금지 시간대 설정 */}
+          {/* 4. 방해금지 시간대 설정 */}
           <div className="settings-section">
             <div className="settings-header-row">
               <div className="settings-title-group">
                 <BellOff size={17} className="text-primary" />
                 <div>
                   <h4 className="settings-section-title">방해금지 시간대</h4>
-                  <p className="settings-section-desc">지정 시간대 알림을 보류한 뒤 종료 시각에 일괄 전달합니다.</p>
+                  <p className="settings-section-desc">
+                    지정 시간대 포털·브라우저 알림을 보류한 뒤 종료 시각에 일괄 전달합니다.
+                  </p>
                 </div>
               </div>
               <label className="toggle-switch">
@@ -286,36 +419,14 @@ const NotificationSettingsModal = ({ isOpen, onClose, onCoursesUpdated }) => {
 
           <div className="settings-divider" />
 
-          {/* 3. 같은 과목 다른 교수 질문 알림 수신 설정 */}
+          {/* 5. 질문 카테고리 활성화 */}
           <div className="settings-section">
             <HelpBubble
               tier="ALL"
               mode="inline"
-              text="타 분반 강의 질문 알림을 켜면 같은 과목의 열린 미답변 질문도 받고, 원치 않는 질문 유형은 잠시 끌 수 있어요."
+              text="성적 질문은 타 분반 알림을 켜더라도 보안상 담당 교수님께만 전달돼요. 원치 않는 질문 유형은 잠시 끌 수 있어요."
               className="mb-help-bubble"
             />
-            <div className="settings-header-row">
-              <div className="settings-title-group">
-                <Users size={17} className="text-primary" />
-                <div>
-                  <h4 className="settings-section-title">동일 과목 타 분반 강의 질문 알림</h4>
-                  <p className="settings-section-desc">타 분반 강의 카테고리의 미답변 질문 알림도 함께 받습니다.</p>
-                </div>
-              </div>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={coProfNotification}
-                  onChange={(e) => setCoProfNotification(e.target.checked)}
-                />
-                <span className="toggle-slider" />
-              </label>
-            </div>
-          </div>
-
-          <div className="settings-divider" />
-
-          <div className="settings-section">
             <h4 className="settings-section-title">질문 카테고리 활성화</h4>
             <p className="settings-section-desc">허용할 질문 카테고리를 선택합니다.</p>
 

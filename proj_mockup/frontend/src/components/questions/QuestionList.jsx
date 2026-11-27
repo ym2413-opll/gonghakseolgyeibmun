@@ -2,6 +2,14 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { CATEGORY_LIST, isQuestionSolved } from '../../services/mockData';
+import { formatSemesterLabel } from '../../utils/semester';
+import {
+  collectLinkedCourseIds,
+  extractCourseScopes,
+  extractCourseSemesters,
+  filterCoursesList,
+  sortCoursesList
+} from '../../utils/courseLineage';
 import QuestionCard from './QuestionCard';
 import HelpBubble from '../common/HelpBubble';
 import {
@@ -21,13 +29,17 @@ const QuestionList = ({
   onToggleHideQuestion,
   onDeleteQuestion
 }) => {
-  const { currentUser, allCourses } = useAuth();
+  const { currentUser, allCourses, departments, colleges, currentSemester } = useAuth();
 
   const [selectedCourseId, setSelectedCourseId] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, UNANSWERED, ANSWERED
   const [onlyMine, setOnlyMine] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [courseTabQuery, setCourseTabQuery] = useState('');
+  const [courseTabSemester, setCourseTabSemester] = useState('ALL');
+  const [courseTabDept, setCourseTabDept] = useState('ALL');
+  const [courseTabSort, setCourseTabSort] = useState('semester_desc');
 
   const courses = useMemo(() => {
     const raw =
@@ -36,15 +48,55 @@ const QuestionList = ({
         : allCourses;
     const map = new Map();
     (raw || []).forEach((c) => {
-      if (!map.has(c.name)) map.set(c.name, c);
+      if (c?.id && !map.has(c.id)) map.set(c.id, c);
     });
     return Array.from(map.values());
   }, [currentUser?.courses, allCourses]);
 
+  const courseSemesterOptions = useMemo(() => extractCourseSemesters(courses), [courses]);
+  const courseScopeOptions = useMemo(() => extractCourseScopes(courses), [courses]);
+
+  const visibleTabCourses = useMemo(() => {
+    const filtered = filterCoursesList(courses, {
+      query: courseTabQuery,
+      semester: courseTabSemester,
+      department: courseTabDept,
+      departments,
+      colleges,
+      currentSemester,
+      keepSelectedIds: selectedCourseId !== 'ALL' ? [selectedCourseId] : null
+    });
+    return sortCoursesList(filtered, courseTabSort, selectedCourseId !== 'ALL' ? [selectedCourseId] : []);
+  }, [
+    courses,
+    courseTabQuery,
+    courseTabSemester,
+    courseTabDept,
+    departments,
+    colleges,
+    currentSemester,
+    selectedCourseId,
+    courseTabSort
+  ]);
+
+  const selectedLineageIds = useMemo(() => {
+    if (selectedCourseId === 'ALL') return null;
+    return collectLinkedCourseIds(selectedCourseId, allCourses);
+  }, [selectedCourseId, allCourses]);
+
+  const selectedCourseObj = useMemo(
+    () => (selectedCourseId === 'ALL' ? null : courses.find((c) => c.id === selectedCourseId) || null),
+    [courses, selectedCourseId]
+  );
+
   const filteredQuestions = useMemo(() => {
     return questions.filter((q) => {
-      if (selectedCourseId !== 'ALL' && q.courseName !== selectedCourseId && q.courseId !== selectedCourseId) {
-        return false;
+      if (selectedCourseId !== 'ALL') {
+        const matchesLineage = selectedLineageIds && q.courseId && selectedLineageIds.has(q.courseId);
+        const matchesName = selectedCourseObj && q.courseName === selectedCourseObj.name;
+        if (!matchesLineage && !matchesName && q.courseId !== selectedCourseId) {
+          return false;
+        }
       }
       if (selectedCategory !== 'ALL' && q.category?.toLowerCase() !== selectedCategory.toLowerCase()) {
         return false;
@@ -102,6 +154,61 @@ const QuestionList = ({
         className="mb-help-bubble"
       />
 
+      {/* 과목 검색·필터·정렬 바 */}
+      <div className="course-tabs-toolbar">
+        <div className="course-search-input-wrap" style={{ flex: '1 1 180px', marginBottom: 0 }}>
+          <Search size={13} className="search-icon" />
+          <input
+            type="text"
+            className="form-input course-search-input"
+            placeholder="과목 검색 (과목명·학수번호·교수명)..."
+            value={courseTabQuery}
+            onChange={(e) => setCourseTabQuery(e.target.value)}
+            aria-label="과목 탭 검색"
+          />
+        </div>
+        {courseSemesterOptions.length > 1 && (
+          <select
+            className="form-select course-picker-ctrl-select"
+            value={courseTabSemester}
+            onChange={(e) => setCourseTabSemester(e.target.value)}
+            aria-label="과목 학기 필터"
+          >
+            <option value="ALL">전체 학기</option>
+            {courseSemesterOptions.map((sem) => (
+              <option key={sem} value={sem}>
+                {formatSemesterLabel(sem)}
+              </option>
+            ))}
+          </select>
+        )}
+        {courseScopeOptions.length > 1 && (
+          <select
+            className="form-select course-picker-ctrl-select"
+            value={courseTabDept}
+            onChange={(e) => setCourseTabDept(e.target.value)}
+            aria-label="과목 학과 필터"
+          >
+            <option value="ALL">전체 학과</option>
+            {courseScopeOptions.map((sc) => (
+              <option key={sc} value={sc}>
+                {sc}
+              </option>
+            ))}
+          </select>
+        )}
+        <select
+          className="form-select course-picker-ctrl-select"
+          value={courseTabSort}
+          onChange={(e) => setCourseTabSort(e.target.value)}
+          aria-label="과목 정렬"
+        >
+          <option value="semester_desc">최신 학기순</option>
+          <option value="name_asc">과목명순</option>
+          <option value="code_asc">학수번호순</option>
+        </select>
+      </div>
+
       {/* 과목 탭 필터 */}
       <div className="course-tabs-bar">
         <button
@@ -112,18 +219,22 @@ const QuestionList = ({
           <BookOpen size={15} />
           <span>전체 강좌 ({questions.length})</span>
         </button>
-        {(Array.isArray(currentUser?.courses) && currentUser.courses.length > 0 ? courses : courses.slice(0, 12)).map((course) => {
+        {(courseTabQuery.trim() || courseTabSemester !== 'ALL' || courseTabDept !== 'ALL'
+          ? visibleTabCourses.slice(0, 24)
+          : visibleTabCourses.slice(0, 16)
+        ).map((course) => {
+          const lineage = collectLinkedCourseIds(course.id, allCourses);
           const count = questions.filter(
-            (q) => q.courseName === course.name || q.courseId === course.id
+            (q) => (q.courseId && lineage.has(q.courseId)) || q.courseName === course.name
           ).length;
           return (
             <button
               type="button"
               key={course.id}
               className={`course-tab ${
-                selectedCourseId === course.name ? 'active' : ''
+                selectedCourseId === course.id ? 'active' : ''
               }`}
-              onClick={() => setSelectedCourseId(course.name)}
+              onClick={() => setSelectedCourseId(course.id)}
             >
               <span>{course.name}</span>
               <span className="tab-count">{count}</span>

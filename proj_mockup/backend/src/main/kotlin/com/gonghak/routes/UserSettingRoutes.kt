@@ -47,6 +47,8 @@ fun Route.userSettingRoutes(
             dndEndTime = profSetting?.quietHoursEnd ?: "08:00",
             coProfNotification = profSetting?.notifyOtherProfessorQuestions ?: false,
             emailEnabled = profSetting?.emailEnabled ?: false,
+            notificationScope = profSetting?.notificationScope ?: "ALL_SECTIONS",
+            emailScope = profSetting?.emailScope ?: "ASSIGNED_SECTION",
             notificationEmail = profSetting?.notificationEmail,
             activeCategories = categoriesMap
         )
@@ -82,6 +84,8 @@ fun Route.userSettingRoutes(
                 request.dndEndTime != null ||
                 request.coProfNotification != null ||
                 request.emailEnabled != null ||
+                request.notificationScope != null ||
+                request.emailScope != null ||
                 request.notificationEmail != null
             ) {
                 notificationService.updateProfessorNotificationSetting(
@@ -92,6 +96,8 @@ fun Route.userSettingRoutes(
                         quietHoursEnd = request.dndEndTime,
                         notifyOtherProfessorQuestions = request.coProfNotification,
                         emailEnabled = request.emailEnabled,
+                        notificationScope = request.notificationScope,
+                        emailScope = request.emailScope,
                         notificationEmail = request.notificationEmail
                     )
                 )

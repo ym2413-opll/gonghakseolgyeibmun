@@ -1,9 +1,10 @@
 // src/components/common/AuthGateOverlay.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
-import CoursePicker from './CoursePicker';
+import { formatSemesterLabel, getAllowedSignupSemesters, normalizeSemester } from '../../utils/semester';
+import CoursePicker, { buildCourseSelectionsPayload } from './CoursePicker';
 import {
   Lock,
   LogIn,
@@ -12,7 +13,9 @@ import {
   BookOpen,
   AlertCircle,
   ArrowLeft,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 const AuthGateOverlay = () => {
@@ -20,6 +23,7 @@ const AuthGateOverlay = () => {
   const {
     departments,
     allCourses,
+    currentSemester,
     authModalMode,
     setAuthModalMode,
     login,
@@ -38,6 +42,7 @@ const AuthGateOverlay = () => {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [department, setDepartment] = useState('');
   const [entryYear, setEntryYear] = useState(2026);
   const [isForeign, setIsForeign] = useState(false);
@@ -45,9 +50,30 @@ const AuthGateOverlay = () => {
   const [professorInviteCode, setProfessorInviteCode] = useState('');
   const [professorInviteRequired, setProfessorInviteRequired] = useState(false);
   const [selectedCourseIds, setSelectedCourseIds] = useState([]);
+  const [sectionSelections, setSectionSelections] = useState({});
+
+  // Professor direct custom course creation during signup
+  const [showCustomCourseBox, setShowCustomCourseBox] = useState(false);
+  const [customCourses, setCustomCourses] = useState([]);
+  const [draftCourseName, setDraftCourseName] = useState('');
+  const [draftCourseCode, setDraftCourseCode] = useState('');
+  const [draftCourseSection, setDraftCourseSection] = useState('');
+  const [draftCourseSemester, setDraftCourseSemester] = useState('');
+  const [draftCourseCompType, setDraftCourseCompType] = useState('전공선택');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const semesterOptions = useMemo(
+    () => getAllowedSignupSemesters(currentSemester || '2026-2'),
+    [currentSemester]
+  );
+
+  useEffect(() => {
+    if (!draftCourseSemester && currentSemester) {
+      setDraftCourseSemester(currentSemester);
+    }
+  }, [currentSemester, draftCourseSemester]);
 
   useEffect(() => {
     if (viewMode !== 'register') return;
@@ -64,9 +90,97 @@ const AuthGateOverlay = () => {
 
   const effectiveDepartment = department || departments[0]?.name || '';
 
+  const customCourseItemsForPicker = useMemo(() => {
+    if (role !== 'PROFESSOR' || customCourses.length === 0) return [];
+    const displayProfName = name.trim() || '본인';
+    return customCourses.map((cc) => ({
+      id: cc.id,
+      name: cc.name,
+      code: cc.code,
+      semester: cc.semester,
+      department: cc.department || effectiveDepartment,
+      college: '',
+      completionType: cc.completionType,
+      isCustomDraft: true,
+      profName: displayProfName,
+      assignedProfessorName: displayProfName,
+      professors: [
+        {
+          id: 'self-draft',
+          name: displayProfName,
+          department: cc.department || effectiveDepartment,
+          section: cc.section || '미정',
+          isRegistered: true
+        }
+      ]
+    }));
+  }, [role, customCourses, name, effectiveDepartment]);
+
+  const pickerCourses = useMemo(
+    () => (role === 'PROFESSOR' ? [...customCourseItemsForPicker, ...(allCourses || [])] : allCourses || []),
+    [role, customCourseItemsForPicker, allCourses]
+  );
+
+  const pickerSelectedIds = useMemo(
+    () =>
+      role === 'PROFESSOR'
+        ? [...customCourses.map((cc) => cc.id), ...selectedCourseIds]
+        : selectedCourseIds,
+    [role, customCourses, selectedCourseIds]
+  );
+
+  const handlePickerSelectionChange = (nextIds) => {
+    const nextSet = new Set(nextIds);
+    const customIdSet = new Set(customCourses.map((cc) => cc.id));
+    setSelectedCourseIds(nextIds.filter((id) => !customIdSet.has(id)));
+    if (role === 'PROFESSOR') {
+      setCustomCourses((prev) => prev.filter((cc) => nextSet.has(cc.id)));
+    }
+  };
+
   const switchAuthMode = (nextMode) => {
     setErrorMsg('');
     setAuthModalMode(nextMode);
+  };
+
+  const handleAddCustomCourse = () => {
+    setErrorMsg('');
+    if (customCourses.length >= 10) {
+      setErrorMsg('직접 추가할 수 있는 담당 강의는 최대 10개까지입니다.');
+      return;
+    }
+    const cleanName = draftCourseName.trim().slice(0, 100);
+    if (!cleanName) {
+      setErrorMsg('직접 추가할 담당 강의의 과목명을 입력해 주세요.');
+      return;
+    }
+    const cleanCode = draftCourseCode.trim().slice(0, 40);
+    if (!cleanCode) {
+      setErrorMsg('직접 추가할 담당 강의의 학수번호를 입력해 주세요.');
+      return;
+    }
+    const rawSem = normalizeSemester(draftCourseSemester || currentSemester || '2026-2');
+    const cleanSem = semesterOptions.includes(rawSem) ? rawSem : semesterOptions[0];
+    const cleanSec = (draftCourseSection.trim() || '미정').slice(0, 20);
+    setCustomCourses((prev) => [
+      ...prev,
+      {
+        id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: cleanName,
+        code: cleanCode,
+        semester: cleanSem,
+        section: cleanSec,
+        department: effectiveDepartment,
+        completionType: draftCourseCompType || '전공선택'
+      }
+    ]);
+    setDraftCourseName('');
+    setDraftCourseCode('');
+    setDraftCourseSection('');
+  };
+
+  const handleRemoveCustomCourse = (tempId) => {
+    setCustomCourses((prev) => prev.filter((item) => item.id !== tempId));
   };
 
   const handleLoginSubmit = async (e) => {
@@ -92,12 +206,13 @@ const AuthGateOverlay = () => {
     }
 
     const availableCourses = (allCourses || []).filter((c) => Boolean(c?.id));
-    if (availableCourses.length > 0 && selectedCourseIds.length === 0) {
-      setErrorMsg(
-        role === 'PROFESSOR'
-          ? '담당 과목을 최소 1개 이상 선택해주세요.'
-          : '수강 과목을 최소 1개 이상 선택해주세요.'
-      );
+    if (role === 'PROFESSOR') {
+      if (availableCourses.length > 0 && selectedCourseIds.length === 0 && customCourses.length === 0) {
+        setErrorMsg('담당 과목을 최소 1개 이상 선택하거나 직접 추가해 주세요.');
+        return;
+      }
+    } else if (availableCourses.length > 0 && selectedCourseIds.length === 0) {
+      setErrorMsg('수강 과목을 최소 1개 이상 선택해 주세요.');
       return;
     }
 
@@ -105,6 +220,13 @@ const AuthGateOverlay = () => {
     try {
       const selectedCourses = availableCourses.filter((c) => selectedCourseIds.includes(c.id));
       const cleanSid = studentId.trim();
+      const courseSelections = buildCourseSelectionsPayload(
+        selectedCourseIds,
+        sectionSelections,
+        availableCourses,
+        role === 'PROFESSOR'
+      );
+
       await register({
         username: role === 'STUDENT' ? cleanSid : username.trim(),
         password,
@@ -114,10 +236,15 @@ const AuthGateOverlay = () => {
         entryYear: role === 'STUDENT' ? Number(entryYear) || 2026 : null,
         isForeign: role === 'STUDENT' ? Boolean(isForeign) : false,
         identifier: role === 'STUDENT' ? cleanSid : null,
-        email: null,
+        email: role === 'PROFESSOR' && email.trim() ? email.trim() : null,
         professorInviteCode: role === 'PROFESSOR' ? professorInviteCode.trim() : null,
         courseIds: selectedCourseIds,
-        courseNames: selectedCourses.map((c) => c.name)
+        courseNames: selectedCourses.map((c) => c.name),
+        courseSelections,
+        newCourses:
+          role === 'PROFESSOR'
+            ? customCourses.map(({ id: _unused, ...rest }) => rest)
+            : []
       });
     } catch (err) {
       setErrorMsg(err.message || '회원가입 중 오류가 발생했습니다.');
@@ -287,15 +414,18 @@ const AuthGateOverlay = () => {
                         className="btn btn-outline btn-xs"
                         style={{ whiteSpace: 'nowrap' }}
                         onClick={() => {
-                          api.getNextStudentId({
-                            year: entryYear,
-                            isForeign,
-                            random: true
-                          }).then((res) => {
-                            if (res?.studentId) setStudentId(res.studentId);
-                          }).catch((err) => {
-                            if (err?.message) setErrorMsg(err.message);
-                          });
+                          api
+                            .getNextStudentId({
+                              year: entryYear,
+                              isForeign,
+                              random: true
+                            })
+                            .then((res) => {
+                              if (res?.studentId) setStudentId(res.studentId);
+                            })
+                            .catch((err) => {
+                              if (err?.message) setErrorMsg(err.message);
+                            });
                         }}
                       >
                         <RefreshCw size={14} />
@@ -401,9 +531,10 @@ const AuthGateOverlay = () => {
                 >
                   {departments.map((dept) => {
                     const aliasList = Array.isArray(dept.aliases) ? dept.aliases.filter(Boolean) : [];
-                    const optionLabel = aliasList.length > 0
-                      ? `${dept.name} (기존: ${aliasList.join(', ')})`
-                      : dept.name;
+                    const optionLabel =
+                      aliasList.length > 0
+                        ? `${dept.name} (기존: ${aliasList.join(', ')})`
+                        : dept.name;
                     return (
                       <option key={dept.id || dept.name} value={dept.name}>
                         {optionLabel}
@@ -413,7 +544,7 @@ const AuthGateOverlay = () => {
                 </select>
               </div>
 
-              {role === 'STUDENT' && (
+              {role === 'STUDENT' ? (
                 <div className="form-group">
                   <label className="form-label" htmlFor="reg-entry-year">
                     입학년도 · 구분
@@ -430,7 +561,16 @@ const AuthGateOverlay = () => {
                       onChange={(e) => setEntryYear(e.target.value)}
                       required
                     />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.82rem',
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer'
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={isForeign}
@@ -440,17 +580,182 @@ const AuthGateOverlay = () => {
                     </label>
                   </div>
                 </div>
+              ) : (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="reg-prof-email">
+                    이메일 (선택)
+                  </label>
+                  <input
+                    id="reg-prof-email"
+                    type="email"
+                    className="form-input"
+                    placeholder="예: professor@kw.ac.kr"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
               )}
             </div>
 
             <CoursePicker
-              courses={allCourses}
-              selectedIds={selectedCourseIds}
-              onChange={setSelectedCourseIds}
+              courses={pickerCourses}
+              selectedIds={pickerSelectedIds}
+              onChange={handlePickerSelectionChange}
+              sectionMode={role === 'PROFESSOR' ? 'multi' : 'single'}
+              sectionSelections={sectionSelections}
+              onSectionSelectionsChange={setSectionSelections}
               label={role === 'PROFESSOR' ? '담당 교과목' : '수강 과목'}
-              required={(allCourses || []).some((c) => Boolean(c?.id))}
-              helperText="최소 1개 이상"
+              required={
+                role === 'PROFESSOR'
+                  ? (allCourses || []).some((c) => Boolean(c?.id)) && customCourses.length === 0
+                  : (allCourses || []).some((c) => Boolean(c?.id))
+              }
+              helperText={role === 'PROFESSOR' ? '선택 또는 직접 추가' : '최소 1개 이상'}
             />
+
+            {role === 'PROFESSOR' && (
+              <div className="prof-signup-custom-course-wrap">
+                <div className="prof-signup-custom-header">
+                  <span className="text-xs text-muted">
+                    목록에 담당 강의가 없다면 직접 추가할 수 있습니다.
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-xs"
+                    onClick={() => setShowCustomCourseBox((prev) => !prev)}
+                  >
+                    <Plus size={13} />
+                    <span>{showCustomCourseBox ? '접기' : '직접 추가'}</span>
+                  </button>
+                </div>
+
+                {showCustomCourseBox && (
+                  <div className="prof-signup-custom-form">
+                    <div className="auth-form-grid-2">
+                      <div className="form-group" style={{ marginBottom: 8 }}>
+                        <label className="form-label">과목명 *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="예: 캡스톤설계"
+                          value={draftCourseName}
+                          onChange={(e) => setDraftCourseName(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 8 }}>
+                        <label className="form-label">학수번호 *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="예: 7000-1-2957"
+                          value={draftCourseCode}
+                          onChange={(e) => setDraftCourseCode(e.target.value)}
+                          maxLength={40}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="auth-form-grid-2">
+                      <div className="form-group" style={{ marginBottom: 8 }}>
+                        <label className="form-label">개설 학기</label>
+                        <select
+                          className="form-select"
+                          value={
+                            semesterOptions.includes(draftCourseSemester)
+                              ? draftCourseSemester
+                              : semesterOptions[0]
+                          }
+                          onChange={(e) => setDraftCourseSemester(e.target.value)}
+                        >
+                          {semesterOptions.map((sem) => (
+                            <option key={sem} value={sem}>
+                              {formatSemesterLabel(sem)} ({sem})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 8 }}>
+                        <label className="form-label">이수구분</label>
+                        <select
+                          className="form-select"
+                          value={draftCourseCompType}
+                          onChange={(e) => setDraftCourseCompType(e.target.value)}
+                        >
+                          <option value="전공선택">전공선택</option>
+                          <option value="전공필수">전공필수</option>
+                          <option value="교양선택">교양선택</option>
+                          <option value="교양필수">교양필수</option>
+                          <option value="기초필수">기초필수</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 10 }}>
+                      <label className="form-label">분반 (선택)</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          list="prof-signup-section-options"
+                          className="form-input"
+                          style={{ flex: 1 }}
+                          placeholder="미입력 시 미정 (예: 전체, 01)"
+                          value={draftCourseSection}
+                          onChange={(e) => setDraftCourseSection(e.target.value)}
+                          maxLength={20}
+                        />
+                        <datalist id="prof-signup-section-options">
+                          <option value="전체" />
+                          <option value="미정" />
+                          <option value="01분반" />
+                          <option value="02분반" />
+                          <option value="03분반" />
+                        </datalist>
+                        <button
+                          type="button"
+                          className={`btn btn-xs ${draftCourseSection.trim() === '전체' ? 'btn-primary' : 'btn-outline'}`}
+                          style={{ height: 38, whiteSpace: 'nowrap' }}
+                          onClick={() =>
+                            setDraftCourseSection((prev) => (prev.trim() === '전체' ? '' : '전체'))
+                          }
+                        >
+                          전체
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ width: '100%', justifyContent: 'center' }}
+                        onClick={handleAddCustomCourse}
+                      >
+                        <Plus size={14} /> 강의 추가
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {customCourses.length > 0 && (
+                  <div className="prof-signup-custom-list">
+                    {customCourses.map((cc) => (
+                      <span key={cc.id} className="prof-signup-custom-chip">
+                        <strong>{cc.name}</strong>
+                        {cc.code ? ` (${cc.code})` : ''} · {cc.section} · {formatSemesterLabel(cc.semester)}
+                        <button
+                          type="button"
+                          className="chip-remove-btn"
+                          onClick={() => handleRemoveCustomCourse(cc.id)}
+                          aria-label="삭제"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="submit"

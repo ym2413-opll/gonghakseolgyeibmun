@@ -253,6 +253,18 @@ export const ThemeProvider = ({ children }) => {
       setExhibitionMode(partialSettings.exhibitionMode);
       safeStorageSet('prof_qa_exhibition_mode', String(partialSettings.exhibitionMode));
     }
+    // Forward professor notification & category fields so NotificationSettingsModal saves cleanly
+    if (typeof partialSettings.dndEnabled === 'boolean') payload.dndEnabled = partialSettings.dndEnabled;
+    if (typeof partialSettings.dndStartTime === 'string') payload.dndStartTime = partialSettings.dndStartTime;
+    if (typeof partialSettings.dndEndTime === 'string') payload.dndEndTime = partialSettings.dndEndTime;
+    if (typeof partialSettings.coProfNotification === 'boolean') payload.coProfNotification = partialSettings.coProfNotification;
+    if (typeof partialSettings.emailEnabled === 'boolean') payload.emailEnabled = partialSettings.emailEnabled;
+    if (typeof partialSettings.notificationScope === 'string') payload.notificationScope = partialSettings.notificationScope;
+    if (typeof partialSettings.emailScope === 'string') payload.emailScope = partialSettings.emailScope;
+    if (partialSettings.notificationEmail !== undefined) payload.notificationEmail = partialSettings.notificationEmail;
+    if (partialSettings.activeCategories && typeof partialSettings.activeCategories === 'object') {
+      payload.activeCategories = partialSettings.activeCategories;
+    }
     if (currentUser?.id && Object.keys(payload).length > 0) {
       try {
         const updated = await api.updateSettings(currentUser.id, payload);
@@ -260,6 +272,7 @@ export const ThemeProvider = ({ children }) => {
         return updated;
       } catch (err) {
         console.warn('Failed to persist settings:', err);
+        throw err;
       }
     }
     return payload;

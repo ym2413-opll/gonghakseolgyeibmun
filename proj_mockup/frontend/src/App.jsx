@@ -8,6 +8,7 @@ import { NotificationProvider } from './context/NotificationContext';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import Header from './components/common/Header';
 import BottomNav from './components/common/BottomNav';
+import AuthGateOverlay from './components/common/AuthGateOverlay';
 import QuestionList from './components/questions/QuestionList';
 import HelpOnboardingModal from './components/common/HelpOnboardingModal';
 import { api } from './services/api';
@@ -440,6 +441,9 @@ function MainApp() {
               />
             )}
           </main>
+
+          {/* 비로그인 상태일 때 블러 처리된 영역 위에 표시되는 인증 유도 오버레이 */}
+          {!isAuthenticated && <AuthGateOverlay />}
         </div>
 
         {/* 스마트폰 환경 전용 하단 내비게이션 바 */}

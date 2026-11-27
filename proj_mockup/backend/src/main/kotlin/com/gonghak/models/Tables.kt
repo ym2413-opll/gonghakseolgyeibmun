@@ -31,6 +31,8 @@ object CollegesTable : UUIDTable("colleges") {
 object CollegeAliasesTable : UUIDTable("college_aliases") {
     val collegeId = uuid("college_id").references(CollegesTable.id)
     val aliasName = varchar("alias_name", 100).uniqueIndex()
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -43,6 +45,8 @@ object DepartmentsTable : UUIDTable("departments") {
 object DepartmentAliasesTable : UUIDTable("department_aliases") {
     val departmentId = uuid("department_id").references(DepartmentsTable.id)
     val aliasName = varchar("alias_name", 100).uniqueIndex()
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
@@ -55,6 +59,16 @@ object CoursesTable : UUIDTable("courses") {
     val major = varchar("major", 100).default("")
     val completionType = varchar("completion_type", 50).default("")
     val credit = integer("credit").default(3)
+    val prevCourseId = uuid("prev_course_id").nullable()
+    val nextCourseId = uuid("next_course_id").nullable()
+}
+
+object CourseAliasesTable : UUIDTable("course_aliases") {
+    val courseId = uuid("course_id").references(CoursesTable.id)
+    val aliasName = varchar("alias_name", 100)
+    val prevAliasId = uuid("prev_alias_id").nullable()
+    val nextAliasId = uuid("next_alias_id").nullable()
+    val createdAt = timestamp("created_at").clientDefault { Instant.now() }
 }
 
 object CourseProfessorsTable : UUIDTable("course_professors") {
@@ -68,6 +82,7 @@ object EnrollmentsTable : UUIDTable("enrollments") {
     val courseId = uuid("course_id").references(CoursesTable.id)
     val studentId = uuid("student_id").references(UsersTable.id)
     val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id).nullable()
+    val courseProfessorId = uuid("course_professor_id").references(CourseProfessorsTable.id).nullable()
 }
 
 object ProfessorCategorySettingsTable : UUIDTable("professor_category_settings") {
@@ -88,7 +103,17 @@ object ProfessorNotificationSettingsTable : UUIDTable("professor_notification_se
     val quietHoursEnd = varchar("quiet_hours_end", 10).default("08:00")
     val notifyOtherProfessorQuestions = bool("notify_other_professor_questions").default(false)
     val emailEnabled = bool("email_enabled").default(true)
+    val notificationScope = varchar("notification_scope", 24).default("ALL_SECTIONS") // NONE, ASSIGNED_SECTION, ALL_SECTIONS
+    val emailScope = varchar("email_scope", 24).default("ASSIGNED_SECTION") // NONE, ASSIGNED_SECTION, ALL_SECTIONS
     val notificationEmail = varchar("notification_email", 150).nullable()
+}
+
+object SystemSettingsTable : org.jetbrains.exposed.sql.Table("system_settings") {
+    val settingKey = varchar("setting_key", 64)
+    val settingValue = text("setting_value")
+    val updatedAt = timestamp("updated_at").clientDefault { Instant.now() }
+
+    override val primaryKey = PrimaryKey(settingKey)
 }
 
 object UserSettingsTable : UUIDTable("user_settings") {
@@ -103,6 +128,8 @@ object QuestionsTable : UUIDTable("questions") {
     val courseId = uuid("course_id").references(CoursesTable.id)
     val studentId = uuid("student_id").references(UsersTable.id)
     val assignedProfessorId = uuid("assigned_professor_id").references(UsersTable.id)
+    val courseProfessorId = uuid("course_professor_id").nullable()
+    val createdSemester = varchar("created_semester", 20).default("")
     val category = varchar("category", 20) // GRADE, ASSIGNMENT, LECTURE
     val title = varchar("title", 200)
     val rawContent = text("raw_content")
@@ -184,4 +211,16 @@ object PushSubscriptionsTable : UUIDTable("push_subscriptions") {
     val userAgent = varchar("user_agent", 255).default("")
     val createdAt = timestamp("created_at").clientDefault { Instant.now() }
     val updatedAt = timestamp("updated_at").clientDefault { Instant.now() }
+}
+
+object AdminTrashBinTable : UUIDTable("admin_trash_bin") {
+    val entityType = varchar("entity_type", 30) // COURSE, QUESTION, ANSWER
+    val entityId = uuid("entity_id")
+    val title = varchar("title", 200)
+    val summary = varchar("summary", 300).default("")
+    val snapshotJson = text("snapshot_json")
+    val deletedBy = uuid("deleted_by").nullable()
+    val deletedAt = timestamp("deleted_at").clientDefault { Instant.now() }
+    val expiresAt = timestamp("expires_at")
+    val restoredAt = timestamp("restored_at").nullable()
 }

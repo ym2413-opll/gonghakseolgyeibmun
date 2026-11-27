@@ -20,6 +20,43 @@ class NotificationService(
     private val zoneId = ZoneId.of("Asia/Seoul")
     private val quietHourFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
+    companion object {
+        const val SCOPE_NONE = "NONE"
+        const val SCOPE_ASSIGNED_SECTION = "ASSIGNED_SECTION"
+        const val SCOPE_ALL_SECTIONS = "ALL_SECTIONS"
+
+        fun normalizeScope(raw: String?, fallback: String = SCOPE_ASSIGNED_SECTION): String {
+            val clean = raw?.trim()?.uppercase() ?: return fallback
+            return when (clean) {
+                "NONE", "OFF", "없음" -> SCOPE_NONE
+                "ASSIGNED_SECTION", "ASSIGNED", "ASSIGNED_SECTION_ONLY", "담당 분반만", "담당분반만" -> SCOPE_ASSIGNED_SECTION
+                "ALL_SECTIONS", "ALL", "OTHER_SECTIONS", "다른 분반도", "다른분반도" -> SCOPE_ALL_SECTIONS
+                else -> fallback
+            }
+        }
+    }
+
+    private fun resolveEffectiveScopes(row: ResultRow?): Pair<String, String> {
+        if (row == null) {
+            return SCOPE_ASSIGNED_SECTION to SCOPE_ASSIGNED_SECTION
+        }
+        val rawNotif = row[ProfessorNotificationSettingsTable.notificationScope]
+        val rawEmail = row[ProfessorNotificationSettingsTable.emailScope]
+        val legacyNotifyOther = row[ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions]
+        val legacyEmailEnabled = row[ProfessorNotificationSettingsTable.emailEnabled]
+
+        val notifScope = normalizeScope(
+            rawNotif.takeIf { it.isNotBlank() },
+            if (legacyNotifyOther) SCOPE_ALL_SECTIONS else SCOPE_ASSIGNED_SECTION
+        )
+        val baseEmailScope = normalizeScope(
+            rawEmail.takeIf { it.isNotBlank() },
+            if (!legacyEmailEnabled) SCOPE_NONE else if (legacyNotifyOther) SCOPE_ALL_SECTIONS else SCOPE_ASSIGNED_SECTION
+        )
+        val emailScope = if (!legacyEmailEnabled) SCOPE_NONE else baseEmailScope
+        return notifScope to emailScope
+    }
+
     private fun validateQuietHourTime(raw: String, fieldLabel: String): String {
         val trimmed = raw.trim()
         val parsed = runCatching { LocalTime.parse(trimmed, quietHourFormatter) }.getOrElse {
@@ -41,23 +78,29 @@ class NotificationService(
 
         return if (row != null) {
             val settingEmail = row[ProfessorNotificationSettingsTable.notificationEmail] ?: userEmail
+            val (notifScope, mailScope) = resolveEffectiveScopes(row)
             ProfessorNotificationSettingDto(
                 professorId = row[ProfessorNotificationSettingsTable.professorId].toString(),
                 quietHoursEnabled = row[ProfessorNotificationSettingsTable.quietHoursEnabled],
                 quietHoursStart = row[ProfessorNotificationSettingsTable.quietHoursStart],
                 quietHoursEnd = row[ProfessorNotificationSettingsTable.quietHoursEnd],
-                notifyOtherProfessorQuestions = row[ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions],
-                emailEnabled = row[ProfessorNotificationSettingsTable.emailEnabled],
+                notifyOtherProfessorQuestions = (notifScope == SCOPE_ALL_SECTIONS || mailScope == SCOPE_ALL_SECTIONS),
+                emailEnabled = (mailScope != SCOPE_NONE),
+                notificationScope = notifScope,
+                emailScope = mailScope,
                 notificationEmail = settingEmail
             )
         } else {
+            val initMailScope = if (!userEmail.isNullOrBlank()) SCOPE_ASSIGNED_SECTION else SCOPE_NONE
             ProfessorNotificationSettingsTable.insert {
                 it[ProfessorNotificationSettingsTable.professorId] = professorId
                 it[quietHoursEnabled] = false
                 it[quietHoursStart] = "22:00"
                 it[quietHoursEnd] = "08:00"
                 it[notifyOtherProfessorQuestions] = false
-                it[emailEnabled] = true
+                it[emailEnabled] = (initMailScope != SCOPE_NONE)
+                it[notificationScope] = SCOPE_ASSIGNED_SECTION
+                it[emailScope] = initMailScope
                 it[notificationEmail] = userEmail
             }
             ProfessorNotificationSettingDto(
@@ -66,7 +109,9 @@ class NotificationService(
                 quietHoursStart = "22:00",
                 quietHoursEnd = "08:00",
                 notifyOtherProfessorQuestions = false,
-                emailEnabled = true,
+                emailEnabled = (initMailScope != SCOPE_NONE),
+                notificationScope = SCOPE_ASSIGNED_SECTION,
+                emailScope = initMailScope,
                 notificationEmail = userEmail
             )
         }
@@ -102,16 +147,49 @@ class NotificationService(
             }
         }
 
-        val exists = ProfessorNotificationSettingsTable.select { ProfessorNotificationSettingsTable.professorId eq professorId }
-            .count() > 0
+        val existingRow = ProfessorNotificationSettingsTable.select {
+            ProfessorNotificationSettingsTable.professorId eq professorId
+        }.singleOrNull()
 
-        if (exists) {
+        val (curNotifScope, curEmailScope) = resolveEffectiveScopes(existingRow)
+
+        val nextNotifScope = when {
+            request.notificationScope != null -> normalizeScope(request.notificationScope, "")
+                .ifEmpty { throw IllegalArgumentException("올바르지 않은 알림 수신 범위입니다.") }
+            request.notifyOtherProfessorQuestions != null -> {
+                if (request.notifyOtherProfessorQuestions) SCOPE_ALL_SECTIONS
+                else if (curNotifScope == SCOPE_NONE) SCOPE_NONE
+                else SCOPE_ASSIGNED_SECTION
+            }
+            else -> curNotifScope
+        }
+
+        val nextEmailScope = when {
+            request.emailScope != null -> normalizeScope(request.emailScope, "")
+                .ifEmpty { throw IllegalArgumentException("올바르지 않은 이메일 수신 범위입니다.") }
+            request.emailEnabled != null -> {
+                if (!request.emailEnabled) SCOPE_NONE
+                else if (request.notifyOtherProfessorQuestions == true || curEmailScope == SCOPE_ALL_SECTIONS) SCOPE_ALL_SECTIONS
+                else SCOPE_ASSIGNED_SECTION
+            }
+            request.notifyOtherProfessorQuestions != null && curEmailScope != SCOPE_NONE -> {
+                if (request.notifyOtherProfessorQuestions) SCOPE_ALL_SECTIONS else SCOPE_ASSIGNED_SECTION
+            }
+            else -> curEmailScope
+        }
+
+        val syncedEmailEnabled = nextEmailScope != SCOPE_NONE
+        val syncedNotifyOther = (nextNotifScope == SCOPE_ALL_SECTIONS || nextEmailScope == SCOPE_ALL_SECTIONS)
+
+        if (existingRow != null) {
             ProfessorNotificationSettingsTable.update({ ProfessorNotificationSettingsTable.professorId eq professorId }) {
                 request.quietHoursEnabled?.let { v -> it[quietHoursEnabled] = v }
                 cleanStart?.let { v -> it[quietHoursStart] = v }
                 cleanEnd?.let { v -> it[quietHoursEnd] = v }
-                request.notifyOtherProfessorQuestions?.let { v -> it[notifyOtherProfessorQuestions] = v }
-                request.emailEnabled?.let { v -> it[emailEnabled] = v }
+                it[notifyOtherProfessorQuestions] = syncedNotifyOther
+                it[emailEnabled] = syncedEmailEnabled
+                it[notificationScope] = nextNotifScope
+                it[emailScope] = nextEmailScope
                 if (request.notificationEmail != null) {
                     it[notificationEmail] = cleanEmail
                 }
@@ -122,8 +200,10 @@ class NotificationService(
                 it[quietHoursEnabled] = request.quietHoursEnabled ?: false
                 it[quietHoursStart] = cleanStart ?: "22:00"
                 it[quietHoursEnd] = cleanEnd ?: "08:00"
-                it[notifyOtherProfessorQuestions] = request.notifyOtherProfessorQuestions ?: false
-                it[emailEnabled] = request.emailEnabled ?: true
+                it[notifyOtherProfessorQuestions] = syncedNotifyOther
+                it[emailEnabled] = syncedEmailEnabled
+                it[notificationScope] = nextNotifScope
+                it[emailScope] = nextEmailScope
                 it[notificationEmail] = cleanEmail
             }
         }
@@ -131,9 +211,16 @@ class NotificationService(
         getProfessorNotificationSettingInternal(professorId)
     }
 
+    private fun scopeAllows(scope: String, isAssignedSection: Boolean): Boolean = when (scope) {
+        SCOPE_NONE -> false
+        SCOPE_ASSIGNED_SECTION -> isAssignedSection
+        SCOPE_ALL_SECTIONS -> true
+        else -> isAssignedSection
+    }
+
     /**
-     * Inserts an in-app notification (honoring DND quiet hours) and optionally queues an
-     * email alert for a single professor (either the assigned professor or a co-professor).
+     * Inserts an in-app notification (honoring DND quiet hours and `notificationScope`)
+     * and optionally queues an email alert (honoring `emailScope`) for a single professor.
      */
     private fun dispatchToProfessor(
         professorId: UUID,
@@ -156,44 +243,52 @@ class NotificationService(
             ProfessorNotificationSettingsTable.professorId eq professorId
         }.singleOrNull()
 
-        val isQuiet = isNowInQuietHours(
-            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnabled) ?: false,
-            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursStart) ?: "22:00",
-            profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
-        )
+        val (notifScope, emailScope) = resolveEffectiveScopes(profSetting)
+        val isAssignedSection = !isCoProfessor
+        val allowInApp = scopeAllows(notifScope, isAssignedSection)
+        val allowEmail = scopeAllows(emailScope, isAssignedSection)
 
-        val notifId = UUID.randomUUID()
-        val safeTitle = notifTitle.take(200)
-        NotificationsTable.insert {
-            it[id] = notifId
-            it[userId] = professorId
-            it[type] = notificationType.name
-            it[title] = safeTitle
-            it[message] = notifMessage
-            it[referenceId] = questionId
-            it[isRead] = false
-            it[isHeld] = isQuiet
-            it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
-        }
+        if (!allowInApp && !allowEmail) return
 
-        if (!isQuiet) {
-            pushesToDispatch.add(
-                PendingPushJob(
-                    userId = professorId,
-                    notificationId = notifId,
-                    title = safeTitle,
-                    message = notifMessage,
-                    questionId = questionId
-                )
+        if (allowInApp) {
+            val isQuiet = isNowInQuietHours(
+                profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnabled) ?: false,
+                profSetting?.get(ProfessorNotificationSettingsTable.quietHoursStart) ?: "22:00",
+                profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) ?: "08:00"
             )
+
+            val notifId = UUID.randomUUID()
+            val safeTitle = notifTitle.take(200)
+            NotificationsTable.insert {
+                it[id] = notifId
+                it[userId] = professorId
+                it[type] = notificationType.name
+                it[title] = safeTitle
+                it[message] = notifMessage
+                it[referenceId] = questionId
+                it[isRead] = false
+                it[isHeld] = isQuiet
+                it[releaseAt] = if (isQuiet) profSetting?.get(ProfessorNotificationSettingsTable.quietHoursEnd) else null
+            }
+
+            if (!isQuiet) {
+                pushesToDispatch.add(
+                    PendingPushJob(
+                        userId = professorId,
+                        notificationId = notifId,
+                        title = safeTitle,
+                        message = notifMessage,
+                        questionId = questionId
+                    )
+                )
+            }
         }
 
-        val emailEnabled = profSetting?.get(ProfessorNotificationSettingsTable.emailEnabled) ?: true
         val targetEmail = profSetting?.get(ProfessorNotificationSettingsTable.notificationEmail)
             ?.takeIf { it.isNotBlank() }
             ?: profUser?.get(UsersTable.email)?.takeIf { it.isNotBlank() }
 
-        if (emailEnabled && !targetEmail.isNullOrBlank()) {
+        if (allowEmail && !targetEmail.isNullOrBlank()) {
             emailService.enqueueQuestionEmail(
                 recipientEmail = targetEmail,
                 professorId = professorId,
@@ -217,15 +312,23 @@ class NotificationService(
         questionTitle: String,
         category: QuestionCategory,
         questionContent: String = "",
-        authorDisplay: String = "수강생"
+        authorDisplay: String = "수강생",
+        courseProfessorId: UUID? = null
     ) {
         val (pendingEmails, pendingPushes) = dbQuery(workerManager.notificationDispatcher) {
             val emailsToDispatch = mutableListOf<PendingEmailJob>()
             val pushesToDispatch = mutableListOf<PendingPushJob>()
 
-            // 1. Notify Assigned Professor
+            // Determine exact section ownership if `courseProfessorId` is known
+            val sectionProfId = courseProfessorId?.let { cpUuid ->
+                CourseProfessorsTable.select {
+                    (CourseProfessorsTable.id eq cpUuid) and (CourseProfessorsTable.courseId eq courseId)
+                }.singleOrNull()?.get(CourseProfessorsTable.professorId)
+            } ?: assignedProfessorId
+
+            // 1. Notify Assigned Section's Professor (honoring their notificationScope & emailScope)
             dispatchToProfessor(
-                professorId = assignedProfessorId,
+                professorId = sectionProfId,
                 notificationType = NotificationType.QUESTION_NEW,
                 courseName = courseName,
                 questionId = questionId,
@@ -240,35 +343,29 @@ class NotificationService(
                 pushesToDispatch = pushesToDispatch
             )
 
-            // 2. Notify other professors of the same course IF category is LECTURE
+            // 2. Notify professors of OTHER sections of the same course IF category is LECTURE
+            //    (`dispatchToProfessor` checks each professor's `notificationScope` and `emailScope` independently!)
             if (category == QuestionCategory.LECTURE) {
                 val otherProfessors = CourseProfessorsTable.select {
-                    (CourseProfessorsTable.courseId eq courseId) and (CourseProfessorsTable.professorId neq assignedProfessorId)
-                }.map { it[CourseProfessorsTable.professorId] }
+                    (CourseProfessorsTable.courseId eq courseId) and (CourseProfessorsTable.professorId neq sectionProfId)
+                }.map { it[CourseProfessorsTable.professorId] }.distinct()
 
                 for (otherProfId in otherProfessors) {
-                    val otherSetting = ProfessorNotificationSettingsTable.select {
-                        ProfessorNotificationSettingsTable.professorId eq otherProfId
-                    }.singleOrNull()
-
-                    val notifyOther = otherSetting?.get(ProfessorNotificationSettingsTable.notifyOtherProfessorQuestions) ?: false
-                    if (notifyOther) {
-                        dispatchToProfessor(
-                            professorId = otherProfId,
-                            notificationType = NotificationType.OTHER_PROFESSOR_QUESTION,
-                            courseName = courseName,
-                            questionId = questionId,
-                            questionTitle = questionTitle,
-                            notifTitle = "[$courseName] (공동과목) 새로운 강의 질문 등록",
-                            notifMessage = "다른 분반/교수 담당 질문: $questionTitle",
-                            category = category,
-                            questionContent = questionContent,
-                            authorDisplay = authorDisplay,
-                            isCoProfessor = true,
-                            emailsToDispatch = emailsToDispatch,
-                            pushesToDispatch = pushesToDispatch
-                        )
-                    }
+                    dispatchToProfessor(
+                        professorId = otherProfId,
+                        notificationType = NotificationType.OTHER_PROFESSOR_QUESTION,
+                        courseName = courseName,
+                        questionId = questionId,
+                        questionTitle = questionTitle,
+                        notifTitle = "[$courseName] (공동과목) 새로운 강의 질문 등록",
+                        notifMessage = "다른 분반/교수 담당 질문: $questionTitle",
+                        category = category,
+                        questionContent = questionContent,
+                        authorDisplay = authorDisplay,
+                        isCoProfessor = true,
+                        emailsToDispatch = emailsToDispatch,
+                        pushesToDispatch = pushesToDispatch
+                    )
                 }
             }
 
@@ -341,14 +438,21 @@ class NotificationService(
         notifTitle: String,
         notifMessage: String,
         questionId: UUID,
-        honorQuietHours: Boolean
+        honorQuietHours: Boolean,
+        isProfessorRecipient: Boolean = false,
+        isAssignedSection: Boolean = true
     ): PendingPushJob? {
-        val profSetting = if (honorQuietHours) {
+        val profSetting = if (honorQuietHours || isProfessorRecipient) {
             ProfessorNotificationSettingsTable.select {
                 ProfessorNotificationSettingsTable.professorId eq recipientId
             }.singleOrNull()
         } else {
             null
+        }
+
+        if (isProfessorRecipient) {
+            val (notifScope, _) = resolveEffectiveScopes(profSetting)
+            if (!scopeAllows(notifScope, isAssignedSection)) return null
         }
 
         val isQuiet = if (honorQuietHours && profSetting != null) {
@@ -443,7 +547,9 @@ class NotificationService(
                     notifTitle = profTitle,
                     notifMessage = profMessage,
                     questionId = questionId,
-                    honorQuietHours = true
+                    honorQuietHours = true,
+                    isProfessorRecipient = true,
+                    isAssignedSection = (profRecipientId == assignedProfessorId)
                 )?.let { pushes.add(it) }
             }
             pushes
@@ -475,7 +581,9 @@ class NotificationService(
                     notifTitle = safeTitle,
                     notifMessage = safeMessage,
                     questionId = questionId,
-                    honorQuietHours = false
+                    honorQuietHours = false,
+                    isProfessorRecipient = true,
+                    isAssignedSection = (recipientId == assignedProfessorId)
                 )?.let { pushes.add(it) }
             }
             pushes

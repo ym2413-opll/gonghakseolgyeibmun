@@ -29,15 +29,16 @@ fun Route.courseRoutes(userService: UserService) {
     route("/api/courses") {
         get {
             val isAll = call.request.queryParameters["all"]?.toBoolean() ?: false
-            val query = call.request.queryParameters["query"]
-            val college = call.request.queryParameters["college"]
-            val dept = call.request.queryParameters["department"]
+            val query = call.request.queryParameters["query"]?.take(100)
+            val college = call.request.queryParameters["college"]?.take(100)
+            val dept = call.request.queryParameters["department"]?.take(100)
+            val semester = call.request.queryParameters["semester"]?.take(30)
 
-            if (isAll || query != null || college != null || dept != null) {
+            if (isAll || query != null || college != null || dept != null || semester != null) {
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
-                val defaultLimit = if (isAll) 2000 else 100
-                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: defaultLimit
-                val result = userService.searchCourses(query, college, dept, page, limit)
+                val defaultLimit = if (isAll) 5000 else 100
+                val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: defaultLimit).coerceIn(1, 5000)
+                val result = userService.searchCourses(query, college, dept, semester, page, limit)
                 call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
             } else {
                 val user = call.requireAuthenticatedUser(userService) ?: return@get
@@ -50,7 +51,11 @@ fun Route.courseRoutes(userService: UserService) {
             val user = call.requireAuthenticatedUser(userService) ?: return@put
             val request = call.receive<UpdateUserCoursesRequest>()
             try {
-                val updated = userService.updateUserCourses(UUID.fromString(user.id), request.courseIds)
+                val updated = userService.updateUserCourses(
+                    UUID.fromString(user.id),
+                    request.courseIds,
+                    request.courseSelections
+                )
                 call.respond(
                     HttpStatusCode.OK,
                     ApiResponse(success = true, data = updated, message = "과목 설정이 저장되었습니다.")
@@ -69,9 +74,10 @@ fun Route.courseRoutes(userService: UserService) {
             val query = call.request.queryParameters["query"]
             val college = call.request.queryParameters["college"]
             val dept = call.request.queryParameters["department"]
+            val semester = call.request.queryParameters["semester"]
             val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
             val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
-            val result = userService.searchCourses(query, college, dept, page, limit)
+            val result = userService.searchCourses(query, college, dept, semester, page, limit)
             call.respond(HttpStatusCode.OK, ApiResponse(success = true, data = result))
         }
 

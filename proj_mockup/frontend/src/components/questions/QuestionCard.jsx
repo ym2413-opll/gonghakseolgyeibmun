@@ -4,6 +4,7 @@ import React from 'react';
 import { CATEGORY_DEFINITIONS, isQuestionSolved } from '../../services/mockData';
 import { useAuth } from '../../context/AuthContext';
 import { stripMarkdownForPreview } from '../../utils/markdown';
+import { formatSemesterLabel, isNonCurrentSemesterThread } from '../../utils/semester';
 import {
   MessageSquare,
   CheckCircle2,
@@ -27,7 +28,8 @@ const QuestionCard = ({
   onToggleHide,
   onDelete
 }) => {
-  const { currentUser, isAdmin, isProfessor } = useAuth();
+  const { currentUser, isAdmin, isProfessor, currentSemester } = useAuth();
+  const showSemesterBadge = isNonCurrentSemesterThread(question, currentSemester);
   const canAuthorDelete =
     !question.isDeleted &&
     !isProfessor &&
@@ -131,7 +133,18 @@ const QuestionCard = ({
         <div className="forum-topic-content">
           <div className="forum-topic-title-line">
             <span className={`badge ${category.badgeClass}`}>{category.name}</span>
-            <span className="forum-course-pill">{question.courseName}</span>
+            <span className="forum-course-pill">
+              {question.courseName}
+              {question.section ? ` (${question.section})` : ''}
+            </span>
+            {showSemesterBadge && (
+              <span
+                className="semester-pill"
+                title={`현재 활성 학기(${formatSemesterLabel(currentSemester)})가 아닌 ${formatSemesterLabel(question.semester)}에 작성된 질문입니다.`}
+              >
+                {formatSemesterLabel(question.semester)} 작성
+              </span>
+            )}
             {question.isAdminAuthor && (
               <span className="badge badge-admin">
                 <ShieldCheck size={11} /> 관리자
